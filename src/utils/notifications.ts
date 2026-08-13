@@ -274,6 +274,9 @@ async function registerRemotePushToken(): Promise<void> {
           body: notification.body ?? '',
           sound: 'default',
           smallIcon: 'ic_notification',
+          // Arancione Bitcoin: Android ricolora l'icona piccola con questo valore,
+          // cosi' la notifica si distingue a colpo d'occhio da altre app simili.
+          iconColor: '#F7931A',
           autoCancel: true,
         }],
       });

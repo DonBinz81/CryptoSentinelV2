@@ -689,7 +689,7 @@ export default function App() {
               <h1 className="font-bold text-xl tracking-tight">
                 <span
                   className="text-accent-orange"
-                  style={{ textShadow: '0 0 22px rgba(249,115,22,0.45), 0 0 48px rgba(249,115,22,0.15)' }}
+                  style={{ textShadow: '0 0 22px rgba(247,147,26,0.5), 0 0 48px rgba(247,147,26,0.18)' }}
                 >
                   Crypto
                 </span>
