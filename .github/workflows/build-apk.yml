@@ -43,7 +43,14 @@ jobs:
             echo "::warning::GOOGLE_SERVICES_JSON non configurato: build senza notifiche push."
           else
             mkdir -p android/app
-            printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+            # tr -cd tiene solo i caratteri validi in base64: elimina BOM, spazi,
+            # a capo e CR che alcuni client aggiungono salvando il secret.
+            # Senza questa pulizia 'base64 -d' fallisce con "invalid input".
+            printf '%s' "$GOOGLE_SERVICES_JSON" | tr -cd 'A-Za-z0-9+/=' | base64 -d > android/app/google-services.json
+            if ! grep -q '"project_id"' android/app/google-services.json; then
+              echo "google-services.json decodificato ma non valido"
+              exit 1
+            fi
             echo "enabled=true" >> $GITHUB_OUTPUT
             echo "Firebase configurato: push abilitate."
           fi
