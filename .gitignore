@@ -1,0 +1,61 @@
+# --- Segreti: mai committare ---------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!android/app/debug.keystore
+secrets/
+**/service-account*.json
+**/firebase-adminsdk*.json
+# keystore cifrato del wallet e passphrase
+*.keystore
+!android/app/debug.keystore
+wallet_keystore*.json
+
+# --- Configurazione di istanza (contiene endpoint/parametri locali) -------
+configs/instance.yaml
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Node / frontend -------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# --- Android ---------------------------------------------------------------
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/release/
+*.apk
+*.aab
+
+# --- Database e log --------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# --- Sistema operativo / editor -------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

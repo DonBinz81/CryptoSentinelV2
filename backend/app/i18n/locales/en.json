@@ -1,0 +1,19 @@
+﻿{
+  "app.name": "CryptoSentinel Agent",
+  "agent.status.idle": "Agent idle",
+  "agent.status.degraded": "Agent degraded",
+  "risk.kill_switch.soft": "Soft stop enabled",
+  "risk.kill_switch.hard": "Hard stop enabled",
+  "market_data.provider": "Market data provider",
+  "market_data.provider.cmc": "CoinMarketCap",
+  "market_data.provider.coingecko": "CoinGecko",
+  "market_data.provider.global_scope": "Global selection, no automatic fallback",
+  "market_data.provider.restart_notice": "The configured default is restored after backend restart",
+  "market_data.error.not_configured": "The selected market data provider is not configured",
+  "market_data.error.unavailable": "Market data is temporarily unavailable",
+  "market_data.error.unsupported_granularity": "The selected provider does not support the requested granularity",
+  "market_data.credits.ok": "CMC credit budget is healthy",
+  "market_data.credits.warning": "CMC credit budget is below the warning threshold",
+  "market_data.credits.critical": "CMC credit budget is below the critical threshold",
+  "market_data.credits.exhausted": "CMC credit budget is exhausted"
+}

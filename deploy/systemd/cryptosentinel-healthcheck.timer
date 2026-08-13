@@ -1,0 +1,11 @@
+[Unit]
+Description=Run CryptoSentinel liveness check every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+Persistent=true
+Unit=cryptosentinel-healthcheck.service
+
+[Install]
+WantedBy=timers.target

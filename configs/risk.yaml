@@ -1,0 +1,20 @@
+# Versioned functional risk defaults.
+# Guardrails marked hard are validated at startup and cannot be disabled by config.
+
+risk:
+  capital_per_trade_pct: 4.0
+  per_trade_pct: 1.5              # A (v3): rischio per trade; la size si adatta allo stop, mai lo stop alla size
+  max_open_positions: 5
+  max_total_exposure_pct: 30.0
+  daily_loss_limit_pct: -8.0
+  max_drawdown_pct: -15.0
+  min_pool_liquidity_usd: 50000.0
+  max_slippage_pct: 1.0
+  correlation_limit: 0.8
+  cooldown_minutes: 30
+  bnb_gas_reserve_pct: 15.0
+  bnb_gas_reserve_min: 0.000005
+  min_portfolio_value_usd: 5.0
+  minimum_trades_per_day: 1
+  dry_run_capital_usd: 200.0
+  min_trade_size_usd: 7.0

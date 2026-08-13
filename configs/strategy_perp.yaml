@@ -1,0 +1,62 @@
+# Versioned Perpetual strategy defaults.
+
+perp:
+  direction_mode: long_short
+  value_area_pct: 68.0
+  sl_mode: atr               # "atr" | "lowest"; lowest usa minimo/massimo strutturale
+  structural_stop_lookback_candles: 20
+  structural_stop_buffer_pct: 1.10 # long: minimo_20 -1.10%; short: massimo_20 +1.10%
+  # SL/TP ancorati all'entry via ATR(14): R:R controllato a prescindere dalla leva.
+  atr_stop_multiplier: 0.8   # SL = entry ∓ 0.8×ATR
+  tp1_atr_multiplier: 2.5    # TP1 = entry ± 2.5×ATR (R:R ~1.67)
+  tp2_atr_multiplier: 4.0    # TP2 = entry ± 4.0×ATR (R:R ~2.67)
+  use_poc_for_tp2: true      # TP2 → POC se più ambizioso del target ATR
+  # Protezione posizione: breakeven anticipato + trailing dinamico sulla leva.
+  breakeven_enabled: true
+  breakeven_trigger_atr: 1.0     # a +1×ATR lo SL sale a entry (+costi andata+ritorno)
+  breakeven_offset_costs: true
+  breakeven_buffer_pct: 0.1      # cuscinetto extra entry+0.1% (copre le fee; 0 = off)
+  # Trailing: il moltiplicatore ATR scala con la leva del trade (base=leva min,
+  # floor=leva max). Più alta la leva → trailing più stretto in prezzo.
+  trailing_base_atr_largo: 4.0     # Largo: leva minima
+  trailing_floor_atr_largo: 2.5    # Largo: leva massima
+  trailing_base_atr_stretto: 2.5   # Stretto: leva minima
+  trailing_floor_atr_stretto: 1.5  # Stretto: leva massima
+  trailing_mode: largo             # default; override da setup mobile (largo|stretto)
+  time_stop_enabled: false        # toggle UI/app-dashboard; default off
+  time_stop_hours: 8
+  dynamic_leverage_enabled: true
+  min_volume_profile_liquidity_usd: 50000.0
+  default_leverage: 2
+  # Range leva modulata sull'ATR in apertura (bassa vol → max, alta vol → min).
+  min_leverage: 4
+  max_leverage: 40
+  leverage_atr_period: 72          # periodo ATR per la leva
+  leverage_atr_baseline_hours: 120 # baseline storica per atr_min/atr_max (~5gg, cap 1500 candele)
+  volume_profile_window_hours: 24
+  volume_profile_candle_minutes: 5
+  # Filtro shock BTC perp: blocca nuove aperture quando BTC mostra trend forte
+  # + volatilita' o volume anomali (score >= 2 su 3). Indipendente dal reversal filter.
+  trend_shock_enabled: true
+  trend_shock_adx_threshold: 25       # ADX >= soglia -> +1 allo score
+  trend_shock_natr_percentile: 90     # NATR percentile >= soglia -> +1
+  trend_shock_volume_threshold: 2.0   # relative volume >= soglia -> +1
+  trend_shock_recovery_confirmations: 3  # check consecutivi score<=1 per tornare NORMAL
+  # Smart Stop Loss: uscita scalata su 3 livelli con rebuy su rimbalzo
+  smart_sl_enabled: true
+  smart_sl_l1_frac: 0.333            # L1 = 33.3% della distanza entry→SL
+  smart_sl_l2_frac: 0.666            # L2 = 66.6%
+  smart_sl_split_l1: 0.25            # 25% della size venduta a L1
+  smart_sl_split_l2: 0.55            # 55% a L2
+  smart_sl_split_l3: 0.20            # 20% rimane, chiuso dal classico SL
+  smart_sl_rebuy_mode: above_entry    # "above_entry" = rebuy tutto sopra entry | "delta" = rebuy per livello
+  smart_sl_rebuy_above_entry_pct: 100  # % del venduto da ricomprare
+  smart_sl_delta_l1: 0.08            # (solo modo delta) 8% di dist: rimbalzo per rebuy L1
+  smart_sl_delta_l2: 0.16            # (solo modo delta) 16% di dist: rimbalzo per rebuy L2/L3
+  smart_sl_split_l1_r2: 0.75          # (solo above_entry) round 2: 75% a L1
+  smart_sl_split_l2_r2: 0.20          # round 2: 20% a L2
+  smart_sl_split_l3_r2: 0.05          # round 2: 5% rimane a SL
+  smart_sl_tp_adjust_after_rebuy: true  # ricalcola TP dopo rebuy per coprire perdite SSL
+  smart_sl_tp_recovery_delta_pct: 7    # delta extra % oltre copertura perdite (guadagno minimo)
+  smart_sl_confirmation_candles: 2   # candele 5min di conferma (sell e rebuy above_entry)
+  smart_sl_max_reentries: 1          # max cicli sell→rebuy

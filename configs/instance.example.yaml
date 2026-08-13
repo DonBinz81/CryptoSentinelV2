@@ -1,0 +1,157 @@
+# Local installation configuration template.
+# Copy to configs/instance.yaml and fill values for the target machine.
+# Do not place credentials, private keys, passphrases, service-account paths, or token values here.
+
+app:
+  env: development
+  name: CryptoSentinel Agent Backend
+  version: 0.1.0-step5
+  default_user_id: "00000000-0000-0000-0000-000000000001"
+
+api:
+  host: 127.0.0.1
+  port: 8000
+  base_url: http://127.0.0.1:8000
+  cors_origins:
+    - http://localhost:5176
+    - http://127.0.0.1:5176
+    # For Tailscale access, add the dashboard origin of this machine:
+    # - http://100.x.y.z:5176
+
+dashboard:
+  port: 5176
+
+frontend:
+  backend_api_base_url: http://127.0.0.1:8000
+
+database:
+  url: sqlite+aiosqlite:///./backend/local.db
+  echo: false
+  pool_size: 5
+  max_overflow: 10
+  backup_enabled: true
+  backup_dir: backend/storage/backups
+  backup_interval_hours: 6
+  backup_retention_days: 7
+
+logging:
+  level: INFO
+  format: json
+  file_enabled: true
+  file_path: logs/backend.log
+  retention_days: 14
+  decision_retention_days: 30
+
+agent:
+  mode: conservative
+  markets_enabled: both
+  execution_mode: dry_run
+  heartbeat_interval_seconds: 5   # fast loop: refresh prezzi/PnL + check SL/TP ogni 5s
+  test_scaling_pct: 10.0
+  operating_hours_utc: "00:00-23:59"
+
+bsc:
+  network: testnet
+  chain_id: 97
+  # Keep at least two independently operated endpoints.
+  rpc_urls:
+    - https://bsc-testnet-rpc.publicnode.com
+    - https://data-seed-prebsc-1-s1.bnbchain.org:8545
+    - https://data-seed-prebsc-2-s1.bnbchain.org:8545
+    # Authenticated (requires TATUM_RPC_API_KEY in .env):
+    # - https://bsc-testnet.gateway.tatum.io
+  explorer_base_url: https://testnet.bscscan.com
+  rpc_timeout_seconds: 8
+  receipt_timeout_seconds: 90
+  receipt_poll_seconds: 3
+  max_transaction_attempts: 2
+  required_confirmations: 1
+
+competition:
+  contract_address: "0x212c61b9b72c95d95bf29cf032f5e5635629aed5"
+  chain_id: 56
+  rpc_urls:
+    - https://bsc-dataseed.bnbchain.org
+    - https://bsc-dataseed1.defibit.io
+  explorer_base_url: https://bscscan.com
+
+wallet:
+  address: ""
+  addresses: []
+  key_kdf: scrypt
+  key_rotation_days: 7
+
+cmc:
+  base_url: https://pro-api.coinmarketcap.com
+  mcp_enabled: false
+  mcp_server_url: https://mcp.coinmarketcap.com/mcp
+  credit_warning_threshold: 20
+  credit_critical_threshold: 10
+  monthly_credit_limit: 15000
+
+market_data:
+  # Global UI/market default. Runtime changes in developer settings persist.
+  provider: coingecko
+  # Background alert checks use this provider and ignore the runtime UI selector.
+  alert_provider: coingecko
+  cache_ttl_seconds: 60
+  request_timeout_seconds: 15
+  coingecko_base_url: https://api.coingecko.com/api/v3
+  coingecko_requests_per_minute: 25
+  # Basic CMC is kept for agent/resolver paths; keep this conservative.
+  cmc_requests_per_minute: 30
+
+anthropic:
+  model: claude-sonnet-4-5
+  max_tokens: 4096
+  daily_cost_limit_usd: 10.0
+
+twak:
+  cli_path: twak
+  api_base_url: https://tws.trustwallet.com
+  chain: bsctestnet
+  autonomous_mode: false
+  approval_policy: exact
+  allowed_spenders:
+    # PancakeSwap V2 Router, official BSC Testnet deployment.
+    - "0xD99D1c33F9fC3444f8101754aBC46c52416550D1"
+
+execution:
+  # Global static default for the SPOT execution provider. Runtime changes in
+  # developer settings last until restart unless persisted in RuntimeState.
+  # twak = Trust Wallet Agent Kit (mandatory for the hackathon competition);
+  # pancakeswap = direct DEX execution via web3.py (real use, no 403, no TWAK fee).
+  provider: twak
+  # Official PancakeSwap V2 Router deployments (verified on BscScan).
+  pancakeswap_router_address_mainnet: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+  pancakeswap_router_address_testnet: "0xD99D1c33F9fC3444f8101754aBC46c52416550D1"
+  # Wrapped BNB (WBNB) per network, used to build swap paths.
+  pancakeswap_wbnb_address_mainnet: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+  pancakeswap_wbnb_address_testnet: "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd"
+
+perp_execution:
+  bnb_ai_agent_sdk_enabled: false
+  provider: bnb_sdk
+  order_submit_url: ""
+  allowed_verifying_contracts: []
+
+x402:
+  enabled: false
+  network: bsc
+  usdc_wallet_address: ""
+  daily_spend_limit_usd: 5.0
+  max_payment_per_call_usd: 0.25
+  agentdata_base_url: ""
+  fallback_base_urls: []
+
+fcm:
+  enabled: false
+  project_id: ""
+  critical_topic: cryptosentinel-critical
+  token_store_path: backend/storage/fcm_tokens.json
+  risk_drawdown_alert_enabled: true
+
+signal_engine:
+  binance_futures_base_url: ""
+  binance_futures_ws_url: ""
+  whale_flow_provider_url: ""

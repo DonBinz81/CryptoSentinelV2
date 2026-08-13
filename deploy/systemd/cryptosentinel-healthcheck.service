@@ -1,0 +1,12 @@
+[Unit]
+Description=CryptoSentinel backend liveness check
+
+[Service]
+Type=oneshot
+User=cryptosentinel
+Group=cryptosentinel
+Environment=HEALTH_URL=http://127.0.0.1:8000/health/live
+ExecStart=/opt/cryptosentinel/app/deploy/scripts/healthcheck.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict

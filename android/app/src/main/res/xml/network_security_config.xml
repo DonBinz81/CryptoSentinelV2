@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Tailscale range: permette HTTP verso IP 100.x.x.x (VPN privata) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.66.71.112</domain>
+    </domain-config>
+    <!-- Tutto il resto: solo HTTPS -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -1,0 +1,107 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportHeight="108"
+    android:viewportWidth="108">
+
+    <!-- Fasci di luce dal lanternino -->
+    <path
+        android:fillColor="#503D8BFF"
+        android:pathData="M48,38 L14,12 L46,35 Z" />
+    <path
+        android:fillColor="#503D8BFF"
+        android:pathData="M60,38 L94,12 L62,35 Z" />
+
+    <!-- Corpo torre (bianco) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,88 L48,47 L60,47 L70,88 Z" />
+
+    <!-- Stanza lanternino -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M47,36 L47,47 L61,47 L61,36 Z" />
+
+    <!-- Cupola -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M47,36 Q54,23 61,36 Z" />
+
+    <!-- Lente luminosa ciano -->
+    <path
+        android:fillColor="#6FB0FF"
+        android:pathData="M54,42 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="#B8D9FF"
+        android:pathData="M54,42 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0" />
+
+    <!-- Linea sopra finestra AI -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#C8D8F0"
+        android:strokeWidth="1.5"
+        android:pathData="M41,56 L67,56" />
+
+    <!-- Oblò / finestra AI — sfondo scuro -->
+    <path
+        android:fillColor="#060C1A"
+        android:pathData="M46,58 Q46,57 47,57 L61,57 Q62,57 62,58 L62,79 Q62,80 61,80 L47,80 Q46,80 46,79 Z" />
+
+    <!-- Bordo oblò ciano -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#3D8BFF"
+        android:strokeWidth="1.5"
+        android:pathData="M46,58 Q46,57 47,57 L61,57 Q62,57 62,58 L62,79 Q62,80 61,80 L47,80 Q46,80 46,79 Z" />
+
+    <!-- Lettera A (due gambe + traversa) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M47.5,78 L51.5,60 L55.5,78" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M49,72 L54,72" />
+
+    <!-- Lettera I (verticale + grazie) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M59,60 L59,78" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M56.5,60 L61.5,60" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M56.5,78 L61.5,78" />
+
+    <!-- Piattaforma base -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M33,88 L75,88 L75,93 L33,93 Z" />
+
+    <!-- Nodo AI in cima -->
+    <path
+        android:fillColor="#6FB0FF"
+        android:pathData="M54,12 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6FB0FF"
+        android:strokeWidth="1.5"
+        android:pathData="M54,16 L54,23" />
+
+</vector>
