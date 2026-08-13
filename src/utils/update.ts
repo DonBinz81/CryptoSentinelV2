@@ -13,11 +13,13 @@ interface AppSettingsPlugin {
 }
 const AppSettings = registerPlugin<AppSettingsPlugin>('AppSettings');
 
-const RELEASES_API = 'https://api.github.com/repos/iridexx/CryptoSentinelHackathon/releases/latest';
-const DEV_RELEASES_API = 'https://api.github.com/repos/iridexx/CryptoSentinelHackathon/releases/tags/dev';
+const RELEASES_API = 'https://api.github.com/repos/DonBinz81/CryptoSentinelV2/releases/latest';
+const DEV_RELEASES_API = 'https://api.github.com/repos/DonBinz81/CryptoSentinelV2/releases/tags/dev';
 
-// L'APK produzione è pubblicato su GitHub Pages, nessun login richiesto
-export const APK_PAGES_URL = 'https://iridexx.github.io/CryptoSentinelHackathon/CryptoSentinelV2-latest.apk';
+// L'APK produzione è pubblicato su GitHub Pages, nessun login richiesto.
+// NOTA: richiede che GitHub Pages sia attivo sul repo e che la CI pubblichi
+// l'APK con questo nome; finche' non esiste una release, l'endpoint risponde 404.
+export const APK_PAGES_URL = 'https://donbinz81.github.io/CryptoSentinelV2/CryptoSentinelV2-latest.apk';
 
 export interface UpdateResult {
   available: boolean;
@@ -97,7 +99,7 @@ export async function getDevBuildInfo(): Promise<DevBuildInfo> {
 }
 
 export async function mergeToMain(branch: string, token: string): Promise<void> {
-  const res = await fetch('https://api.github.com/repos/iridexx/CryptoSentinelHackathon/merges', {
+  const res = await fetch('https://api.github.com/repos/DonBinz81/CryptoSentinelV2/merges', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
