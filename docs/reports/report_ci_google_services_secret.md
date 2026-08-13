@@ -30,7 +30,7 @@
 ## 5. QUESTIONI APERTE
 
 - L'utente deve creare il GitHub Secret `GOOGLE_SERVICES_JSON` con il contenuto base64 del file locale.
-- Il file Firebase deve essere quello della Android app con package `com.cryptosentinelai.app`.
+- Il file Firebase deve essere quello della Android app con package `com.cryptosentinelv2.app`.
 
 Comando PowerShell locale per generare il base64 senza stamparlo a terminale:
 

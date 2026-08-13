@@ -1,4 +1,4 @@
-package com.cryptosentinelai.app;
+package com.cryptosentinelv2.app;
 
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
@@ -54,13 +54,13 @@ public class AppSettingsPlugin extends Plugin {
             .getSystemService(Context.DOWNLOAD_SERVICE);
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-        request.setTitle("CryptoSentinel");
+        request.setTitle("CryptoSentinelV2");
         request.setDescription("Download aggiornamento in corso...");
         request.setNotificationVisibility(
             DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
         );
         request.setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_DOWNLOADS, "CryptoSentinel-update.apk"
+            Environment.DIRECTORY_DOWNLOADS, "CryptoSentinelV2-update.apk"
         );
         request.setMimeType("application/vnd.android.package-archive");
 
@@ -128,7 +128,7 @@ public class AppSettingsPlugin extends Plugin {
     @PluginMethod
     public void getAlerts(PluginCall call) {
         String json = getContext()
-            .getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE)
+            .getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE)
             .getString("alerts_json", "[]");
         JSObject result = new JSObject();
         result.put("json", json);
@@ -138,7 +138,7 @@ public class AppSettingsPlugin extends Plugin {
     @PluginMethod
     public void getRangeAlerts(PluginCall call) {
         String json = getContext()
-            .getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE)
+            .getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE)
             .getString("range_alerts_json", "[]");
         JSObject result = new JSObject();
         result.put("json", json);
@@ -148,7 +148,7 @@ public class AppSettingsPlugin extends Plugin {
     @PluginMethod
     public void syncRangeAlerts(PluginCall call) {
         String json = call.getString("json", "[]");
-        getContext().getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE)
+        getContext().getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE)
             .edit().putString("range_alerts_json", json).apply();
         call.resolve();
     }
@@ -156,7 +156,7 @@ public class AppSettingsPlugin extends Plugin {
     @PluginMethod
     public void syncAlerts(PluginCall call) {
         String json = call.getString("json", "[]");
-        getContext().getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE)
+        getContext().getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE)
             .edit().putString("alerts_json", json).apply();
         call.resolve();
     }
@@ -169,7 +169,7 @@ public class AppSettingsPlugin extends Plugin {
         String refPricesJson = call.getString("refPricesJson", "{}");
         String currency      = call.getString("currency", "usd");
         android.content.SharedPreferences.Editor ed = getContext()
-            .getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE)
+            .getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE)
             .edit()
             .putString("fav_coins_json", coinsJson)
             .putFloat("fav_up_pct",   upPct)
@@ -185,7 +185,7 @@ public class AppSettingsPlugin extends Plugin {
     @PluginMethod
     public void getAndClearPendingFavAlerts(PluginCall call) {
         android.content.SharedPreferences prefs = getContext()
-            .getSharedPreferences("cryptosentinel_prefs", android.content.Context.MODE_PRIVATE);
+            .getSharedPreferences("cryptosentinelv2_prefs", android.content.Context.MODE_PRIVATE);
         String json = prefs.getString("pending_fav_alerts_json", "[]");
         prefs.edit().putString("pending_fav_alerts_json", "[]").apply();
         JSObject result = new JSObject();

@@ -6,7 +6,7 @@ interface AppSettingsPlugin {
 
 const AppSettings = registerPlugin<AppSettingsPlugin>('AppSettings');
 
-const DISMISSED_KEY = 'cryptosentinel_battery_opt_dismissed';
+const DISMISSED_KEY = 'cryptosentinelv2_battery_opt_dismissed';
 
 export function isBatteryBannerDismissed(): boolean {
   return localStorage.getItem(DISMISSED_KEY) === 'true';

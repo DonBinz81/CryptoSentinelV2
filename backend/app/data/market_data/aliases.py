@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# CryptoSentinel historically persisted CoinGecko IDs in favorites and alerts.
+# CryptoSentinelV2 historically persisted CoinGecko IDs in favorites and alerts.
 # Keep those IDs stable while translating only at provider boundaries.
 CMC_SLUG_BY_APP_ID: dict[str, str] = {
     "avalanche-2": "avalanche",

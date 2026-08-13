@@ -1,6 +1,6 @@
 # Configuration Model
 
-CryptoSentinel uses one runtime loading point: `backend/app/core/config.py`.
+CryptoSentinelV2 uses one runtime loading point: `backend/app/core/config.py`.
 Application code must depend on `Settings` only and must not read YAML files,
 `.env`, or secret files directly.
 

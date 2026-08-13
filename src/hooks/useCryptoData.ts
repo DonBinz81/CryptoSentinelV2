@@ -4,7 +4,7 @@ import { fetchMarkets } from '../services/marketData';
 
 export type PerPage = 50 | 100 | 200 | 400 | 600;
 
-const CACHE_KEY = 'cryptosentinel_coins_cache';
+const CACHE_KEY = 'cryptosentinelv2_coins_cache';
 async function fetchCoinsAll(perPage: PerPage, page: number, currency: string, signal: AbortSignal): Promise<Coin[]> {
   return fetchMarkets(perPage, page, currency, signal);
 }

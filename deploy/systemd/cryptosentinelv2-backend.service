@@ -1,0 +1,28 @@
+[Unit]
+Description=CryptoSentinelV2 Agent backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cryptosentinelv2
+Group=cryptosentinelv2
+WorkingDirectory=/opt/cryptosentinelv2/app
+EnvironmentFile=-/etc/cryptosentinelv2/backend.env
+Environment=PYTHONPATH=/opt/cryptosentinelv2/app
+ExecStart=/opt/cryptosentinelv2/app/backend/.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0077
+
+# Hardening. Keep writable paths explicit because SQLite, logs, backups and
+# encrypted TWAK headless wallet state must persist across restarts.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/cryptosentinelv2/app/backend /opt/cryptosentinelv2/app/logs /var/backups/cryptosentinelv2 /home/cryptosentinelv2/.twak
+
+[Install]
+WantedBy=multi-user.target

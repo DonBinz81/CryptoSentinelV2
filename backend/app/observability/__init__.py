@@ -1,1 +1,1 @@
-﻿"""Package marker for the CryptoSentinel backend."""
+﻿"""Package marker for the CryptoSentinelV2 backend."""

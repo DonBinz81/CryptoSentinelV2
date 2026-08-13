@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Avvia il backend CryptoSentinel con Uvicorn.
+# Avvia il backend CryptoSentinelV2 con Uvicorn.
 #
 # Uso:
 #   ./backend/scripts/run_backend.sh          # produzione

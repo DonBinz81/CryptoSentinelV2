@@ -40,7 +40,7 @@
 - Verificato il loader Settings da directory temporanea, senza eseguire comandi dalla root che possano caricare `.env` locale:
   - `settings_ok 5176 149 5.0 -15.0`.
 - Verificato import dell'app FastAPI:
-  - `app_ok CryptoSentinel Agent Backend`.
+  - `app_ok CryptoSentinelV2 Agent Backend`.
 - Verificato `PyYAML` disponibile nell'ambiente backend:
   - `pyyaml_ok 6.0.3`.
 - Verificato `compileall` su `backend/app` con esito positivo.

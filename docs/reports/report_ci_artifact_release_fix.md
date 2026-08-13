@@ -9,7 +9,7 @@
 
 ## 2. COME È STATO FATTO
 
-- L'artifact `CryptoSentinel-debug.apk` viene caricato prima di qualsiasi operazione `gh release`.
+- L'artifact `CryptoSentinelV2-debug.apk` viene caricato prima di qualsiasi operazione `gh release`.
 - Gli step release hanno `continue-on-error: true`.
 - In questo modo una failure accessoria nelle release non impedisce il download dell'APK e non blocca `deploy-pages`.
 

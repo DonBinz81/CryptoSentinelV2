@@ -17,7 +17,7 @@ const RELEASES_API = 'https://api.github.com/repos/iridexx/CryptoSentinelHackath
 const DEV_RELEASES_API = 'https://api.github.com/repos/iridexx/CryptoSentinelHackathon/releases/tags/dev';
 
 // L'APK produzione è pubblicato su GitHub Pages, nessun login richiesto
-export const APK_PAGES_URL = 'https://iridexx.github.io/CryptoSentinelHackathon/CryptoSentinelAI-latest.apk';
+export const APK_PAGES_URL = 'https://iridexx.github.io/CryptoSentinelHackathon/CryptoSentinelV2-latest.apk';
 
 export interface UpdateResult {
   available: boolean;
@@ -77,7 +77,7 @@ export async function getDevBuildInfo(): Promise<DevBuildInfo> {
   if (!res.ok) throw new Error(`GitHub API: ${res.status}`);
   const release = await res.json();
 
-  // Title format: "CryptoSentinelAI Dev v1.0.<run_number>" — last segment is build number
+  // Title format: "CryptoSentinelV2 Dev v1.0.<run_number>" — last segment is build number
   const titleMatch = (release.name as string)?.match(/v[\d.]+\.(\d+)/);
   const notesMatch = (release.body as string)?.match(/Build #(\d+)/);
   const buildNumber = titleMatch?.[1] ?? notesMatch?.[1] ?? null;

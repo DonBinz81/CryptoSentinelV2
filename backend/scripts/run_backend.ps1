@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Avvia il backend CryptoSentinel con Uvicorn.
+    Avvia il backend CryptoSentinelV2 con Uvicorn.
 
 .PARAMETER Dev
     Abilita --reload di Uvicorn (solo sviluppo locale, non usare in produzione).

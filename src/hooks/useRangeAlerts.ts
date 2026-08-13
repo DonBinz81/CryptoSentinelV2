@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { RangeAlert } from '../types';
 
-const STORAGE_KEY = 'cryptosentinel_range_alerts';
+const STORAGE_KEY = 'cryptosentinelv2_range_alerts';
 
 function loadRangeAlerts(): RangeAlert[] {
   try {

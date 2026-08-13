@@ -201,7 +201,7 @@ class AgentNotifier:
             return False
 
         pnl_sign = "+" if daily_pnl_usd >= 0 else ""
-        title = "Riepilogo giornaliero CryptoSentinel"
+        title = "Riepilogo giornaliero CryptoSentinelV2"
         body = (
             f"Spot {spot_trades} | Perp {perp_trades} | "
             f"PnL {pnl_sign}{daily_pnl_usd:.2f}$ | WR {win_rate_pct:.1f}%"
@@ -243,7 +243,7 @@ class AgentNotifier:
             body=body,
             severity="critical",
             data={
-                "topic": self.settings.fcm_critical_topic or "cryptosentinel-critical",
+                "topic": self.settings.fcm_critical_topic or "cryptosentinelv2-critical",
                 "event": event,
                 "detail": detail,
             },

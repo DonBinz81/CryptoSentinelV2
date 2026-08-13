@@ -361,7 +361,7 @@ class Settings(BaseSettings):
     """Typed runtime configuration merged from environment and YAML files."""
 
     app_env: str = Field(default="development", alias="APP_ENV")
-    app_name: str = Field(default="CryptoSentinel Agent Backend", alias="APP_NAME")
+    app_name: str = Field(default="CryptoSentinelV2 Agent Backend", alias="APP_NAME")
     app_version: str = Field(default="0.1.0-step4ext", alias="APP_VERSION")
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
@@ -518,10 +518,10 @@ class Settings(BaseSettings):
     fcm_critical_topic: str | None = Field(default=None, alias="FCM_CRITICAL_TOPIC")
     fcm_token_store_path: str = Field(default="backend/storage/fcm_tokens.json", alias="FCM_TOKEN_STORE_PATH")
     notify_dry_run_trades: bool = Field(default=False, alias="NOTIFY_DRY_RUN_TRADES")
-    fcm_spot_topic: str = Field(default="cryptosentinel-spot", alias="FCM_SPOT_TOPIC")
-    fcm_perp_topic: str = Field(default="cryptosentinel-perp", alias="FCM_PERP_TOPIC")
-    fcm_risk_topic: str = Field(default="cryptosentinel-risk", alias="FCM_RISK_TOPIC")
-    fcm_summary_topic: str = Field(default="cryptosentinel-summary", alias="FCM_SUMMARY_TOPIC")
+    fcm_spot_topic: str = Field(default="cryptosentinelv2-spot", alias="FCM_SPOT_TOPIC")
+    fcm_perp_topic: str = Field(default="cryptosentinelv2-perp", alias="FCM_PERP_TOPIC")
+    fcm_risk_topic: str = Field(default="cryptosentinelv2-risk", alias="FCM_RISK_TOPIC")
+    fcm_summary_topic: str = Field(default="cryptosentinelv2-summary", alias="FCM_SUMMARY_TOPIC")
     agent_summary_hour_utc: int = Field(default=23, alias="AGENT_SUMMARY_HOUR_UTC")
     agent_summary_minute_utc: int = Field(default=55, alias="AGENT_SUMMARY_MINUTE_UTC")
     risk_drawdown_alert_enabled: bool = Field(default=True, alias="RISK_DRAWDOWN_ALERT_ENABLED")

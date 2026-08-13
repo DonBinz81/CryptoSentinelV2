@@ -7,14 +7,14 @@ Documento di riferimento per revisione esterna. Viene aggiornato al termine di o
 ## 1. STRUTTURA CARTELLE
 
 ```text
-CryptoSentinelHackathon/ - repository CryptoSentinel + backend agente BNB Hack Track 1.
+CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack Track 1.
 |-- AGENTS.md - regole operative permanenti per agenti AI sul repository, incluso path Windows corretto per verifiche backend con `backend\.venv\Scripts\python.exe`.
 |-- .github/ - automazioni CI/CD GitHub.
 |   `-- workflows/build-apk.yml - workflow GitHub Actions per build APK debug con JDK 21, restore sicuro google-services da secret, artifact prima delle release e deploy Pages su gh-pages solo da main.
 |-- android/ - progetto Android Capacitor esistente.
 |   |-- app/ - modulo Android principale.
 |   |   |-- src/main/AndroidManifest.xml - dichiarazioni activity, provider, permessi e FCM.
-|   |   |-- src/main/java/com/cryptosentinelai/app/ - codice nativo Java.
+|   |   |-- src/main/java/com/cryptosentinelv2/app/ - codice nativo Java.
 |   |   |   |-- MainActivity.java - entrypoint Android e registrazione plugin custom.
 |   |   |   `-- AppSettingsPlugin.java - bridge Capacitor per impostazioni e download APK.
 |   |   |-- src/main/res/ - risorse Android: icone, splash, layout, stringhe, stili e XML provider.
@@ -209,15 +209,15 @@ CryptoSentinelHackathon/ - repository CryptoSentinel + backend agente BNB Hack T
 |   |-- strategy_perp.yaml - default strategia Perpetual.
 |   `-- eligible_tokens.yaml - universo 148 token eligible unici dopo rimozione del duplicato SLX.
 |-- deploy/ - artefatti Step 10 per VPS Linux 24/7.
-|   |-- nginx/cryptosentinel.conf - template nginx per dashboard statica e proxy `/api/` verso backend locale.
+|   |-- nginx/cryptosentinelv2.conf - template nginx per dashboard statica e proxy `/api/` verso backend locale.
 |   |-- scripts/ - script installazione, backup SQLite/TWAK encrypted state e healthcheck liveness.
-|   |   |-- install_vps.sh - bootstrap Ubuntu/Debian da eseguire da `/opt/cryptosentinel/app`, senza segreti nel repo.
+|   |   |-- install_vps.sh - bootstrap Ubuntu/Debian da eseguire da `/opt/cryptosentinelv2/app`, senza segreti nel repo.
 |   |   |-- backup_sqlite.sh - backup DB SQLite, config versionate non segrete e stato TWAK cifrato.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
-|       |-- cryptosentinel-backend.service - backend Uvicorn con restart automatico e hardening base.
-|       |-- cryptosentinel-backup.service / cryptosentinel-backup.timer - backup periodico ogni 6 ore.
-|       `-- cryptosentinel-healthcheck.service / cryptosentinel-healthcheck.timer - liveness periodica ogni 60 secondi.
+|       |-- cryptosentinelv2-backend.service - backend Uvicorn con restart automatico e hardening base.
+|       |-- cryptosentinelv2-backup.service / cryptosentinelv2-backup.timer - backup periodico ogni 6 ore.
+|       `-- cryptosentinelv2-healthcheck.service / cryptosentinelv2-healthcheck.timer - liveness periodica ogni 60 secondi.
 |-- docs/ - documentazione progetto e review.
 |   |-- CURRENT_STRUCTURE.md - baseline pre-integrazione backend.
 |   |-- PROJECT_STRUCTURE.md - questo documento aggiornato a ogni step.
@@ -277,7 +277,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinel + backend agente BNB Hack T
 |   |-- twak-password-file.cjs - wrapper Node per leggere password TWAK da file UTF-8 ed evitare problemi encoding PowerShell/keychain.
 |   `-- gen-icons.mjs - generazione icone.
 |-- src/ - frontend React/TypeScript esistente.
-|   |-- components/ - componenti UI CryptoSentinel.
+|   |-- components/ - componenti UI CryptoSentinelV2.
 |   |   |-- AgentTab.tsx - tab mobile agente con viste Spot/Perp/Global, metriche Trade Day e Bot Day in Spot/Perp, analytics sintetica, formatter micro-prezzi con soglia full-decimal sotto 0.000001, dettaglio trade rapido con cache che distingue grafico base e candele post-chiusura, deduplica delle richieste dettaglio in corso, refresh single-flight, preload base della prima pagina Spot/Perp e delle posizioni aperte, enrichment grafico solo dopo apertura dettaglio, risk levels con prezzo candela riferimento SL Perp, grafici trade con candele pre-entry/post-close attenuate, marker SL ref sul prezzo stop effettivo e linea ref che evita la candela, setup con stop loss ATR o Min/Max 20 con buffer per Spot/Perp, filtro inversione mercato, toggle margine fisso Perp, toggle Time Stop Spot/Perp con durata in ore, toggle breakeven Spot/Perp e allarme drawdown configurabili, onboarding, kill switch, admin token persistito localmente, wallet caricati solo nella vista dedicata ed empty state dedicati.
 |   |   `-- SettingsTab.tsx - impostazioni app, nome utente locale per supporto, apertura/lettura ticket con mark-read, reply utente, modalita' admin opzionale per risposta/chiusura e uso dello stesso admin token persistito dell'AgentTab.
 |   |-- hooks/ - hook dati, alert, preferiti, valuta, search e refresh.
@@ -399,7 +399,7 @@ Ordine di precedenza runtime: variabili ambiente e `.env` > `configs/instance.ya
 | Step 2 - Migrazione Notifiche a Backend FCM | Completato | Checker backend 60s, sync alert, persistenza temporanea, FCM con app aperta/background/chiusa verificato dall'utente; boundary auth e regressione stato notifiche verificati. |
 | Task intermedio - Ambiente + config refactor | Parziale | Config refactor completato e verificato; build APK riuscita in CI, deploy Pages corretto per usare branch `gh-pages` solo da `main`. |
 | Task istruzioni agenti | Completato | Creato `AGENTS.md` con regole permanenti operative, sicurezza, documentazione, config, CI e step boundary. |
-| Task Android package rename | Completato | Package Android/appId rinominato da `com.cryptosentinel.app` a `com.cryptosentinelai.app` per evitare conflitto con il fork/app esistente. |
+| Task Android package rename | Completato | Package Android/appId rinominato da `com.cryptosentinelv2.app` a `com.cryptosentinelv2.app` per evitare conflitto con il fork/app esistente. |
 | Task CI FCM Android config | Completato | Workflow aggiorna `android/app/google-services.json` da GitHub Secret base64 prima della build APK. |
 | Task CI APK artifact robustness | Completato | Artifact APK caricato prima delle release GitHub; release non bloccanti per non impedire download APK/Pages. |
 | Task regressione market-data frontend | Completato | Ripristinato il flusso frontend pre-regressione per selettore mercato e preferiti; rimossa la logica di seed/cache/chunking introdotta nei fix intermedi. |
@@ -425,7 +425,7 @@ Ordine di precedenza runtime: variabili ambiente e `.env` > `configs/instance.ya
 | FCM credentials path in `.env.example` | Anche i path a service account/segreti sono trattati come sensibili, quindi non stanno in `instance.yaml`. |
 | Java locale non installato | La build Android passa da GitHub Actions, usando JDK 21 già presente nel workflow; evita SDK/JDK sulla macchina locale. |
 | Deploy Pages via `gh-pages` branch | Replica il comportamento storico del progetto: ogni build su `main` aggiorna il branch `gh-pages` senza usare l'ambiente protetto `github-pages`. |
-| Package Android dedicato | Il fork hackathon usa `com.cryptosentinelai.app` per non collidere con l'app CryptoSentinel esistente sul device e su Firebase/Play metadata. |
+| Package Android dedicato | Il fork hackathon usa `com.cryptosentinelv2.app` per non collidere con l'app CryptoSentinelV2 esistente sul device e su Firebase/Play metadata. |
 | `google-services.json` solo da secret CI | Il file Android Firebase resta gitignored e viene ricostruito in CI da `GOOGLE_SERVICES_JSON` base64 senza stampare il contenuto. |
 | Artifact APK prima delle release | Il download dell'APK non deve dipendere dal successo degli step `gh release`, che sono accessori e possono fallire per collisioni/rate limit. |
 | Gate segreti build APK | La CI interrompe la build prima di Vite se URL backend o token client obbligatori sono assenti, evitando APK parzialmente funzionanti. |
@@ -491,9 +491,9 @@ Ordine di precedenza runtime: variabili ambiente e `.env` > `configs/instance.ya
 | Selettore provider persistito in RuntimeState (Step 5) | Un cambio admin sopravvive al riavvio; Settings è il default al boot. Nessun file JSON intermedio. |
 | X402 budget compatibilità backward (Step 5) | `X402Client` accetta `session_factory` opzionale; test legacy usano SimpleNamespace senza DB → budget in-memory → test invariati. |
 | Dashboard web su porta 5176 | `configs/instance.example.yaml` include `dashboard.port: 5176`; Step 8 usa Vite separato con dev server dedicato. |
-| Deploy VPS senza segreti nel repo | Step 10 usa `/etc/cryptosentinel/backend.env` per variabili sensibili, `configs/instance.yaml` per installazione locale non segreta e `/home/cryptosentinel/.twak` per stato TWAK headless cifrato. |
+| Deploy VPS senza segreti nel repo | Step 10 usa `/etc/cryptosentinelv2/backend.env` per variabili sensibili, `configs/instance.yaml` per installazione locale non segreta e `/home/cryptosentinelv2/.twak` per stato TWAK headless cifrato. |
 | Dashboard statica dietro nginx | In produzione la dashboard viene compilata in `dist-dashboard`; nginx serve gli asset statici e proxya solo `/api/` e `/health/live` al backend locale. |
-| Systemd come supervisor | Il backend gira come utente `cryptosentinel`, con restart automatico, hardening base e timer separati per backup e liveness. |
+| Systemd come supervisor | Il backend gira come utente `cryptosentinelv2`, con restart automatico, hardening base e timer separati per backup e liveness. |
 | Backup VPS conservativo | Il backup versionato copia SQLite, config YAML non segrete e stato TWAK cifrato se presente; non esporta `.env`, `configs/instance.yaml` o service account. |
 | Questioni Telegram non bloccanti | Si procede con default prudenziali del piano e si aggiornano quando arrivano risposte. |
 | Spot e Perp separati | TWAK gestisce spot; BNB Agent SDK/EIP-712 gestisce perp. Non condividono adapter o flusso di firma. |
@@ -513,9 +513,9 @@ Ordine di precedenza runtime: variabili ambiente e `.env` > `configs/instance.ya
 | Config precedence | Verificare `Settings`: env/.env > instance.yaml > YAML funzionali > default Pydantic. |
 | Guardrail startup | Confermare fail-closed per `min_portfolio_value_usd <= 1`, `minimum_trades_per_day < 1`, drawdown cap oltre -15%, token count fuori range 100-200. |
 | Multi-user readiness | Valutare se i file funzionali sono una buona base per default di sistema overridabili per utente. |
-| GitHub Actions APK/Pages | Verificare che il job `build` produca `CryptoSentinel-debug.apk` e che `deploy-pages` aggiorni `gh-pages` solo su push a `main`. |
+| GitHub Actions APK/Pages | Verificare che il job `build` produca `CryptoSentinelV2-debug.apk` e che `deploy-pages` aggiorni `gh-pages` solo su push a `main`. |
 | GitHub Releases | Gli step release sono non bloccanti; se falliscono, controllare il job ma scaricare comunque l'APK dagli artifact CI. |
-| Firebase Android app | Creare/scaricare un nuovo `google-services.json` per package `com.cryptosentinelai.app`, salvarlo come GitHub Secret `GOOGLE_SERVICES_JSON` in base64 e non committarlo. |
+| Firebase Android app | Creare/scaricare un nuovo `google-services.json` per package `com.cryptosentinelv2.app`, salvarlo come GitHub Secret `GOOGLE_SERVICES_JSON` in base64 e non committarlo. |
 | Step 5 | Completato: readiness DB con SELECT 1 + latency; migrazione JSON→DB (FCM, alert, x402, provider selector); schema ORM completo; 16 test passed. |
 | Step 7 | Nuova tab mobile agente additiva; verificare su APK/dispositivo reale layout, admin token persistito localmente, onboarding validation e kill switch contro backend avviato. |
 | Documentazione uscite | Aggiornata al comportamento corrente: livelli ATR, breakeven con costi+buffer, trailing ATR/dinamico, TP1 parziale e time stop ATR-aware/orario. |

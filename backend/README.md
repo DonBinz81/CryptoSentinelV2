@@ -1,4 +1,4 @@
-﻿# CryptoSentinel Backend
+﻿# CryptoSentinelV2 Backend
 
 FastAPI backend for the BNB Hack Track 1 autonomous trading agent.
 
@@ -113,7 +113,7 @@ Minimum `configs/instance.yaml` installation values for real FCM delivery:
 fcm:
   enabled: true
   project_id: your-firebase-project-id
-  critical_topic: cryptosentinel-critical
+  critical_topic: cryptosentinelv2-critical
   token_store_path: backend/storage/fcm_tokens.json
 ```
 
@@ -176,7 +176,7 @@ twak --version
 
 On Windows, restart PowerShell after installation if `twak` is still not
 recognized. The expected npm launcher is normally
-`%APPDATA%\npm\twak.cmd`. CryptoSentinel resolves this `.cmd` launcher
+`%APPDATA%\npm\twak.cmd`. CryptoSentinelV2 resolves this `.cmd` launcher
 automatically; alternatively set `twak.cli_path` in local
 `configs/instance.yaml` to its absolute path.
 
@@ -198,8 +198,8 @@ Add these entries to the local `.env`:
 
 ```dotenv
 WALLET_ENCRYPTED_PRIVATE_KEY_PATH=secrets/wallet-keystore.json
-WALLET_KEY_PASSPHRASE_ENV=CRYPTOSENTINEL_WALLET_PASSPHRASE
-CRYPTOSENTINEL_WALLET_PASSPHRASE=replace-with-the-keystore-passphrase
+WALLET_KEY_PASSPHRASE_ENV=CRYPTOSENTINELV2_WALLET_PASSPHRASE
+CRYPTOSENTINELV2_WALLET_PASSPHRASE=replace-with-the-keystore-passphrase
 TATUM_RPC_API_KEY=
 ```
 
@@ -273,16 +273,16 @@ The competition contract is intentionally on BSC mainnet. It is used only for
 registration/status and must not replace the BSC testnet trading RPC.
 
 Tatum is optional. Set `TATUM_RPC_API_KEY` in `.env` and uncomment the Tatum
-URL in local `configs/instance.yaml`. CryptoSentinel sends `x-api-key` only to
+URL in local `configs/instance.yaml`. CryptoSentinelV2 sends `x-api-key` only to
 `tatum.io` hosts; PublicNode and BNB Chain endpoints remain unauthenticated.
 For future mainnet operation, configure a BSC mainnet Tatum endpoint only in
 Step 9. Step 4 trading remains locked to chain ID 97.
 
-The configured RPC list is used by CryptoSentinel for balance/gas preflight,
+The configured RPC list is used by CryptoSentinelV2 for balance/gas preflight,
 failover, receipt polling, and on-chain verification. TWAK CLI `0.19.1` does
 not expose a custom RPC option for `swap`; its `bsctestnet` chain currently
 uses TWAK's internal `https://bsc-testnet.twnodes.com` endpoint. Therefore a
-TWAK broadcast failure can still occur even when CryptoSentinel's Tatum/BNB
+TWAK broadcast failure can still occur even when CryptoSentinelV2's Tatum/BNB
 Chain preflight succeeds.
 
 Spot and perpetual execution are deliberately separate. Spot uses TWAK on
@@ -313,7 +313,7 @@ twak wallet address --chain bsc --json
 twak wallet balance --chain bsc --json
 ```
 
-Then run one small swap through CryptoSentinel's Step 4 layer:
+Then run one small swap through CryptoSentinelV2's Step 4 layer:
 
 ```powershell
 $env:PYTHONPATH = (Get-Location).Path

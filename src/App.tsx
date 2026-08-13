@@ -42,9 +42,9 @@ import {
 } from './services/supportApi';
 import { FALLBACK_ELIGIBLE_SYMBOLS, toEligibleSymbolSet } from './utils/eligibleTokens';
 
-const INTERVAL_KEY = 'cryptosentinel_refresh_interval';
-const PERPAGE_KEY = 'cryptosentinel_perpage';
-const SLIDER_RANGE_KEY = 'cryptosentinel_alert_slider_range';
+const INTERVAL_KEY = 'cryptosentinelv2_refresh_interval';
+const PERPAGE_KEY = 'cryptosentinelv2_perpage';
+const SLIDER_RANGE_KEY = 'cryptosentinelv2_alert_slider_range';
 const FAV_UP_KEY = 'cs_fav_up_pct';
 const FAV_DOWN_KEY = 'cs_fav_down_pct';
 const RANK_ANIM_KEY = 'cs_rank_anim_topn';
@@ -690,7 +690,7 @@ export default function App() {
                 className="text-white font-bold text-xl tracking-tight"
                 style={{ textShadow: '0 0 22px rgba(96,165,250,0.38), 0 0 48px rgba(59,130,246,0.12)' }}
               >
-                CryptoSentinelAI
+                CryptoSentinelV2
               </h1>
             </div>
             <div className="flex items-center gap-2">

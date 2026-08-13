@@ -265,12 +265,12 @@ async function registerRemotePushToken(): Promise<void> {
       emitFavPush(notification.data, false);
       const d = notification.data ?? {};
       const topic = typeof d.topic === 'string' ? d.topic : '';
-      const isTrade = topic === 'cryptosentinel-spot' || topic === 'cryptosentinel-perp';
+      const isTrade = topic === 'cryptosentinelv2-spot' || topic === 'cryptosentinelv2-perp';
       await LocalNotifications.schedule({
         notifications: [{
           id: stableNotifId(d),
           channelId: isTrade ? 'trade_alerts' : 'price_alerts',
-          title: notification.title ?? 'CryptoSentinel',
+          title: notification.title ?? 'CryptoSentinelV2',
           body: notification.body ?? '',
           sound: 'default',
           smallIcon: 'ic_notification',

@@ -4,10 +4,10 @@ def buildNumber = project.hasProperty('buildNumber') ? project.buildNumber.toInt
 def baseVersion = project.hasProperty('baseVersion') ? project.baseVersion : '1.0'
 
 android {
-    namespace = "com.cryptosentinelai.app"
+    namespace = "com.cryptosentinelv2.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.cryptosentinelai.app"
+        applicationId "com.cryptosentinelv2.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode buildNumber

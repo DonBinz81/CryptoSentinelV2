@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
 import type { AlertDirection, AlertHistoryEntry, PriceAlert, PriceAlertTriggerOptions } from '../types';
 
-const STORAGE_KEY = 'cryptosentinel_alerts';
-const HISTORY_KEY = 'cryptosentinel_alert_history';
+const STORAGE_KEY = 'cryptosentinelv2_alerts';
+const HISTORY_KEY = 'cryptosentinelv2_alert_history';
 
 function normalizeAlert(alert: PriceAlert): PriceAlert {
   return {

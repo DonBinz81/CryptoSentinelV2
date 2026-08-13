@@ -48,7 +48,7 @@
 ## 4. SCOSTAMENTI DAL PIANO
 
 - No functional FastAPI app, health endpoint, authentication implementation, logging setup, or heartbeat was implemented. This is intentional: those are Step 1 deliverables, not Step 0.
-- The backend README was created at `backend/README.md` rather than replacing root `README.md`, to preserve the existing CryptoSentinel mobile app documentation.
+- The backend README was created at `backend/README.md` rather than replacing root `README.md`, to preserve the existing CryptoSentinelV2 mobile app documentation.
 - Root `requirements.txt` was added as a small delegator to `backend/requirements.txt` to satisfy root-level reviewer expectations without duplicating dependency lists.
 
 ## 5. QUESTIONI APERTE

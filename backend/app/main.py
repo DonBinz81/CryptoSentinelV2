@@ -177,7 +177,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="CryptoSentinel autonomous trading agent backend foundations.",
+        description="CryptoSentinelV2 autonomous trading agent backend foundations.",
         lifespan=lifespan,
     )
 

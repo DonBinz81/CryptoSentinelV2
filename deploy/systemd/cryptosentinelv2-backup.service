@@ -1,0 +1,21 @@
+[Unit]
+Description=CryptoSentinelV2 SQLite and runtime backup
+
+[Service]
+Type=oneshot
+User=cryptosentinelv2
+Group=cryptosentinelv2
+Environment=APP_DIR=/opt/cryptosentinelv2/app
+Environment=BACKUP_DIR=/var/backups/cryptosentinelv2
+ExecStart=/opt/cryptosentinelv2/app/deploy/scripts/backup_sqlite.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+
+# Backup needs only repository state, encrypted TWAK state and backup output.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/cryptosentinelv2
+ReadOnlyPaths=/opt/cryptosentinelv2/app /home/cryptosentinelv2/.twak

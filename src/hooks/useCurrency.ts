@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 
 export type Currency = 'usd' | 'eur' | 'btc';
 
-const STORAGE_KEY = 'cryptosentinel_currency';
+const STORAGE_KEY = 'cryptosentinelv2_currency';
 
 export function useCurrency() {
   const [currency, setCurrency] = useState<Currency>(() => {

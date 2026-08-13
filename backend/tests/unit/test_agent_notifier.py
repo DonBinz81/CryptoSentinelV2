@@ -25,11 +25,11 @@ def _make_settings(
     s.fcm_enabled = fcm_enabled
     s.fcm_token_store_path = "backend/storage/fcm_tokens.json"
     s.notify_dry_run_trades = notify_dry_run_trades
-    s.fcm_spot_topic = "cryptosentinel-spot"
-    s.fcm_perp_topic = "cryptosentinel-perp"
-    s.fcm_risk_topic = "cryptosentinel-risk"
-    s.fcm_summary_topic = "cryptosentinel-summary"
-    s.fcm_critical_topic = "cryptosentinel-critical"
+    s.fcm_spot_topic = "cryptosentinelv2-spot"
+    s.fcm_perp_topic = "cryptosentinelv2-perp"
+    s.fcm_risk_topic = "cryptosentinelv2-risk"
+    s.fcm_summary_topic = "cryptosentinelv2-summary"
+    s.fcm_critical_topic = "cryptosentinelv2-critical"
     return s
 
 
@@ -74,7 +74,7 @@ def _notifier_with_mocks(settings=None, tokens=None, fcm_result=None):
 
 @pytest.mark.asyncio
 async def test_notify_trade_opened_spot():
-    """Apertura trade spot notifica con topic cryptosentinel-spot."""
+    """Apertura trade spot notifica con topic cryptosentinelv2-spot."""
     notifier, mock_fcm, mock_svc = _notifier_with_mocks()
 
     store: dict[str, str] = {}
@@ -107,12 +107,12 @@ async def test_notify_trade_opened_spot():
     data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data") or call_kwargs[0][3]
     # Il topic deve essere quello spot
     sent_data = mock_fcm.send.call_args[1].get("data") or mock_fcm.send.call_args.kwargs.get("data") or {}
-    assert "cryptosentinel-spot" in str(sent_data)
+    assert "cryptosentinelv2-spot" in str(sent_data)
 
 
 @pytest.mark.asyncio
 async def test_notify_trade_opened_perp():
-    """Apertura trade perp usa topic cryptosentinel-perp."""
+    """Apertura trade perp usa topic cryptosentinelv2-perp."""
     notifier, mock_fcm, mock_svc = _notifier_with_mocks()
     store: dict[str, str] = {}
 
@@ -135,7 +135,7 @@ async def test_notify_trade_opened_perp():
 
     assert result is True
     sent_data = mock_fcm.send.call_args.kwargs.get("data") or {}
-    assert "cryptosentinel-perp" in str(sent_data)
+    assert "cryptosentinelv2-perp" in str(sent_data)
 
 
 # ---------------------------------------------------------------------------

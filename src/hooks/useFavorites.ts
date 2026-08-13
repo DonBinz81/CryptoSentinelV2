@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const STORAGE_KEY = 'cryptosentinel_favorites';
+const STORAGE_KEY = 'cryptosentinelv2_favorites';
 
 function loadFavorites(): Set<string> {
   try {

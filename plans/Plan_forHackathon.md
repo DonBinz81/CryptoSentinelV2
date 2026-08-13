@@ -17,7 +17,7 @@ Un **agente di trading autonomo** su **BNB Smart Chain (BSC)** che:
 4. Opera entro regole di rischio rigide, monitorabile da app mobile e dashboard web
 
 ### Il punto di partenza
-Il progetto è un **fork/evoluzione di CryptoSentinel**, un'app mobile esistente (React + TypeScript + Capacitor/Android) di monitoraggio prezzi crypto con sistema di alert. Attualmente usa CoinGecko, è in italiano, e non ha backend.
+Il progetto è un **fork/evoluzione di CryptoSentinelV2**, un'app mobile esistente (React + TypeScript + Capacitor/Android) di monitoraggio prezzi crypto con sistema di alert. Attualmente usa CoinGecko, è in italiano, e non ha backend.
 
 ### La narrativa (importante per i giudici)
 **"Da app che ti avvisa → app che agisce per te."**
@@ -468,7 +468,7 @@ Mobile = essenziale. Web = completa con grafici, log, export.
 
 ### STEP 7 — Estensione App Mobile (SOLO ADDITIVO)
 
-> **REGOLA ASSOLUTA — protezione app esistente:** l'app mobile CryptoSentinel esistente NON va stravolta. Le funzionalità attuali (monitoring prezzi, alert soglia/range/percentuali/preferiti, grafici, ricerca, notifiche, preferiti) sono **intoccabili** nel comportamento. Lo Step 7 è **solo additivo**: si aggiungono nuovi componenti, nuove tab/viste e nuove impostazioni per l'agente. Se serve estendere un componente esistente (es. icona AI sulla CoinCard), farlo in modo additivo (prop opzionali, nuovi elementi), MAI riscrivendo o cambiando la logica esistente. Nessun file esistente va rinominato o spostato.
+> **REGOLA ASSOLUTA — protezione app esistente:** l'app mobile CryptoSentinelV2 esistente NON va stravolta. Le funzionalità attuali (monitoring prezzi, alert soglia/range/percentuali/preferiti, grafici, ricerca, notifiche, preferiti) sono **intoccabili** nel comportamento. Lo Step 7 è **solo additivo**: si aggiungono nuovi componenti, nuove tab/viste e nuove impostazioni per l'agente. Se serve estendere un componente esistente (es. icona AI sulla CoinCard), farlo in modo additivo (prop opzionali, nuovi elementi), MAI riscrivendo o cambiando la logica esistente. Nessun file esistente va rinominato o spostato.
 
 Aggiunte all'app mobile (essenziali, mobile-first):
 - 3 viste nuove: Spot / Perp / Globale

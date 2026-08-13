@@ -103,7 +103,7 @@ const UpdateNotification: FC<Props> = ({ update, dlState, onIgnore, onSnooze, on
 
             <div className="bg-dark-700 rounded-xl px-4 py-3 mb-4">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-xs text-gray-500">CryptoSentinelAI</p>
+                <p className="text-xs text-gray-500">CryptoSentinelV2</p>
                 <span className="flex-shrink-0 text-xs font-semibold text-accent-green bg-accent-green/10 px-2.5 py-1 rounded-full">Nuova</span>
               </div>
               <p className="text-white font-bold text-lg font-mono leading-snug break-words">

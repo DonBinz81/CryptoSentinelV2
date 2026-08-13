@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Termina il processo backend CryptoSentinel (uvicorn/Python su porta 8001).
+    Termina il processo backend CryptoSentinelV2 (uvicorn/Python su porta 8001).
 #>
 
 $killed = $false

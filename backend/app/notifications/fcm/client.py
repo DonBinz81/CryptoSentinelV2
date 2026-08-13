@@ -44,7 +44,7 @@ class FcmClient:
         with self._lock:
             if self._initialized:
                 return True
-            app_name = "cryptosentinel-agent"
+            app_name = "cryptosentinelv2-agent"
             try:
                 firebase_admin.get_app(app_name)
             except ValueError:
@@ -152,7 +152,7 @@ class FcmClient:
     def _app() -> App:
         """Return the named Firebase app used by the backend."""
 
-        return firebase_admin.get_app("cryptosentinel-agent")
+        return firebase_admin.get_app("cryptosentinelv2-agent")
 
     @staticmethod
     def _stringify_data(data: dict[str, Any]) -> dict[str, str]:

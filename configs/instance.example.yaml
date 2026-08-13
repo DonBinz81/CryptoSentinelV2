@@ -4,7 +4,7 @@
 
 app:
   env: development
-  name: CryptoSentinel Agent Backend
+  name: CryptoSentinelV2 Agent Backend
   version: 0.1.0-step5
   default_user_id: "00000000-0000-0000-0000-000000000001"
 
@@ -147,7 +147,7 @@ x402:
 fcm:
   enabled: false
   project_id: ""
-  critical_topic: cryptosentinel-critical
+  critical_topic: cryptosentinelv2-critical
   token_store_path: backend/storage/fcm_tokens.json
   risk_drawdown_alert_enabled: true
 

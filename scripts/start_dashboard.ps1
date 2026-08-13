@@ -23,7 +23,7 @@ function Get-TailscaleIp {
 
 try {
     Set-Location $RepoRoot
-    Write-Host "CryptoSentinel dashboard start" -ForegroundColor Cyan
+    Write-Host "CryptoSentinelV2 dashboard start" -ForegroundColor Cyan
     Write-Host "Repository: $RepoRoot"
     Write-Host "Port: $Port"
 

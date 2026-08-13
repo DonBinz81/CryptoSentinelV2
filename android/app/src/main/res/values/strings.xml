@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">CryptoSentinelAI</string>
-    <string name="title_activity_main">CryptoSentinelAI</string>
-    <string name="package_name">com.cryptosentinelai.app</string>
-    <string name="custom_url_scheme">com.cryptosentinelai.app</string>
+    <string name="app_name">CryptoSentinelV2</string>
+    <string name="title_activity_main">CryptoSentinelV2</string>
+    <string name="package_name">com.cryptosentinelv2.app</string>
+    <string name="custom_url_scheme">com.cryptosentinelv2.app</string>
 </resources>

@@ -10,7 +10,7 @@
 ## 2. COME È STATO FATTO
 
 - Il job `deploy-pages` continua a dipendere dal job `build`.
-- Il job `deploy-pages` scarica l'artifact `CryptoSentinel-debug.apk`, prepara `pages-dist`, copia `docs/index.html` e l'APK.
+- Il job `deploy-pages` scarica l'artifact `CryptoSentinelV2-debug.apk`, prepara `pages-dist`, copia `docs/index.html` e l'APK.
 - La pubblicazione usa `peaceiris/actions-gh-pages@v4` con `publish_branch: gh-pages`.
 - Il job ha permesso `contents: write`, necessario per aggiornare il branch `gh-pages`.
 

@@ -1,6 +1,6 @@
-# CryptoSentinel — Market Watch
+# CryptoSentinelV2 — Market Watch
 
-**CryptoSentinel** è un'app Android per monitorare i prezzi delle criptovalute in tempo reale e ricevere notifiche personalizzate quando il mercato si muove.
+**CryptoSentinelV2** è un'app Android per monitorare i prezzi delle criptovalute in tempo reale e ricevere notifiche personalizzate quando il mercato si muove.
 
 ---
 
@@ -126,7 +126,7 @@ backend/app/notifications/
 ├── service.py         # Orchestrazione notifiche
 └── fcm/               # Client Firebase e registro device token
 
-android/app/src/main/java/com/cryptosentinelai/app/
+android/app/src/main/java/com/cryptosentinelv2/app/
 ├── MainActivity.java       # Entry point Android
 └── AppSettingsPlugin.java  # Plugin Capacitor per funzionalità native
 ```
@@ -141,7 +141,7 @@ L'app usa il backend normalizzato con il provider globale selezionato. CoinGecko
 
 ## Supporta il progetto
 
-CryptoSentinel è gratuito e senza pubblicità. Se lo trovi utile puoi offrire un caffè ☕
+CryptoSentinelV2 è gratuito e senza pubblicità. Se lo trovi utile puoi offrire un caffè ☕
 
 | Metodo | Indirizzo |
 |---|---|

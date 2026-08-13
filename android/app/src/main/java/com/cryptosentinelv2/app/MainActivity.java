@@ -1,4 +1,4 @@
-package com.cryptosentinelai.app;
+package com.cryptosentinelv2.app;
 
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
@@ -7,7 +7,7 @@ import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
-    private static final String PREFS = "cryptosentinel_prefs";
+    private static final String PREFS = "cryptosentinelv2_prefs";
     private static final String KEY_VER = "last_version_code";
 
     @Override

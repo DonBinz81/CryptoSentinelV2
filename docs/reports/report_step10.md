@@ -26,7 +26,7 @@
 
 - Il backend viene esposto solo localmente su `127.0.0.1:8000` tramite Uvicorn.
 - Nginx serve `dist-dashboard` come dashboard statica e inoltra `/api/` al backend locale.
-- I segreti sono deliberatamente esclusi dal repository: il template usa `/etc/cryptosentinel/backend.env`.
+- I segreti sono deliberatamente esclusi dal repository: il template usa `/etc/cryptosentinelv2/backend.env`.
 - La configurazione non segreta di installazione resta in `configs/instance.yaml`, locale e gitignored.
 - Lo stato TWAK headless viene trattato come persistente e cifrato nella home del service user.
 - Il backup esporta:
@@ -46,9 +46,9 @@
   - `docs/CURRENT_STRUCTURE.md`
 - Ispezionati gli script esistenti di avvio backend e la config dashboard per rispettare porta e convenzioni esistenti.
 - Verificata coerenza dei path:
-  - repository: `/opt/cryptosentinel/app`;
-  - env sensibile: `/etc/cryptosentinel/backend.env`;
-  - backup: `/var/backups/cryptosentinel`;
+  - repository: `/opt/cryptosentinelv2/app`;
+  - env sensibile: `/etc/cryptosentinelv2/backend.env`;
+  - backup: `/var/backups/cryptosentinelv2`;
   - TWAK headless: home del service user;
   - dashboard build: `dist-dashboard`.
 - Tentata verifica `bash -n` sugli script di deploy, ma il `bash.exe` disponibile nella sessione Windows non esegue comandi; la sintassi va ricontrollata su VPS/Linux.
@@ -65,11 +65,11 @@
 
 - Configurare dominio reale e TLS sul VPS.
 - Compilare e installare sul server reale.
-- Popolare `/etc/cryptosentinel/backend.env` con segreti runtime senza stamparli.
+- Popolare `/etc/cryptosentinelv2/backend.env` con segreti runtime senza stamparli.
 - Validare TWAK headless come service user con `--no-keychain`.
 - Verificare FCM con service account esterno al repo.
 - Eseguire test runtime su VPS:
-  - `systemctl status cryptosentinel-backend.service`;
+  - `systemctl status cryptosentinelv2-backend.service`;
   - `/health/live`;
   - dashboard HTTPS;
   - endpoint read/admin;

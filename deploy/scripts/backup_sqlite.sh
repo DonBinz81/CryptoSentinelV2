@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/cryptosentinel/app}"
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/cryptosentinel}"
+APP_DIR="${APP_DIR:-/opt/cryptosentinelv2/app}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/cryptosentinelv2}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 DB_PATH="${DB_PATH:-$APP_DIR/backend/local.db}"
-TWAK_HOME="${TWAK_HOME:-/home/cryptosentinel/.twak}"
+TWAK_HOME="${TWAK_HOME:-/home/cryptosentinelv2/.twak}"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 target_dir="$BACKUP_DIR/$timestamp"

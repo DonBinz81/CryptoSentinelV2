@@ -2,11 +2,11 @@
 
 ## 1. COSA È STATO FATTO
 
-- Rinominato l'app id Android da `com.cryptosentinel.app` a `com.cryptosentinelai.app`.
+- Rinominato l'app id Android da `com.cryptosentinelv2.app` a `com.cryptosentinelv2.app`.
 - Aggiornati `namespace` e `applicationId` in `android/app/build.gradle`.
 - Aggiornato `appId` in `capacitor.config.ts`.
 - Aggiornate le stringhe Android `package_name` e `custom_url_scheme`.
-- Spostati i sorgenti Java da `android/app/src/main/java/com/cryptosentinel/app/` a `android/app/src/main/java/com/cryptosentinelai/app/`.
+- Spostati i sorgenti Java da `android/app/src/main/java/com/cryptosentinelv2/app/` a `android/app/src/main/java/com/cryptosentinelv2/app/`.
 - Aggiornate le dichiarazioni `package` nei file Java nativi.
 - Aggiornati `docs/PROJECT_STRUCTURE.md` e `docs/CURRENT_STRUCTURE.md`.
 
@@ -19,8 +19,8 @@
 ## 3. COSA È STATO VERIFICATO
 
 - Ricerca repository dei riferimenti al vecchio package.
-- Verificata presenza dei sorgenti Java nel nuovo path `com/cryptosentinelai/app`.
-- Verificato che i riferimenti attivi in Android/Capacitor puntino a `com.cryptosentinelai.app`.
+- Verificata presenza dei sorgenti Java nel nuovo path `com/cryptosentinelv2/app`.
+- Verificato che i riferimenti attivi in Android/Capacitor puntino a `com.cryptosentinelv2.app`.
 
 ## 4. SCOSTAMENTI DAL PIANO
 
@@ -28,7 +28,7 @@
 
 ## 5. QUESTIONI APERTE
 
-- Firebase richiede una nuova Android app registrata con package `com.cryptosentinelai.app`.
+- Firebase richiede una nuova Android app registrata con package `com.cryptosentinelv2.app`.
 - Il relativo `google-services.json` dovrà essere generato e gestito fuori repo o tramite GitHub Secrets, mai committato.
 - La build APK va verificata in GitHub Actions dopo commit/push.
 
