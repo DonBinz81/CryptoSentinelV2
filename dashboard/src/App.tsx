@@ -583,7 +583,7 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark">CS</span>
           <div>
-            <strong>CryptoSentinelV2</strong>
+            <strong>CryptoSentinelV2 AI</strong>
             <small>Judge Dashboard</small>
           </div>
         </div>

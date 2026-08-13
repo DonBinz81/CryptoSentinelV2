@@ -1,0 +1,173 @@
+name: Build CryptoSentinelV2 APK
+
+on:
+  push:
+    branches:
+      - main
+      - release/**
+      - claude/**
+      - fix_*
+      - Fix_*
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Installa dipendenze npm
+        run: npm ci || npm install
+
+      # Firebase e' OPZIONALE (deviazione dichiarata dal workflow originale, che qui
+      # falliva senza il secret). android/app/build.gradle applica il plugin
+      # google-services solo se il file esiste: senza, l'APK si compila lo stesso
+      # e mancano soltanto le notifiche push. fcm.enabled e' false di default.
+      - name: Restore google-services.json (se configurato)
+        id: firebase
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "::warning::GOOGLE_SERVICES_JSON non configurato: build senza notifiche push."
+          else
+            mkdir -p android/app
+            printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > android/app/google-services.json
+            echo "enabled=true" >> $GITHUB_OUTPUT
+            echo "Firebase configurato: push abilitate."
+          fi
+
+      - name: Leggi versione base
+        id: ver
+        run: |
+          BASE=$(cat VERSION | tr -d '[:space:]')
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+          echo "full=$BASE.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Build web app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VITE_BACKEND_API_BASE_URL: ${{ secrets.VITE_BACKEND_API_BASE_URL }}
+          VITE_API_READ_TOKEN: ${{ secrets.VITE_API_READ_TOKEN }}
+          VITE_API_DEVICE_TOKEN: ${{ secrets.VITE_API_DEVICE_TOKEN }}
+          VITE_API_ALERTS_TOKEN: ${{ secrets.VITE_API_ALERTS_TOKEN }}
+        run: |
+          missing=()
+          [ -n "$VITE_BACKEND_API_BASE_URL" ] || missing+=("VITE_BACKEND_API_BASE_URL")
+          [ -n "$VITE_API_READ_TOKEN" ] || missing+=("VITE_API_READ_TOKEN")
+          [ -n "$VITE_API_DEVICE_TOKEN" ] || missing+=("VITE_API_DEVICE_TOKEN")
+          [ -n "$VITE_API_ALERTS_TOKEN" ] || missing+=("VITE_API_ALERTS_TOKEN")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Secret mancanti per la build APK: ${missing[*]}"
+            exit 1
+          fi
+          npm run build
+
+      - name: Sync Capacitor assets in Android
+        run: npx cap sync android
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Build APK debug
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace -PbuildNumber=${{ github.run_number }} -PbaseVersion=${{ steps.ver.outputs.base }}
+
+      - name: Rinomina APK con versione
+        run: |
+          APK_NAME="CryptoSentinelV2-v${{ steps.ver.outputs.full }}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
+          cp "$APK_NAME" CryptoSentinelV2-latest.apk
+          echo "APK_NAME=$APK_NAME" >> $GITHUB_ENV
+
+      - name: Upload APK come artefatto CI
+        uses: actions/upload-artifact@v5
+        with:
+          name: apk-artifact
+          path: |
+            ${{ env.APK_NAME }}
+            CryptoSentinelV2-latest.apk
+          retention-days: 30
+
+      - name: Aggiorna release dev (tutti i branch)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete dev --yes --cleanup-tag 2>/dev/null || true
+          sleep 2
+          gh release create dev \
+            --title "CryptoSentinelV2 Dev v${{ steps.ver.outputs.full }}" \
+            --notes "Branch: ${{ github.ref_name }} | Build #${{ github.run_number }} del $(date '+%d/%m/%Y %H:%M') | Push: ${{ steps.firebase.outputs.enabled }}" \
+            --prerelease \
+            "${{ env.APK_NAME }}"
+
+      - name: Pubblica release latest (solo main)
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.full }}"
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          sleep 2
+          gh release create "$TAG" \
+            --title "CryptoSentinelV2 $TAG" \
+            --notes "Build automatica dal branch main — run #${{ github.run_number }} del $(date '+%d/%m/%Y %H:%M')" \
+            --latest \
+            "${{ env.APK_NAME }}"
+
+  deploy-pages:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Scarica APK dall'artefatto
+        uses: actions/download-artifact@v5
+        with:
+          name: apk-artifact
+
+      - name: Prepara cartella Pages
+        run: |
+          mkdir -p pages-dist
+          cp docs/index.html pages-dist/index.html
+          cp CryptoSentinelV2-latest.apk pages-dist/
+          cp CryptoSentinelV2-*.apk pages-dist/ 2>/dev/null || true
+
+      - name: Upload artefatto Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages-dist
+
+      - name: Deploy su GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

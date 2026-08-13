@@ -686,11 +686,19 @@ export default function App() {
           <div className="flex items-center justify-between py-2.5">
             <div className="flex items-center gap-2">
               <LogoLighthouse />
-              <h1
-                className="text-white font-bold text-xl tracking-tight"
-                style={{ textShadow: '0 0 22px rgba(96,165,250,0.38), 0 0 48px rgba(59,130,246,0.12)' }}
-              >
-                CryptoSentinelV2
+              <h1 className="font-bold text-xl tracking-tight">
+                <span
+                  className="text-accent-orange"
+                  style={{ textShadow: '0 0 22px rgba(249,115,22,0.45), 0 0 48px rgba(249,115,22,0.15)' }}
+                >
+                  Crypto
+                </span>
+                <span
+                  className="text-white"
+                  style={{ textShadow: '0 0 22px rgba(96,165,250,0.38), 0 0 48px rgba(59,130,246,0.12)' }}
+                >
+                  SentinelV2 AI
+                </span>
               </h1>
             </div>
             <div className="flex items-center gap-2">

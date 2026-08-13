@@ -550,7 +550,7 @@ const SettingsTab: FC<Props> = ({
         <div className="bg-dark-800 rounded-xl px-4 py-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-white font-medium">CryptoSentinelV2</p>
+              <p className="text-sm text-white font-medium">CryptoSentinelV2 AI</p>
               <p className="text-xs text-gray-500 mt-0.5">
                 Build #{__APP_BUILD_NUMBER__} · {new Date(__APP_BUILD_DATE__).toLocaleDateString('it-IT', {
                   day: '2-digit', month: '2-digit', year: 'numeric',
@@ -1112,7 +1112,7 @@ const SettingsTab: FC<Props> = ({
         <div className="bg-dark-800 rounded-xl divide-y divide-dark-700">
           <div className="px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-gray-400">Applicazione</span>
-            <span className="text-sm text-white font-medium">CryptoSentinelV2</span>
+            <span className="text-sm text-white font-medium">CryptoSentinelV2 AI</span>
           </div>
           <div className="px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-gray-400">Versione</span>

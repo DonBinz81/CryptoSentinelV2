@@ -270,7 +270,7 @@ async function registerRemotePushToken(): Promise<void> {
         notifications: [{
           id: stableNotifId(d),
           channelId: isTrade ? 'trade_alerts' : 'price_alerts',
-          title: notification.title ?? 'CryptoSentinelV2',
+          title: notification.title ?? 'CryptoSentinelV2 AI',
           body: notification.body ?? '',
           sound: 'default',
           smallIcon: 'ic_notification',

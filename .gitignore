@@ -8,6 +8,8 @@
 secrets/
 **/service-account*.json
 **/firebase-adminsdk*.json
+# config Firebase del client: va iniettata in CI dal secret GOOGLE_SERVICES_JSON
+android/app/google-services.json
 # keystore cifrato del wallet e passphrase
 *.keystore
 !android/app/debug.keystore
