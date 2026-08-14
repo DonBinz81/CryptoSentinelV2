@@ -152,6 +152,8 @@ const defaultSettings: AgentMobileSettings = {
   perp_structural_stop_lookback_candles: 20,
   perp_structural_stop_buffer_pct: 1.10,
   perp_min_rr: 1.2,
+  perp_tp1_atr_multiplier: 2.5,
+  perp_tp2_atr_multiplier: 4.0,
   spot_capital_per_trade_pct: 6,
   spot_per_trade_pct: 1.5,
   spot_max_open_positions: 3,
@@ -1704,6 +1706,8 @@ const SetupPane: FC<{
           <NumberInput label="ATR stop" value={settings.perp_atr_stop_multiplier} step={0.1} onChange={(perp_atr_stop_multiplier) => patch({ perp_atr_stop_multiplier })} />
           <NumberInput label="Buffer Min/Max20 %" value={settings.perp_structural_stop_buffer_pct} step={0.1} onChange={(perp_structural_stop_buffer_pct) => patch({ perp_structural_stop_buffer_pct })} />
           <NumberInput label="Filtro R:R min (0=off)" value={settings.perp_min_rr} step={0.1} onChange={(perp_min_rr) => patch({ perp_min_rr })} />
+          <NumberInput label="TP1 (× ATR)" value={settings.perp_tp1_atr_multiplier} step={0.1} onChange={(perp_tp1_atr_multiplier) => patch({ perp_tp1_atr_multiplier })} />
+          <NumberInput label="TP2 (× ATR)" value={settings.perp_tp2_atr_multiplier} step={0.1} onChange={(perp_tp2_atr_multiplier) => patch({ perp_tp2_atr_multiplier })} />
           <SelectInput label="Trailing ATR (adatta alla leva)" value={settings.perp_trailing_mode} onChange={(v) => patch({ perp_trailing_mode: v as 'largo' | 'stretto' })} options={[
             { value: 'largo', label: 'Largo — lascia correre' },
             { value: 'stretto', label: 'Stretto — blocca prima' },

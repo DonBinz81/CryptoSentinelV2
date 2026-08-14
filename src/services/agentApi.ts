@@ -345,6 +345,8 @@ export interface AgentMobileSettings {
   spot_sl_mode: string;
   perp_sl_mode: string;
   perp_min_rr: number;
+  perp_tp1_atr_multiplier: number;
+  perp_tp2_atr_multiplier: number;
   spot_structural_stop_lookback_candles: number;
   spot_structural_stop_buffer_pct: number;
   perp_structural_stop_lookback_candles: number;
