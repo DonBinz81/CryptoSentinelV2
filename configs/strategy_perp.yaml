@@ -6,6 +6,11 @@ perp:
   sl_mode: atr               # "atr" | "lowest"; lowest usa minimo/massimo strutturale
   structural_stop_lookback_candles: 20
   structural_stop_buffer_pct: 1.10 # long: minimo_20 -1.10%; short: massimo_20 +1.10%
+  # FIX-2: rapporto minimo TP1/SL per accettare un segnale (0 = filtro spento).
+  # Con sl_mode=atr il rapporto e' fisso a 3.125 e il filtro non scatta mai.
+  # Con sl_mode=lowest lo stop e' piu' largo: a 1.2 respinge ~92% dei segnali,
+  # a 0.6 e' il valore che massimizza i trade che arrivano a TP1 (vedi NOTE/16).
+  min_rr: 1.2
   # SL/TP ancorati all'entry via ATR(14): R:R controllato a prescindere dalla leva.
   atr_stop_multiplier: 0.8   # SL = entry ∓ 0.8×ATR
   tp1_atr_multiplier: 2.5    # TP1 = entry ± 2.5×ATR (R:R ~1.67)

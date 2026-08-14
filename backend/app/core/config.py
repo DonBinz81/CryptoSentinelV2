@@ -238,6 +238,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "sl_mode": "perp_sl_mode",
         "structural_stop_lookback_candles": "perp_structural_stop_lookback_candles",
         "structural_stop_buffer_pct": "perp_structural_stop_buffer_pct",
+        "min_rr": "perp_min_rr",
         "tp1_atr_multiplier": "perp_tp1_atr_multiplier",
         "tp2_atr_multiplier": "perp_tp2_atr_multiplier",
         "use_poc_for_tp2": "perp_use_poc_for_tp2",

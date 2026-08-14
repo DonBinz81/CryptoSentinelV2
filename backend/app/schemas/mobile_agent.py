@@ -32,6 +32,8 @@ class AgentMobileSettings(BaseModel):
     spot_structural_stop_buffer_pct: float = Field(default=1.10, ge=0.0, le=20.0)
     perp_structural_stop_lookback_candles: int = Field(default=20, ge=2, le=100)
     perp_structural_stop_buffer_pct: float = Field(default=1.10, ge=0.0, le=20.0)
+    # FIX-2: rapporto minimo TP1/SL per accettare un segnale (0 = filtro disattivo).
+    perp_min_rr: float = Field(default=1.2, ge=0.0, le=5.0)
     # Filtro shock BTC perp
     perp_trend_shock_enabled: bool = True
     perp_trend_shock_adx_threshold: float = Field(default=25.0, ge=10.0, le=60.0)
