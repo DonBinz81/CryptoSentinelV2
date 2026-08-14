@@ -1308,6 +1308,7 @@ const SetupPane: FC<{
   agentStatus: AgentStatus | null;
   saving: boolean;
   actionError: string;
+  dirty: boolean;
   onSave: () => void;
   onValidate: () => void;
   onKill: (state: KillSwitchState) => void;
@@ -1322,6 +1323,7 @@ const SetupPane: FC<{
   agentStatus,
   saving,
   actionError,
+  dirty,
   onSave,
   onValidate,
   onKill,
@@ -1718,8 +1720,17 @@ const SetupPane: FC<{
         </p>
       </section>
 
-      <button onClick={onSave} disabled={!adminToken || saving} className="w-full rounded-lg bg-accent-blue px-3 py-3 text-sm font-semibold text-white disabled:opacity-40">
-        {saving ? 'Saving...' : 'Save agent settings'}
+      {dirty && !saving && (
+        <p className="rounded-lg border border-accent-yellow/30 bg-accent-yellow/10 px-3 py-2 text-xs text-accent-yellow">
+          Modifiche non salvate — l'aggiornamento automatico è in pausa finché non salvi.
+        </p>
+      )}
+      <button
+        onClick={onSave}
+        disabled={!adminToken || saving}
+        className={`w-full rounded-lg px-3 py-3 text-sm font-semibold text-white disabled:opacity-40 ${dirty ? 'bg-accent-orange' : 'bg-accent-blue'}`}
+      >
+        {saving ? 'Salvataggio…' : dirty ? 'Salva le modifiche' : 'Salva impostazioni agente'}
       </button>
       {actionError && <p className="rounded-lg bg-accent-red/10 px-3 py-2 text-xs text-accent-red">{actionError}</p>}
     </div>
@@ -2147,6 +2158,16 @@ const AgentTab: FC<AgentTabProps> = ({
   const [tradeDetail, setTradeDetail] = useState<TradeDetail | null>(null);
   const detailTradeIdRef = useRef<string | null>(null);
   const [settings, setSettings] = useState<AgentMobileSettings>(agentCache.settings ?? defaultSettings);
+  // "Dirty": l'utente sta modificando il Setup e non ha ancora salvato. Il
+  // refresh periodico (45s) NON deve sovrascrivere le sue spunte con lo stato
+  // del server: prima di questo flag il pannello "tornava indietro" da solo.
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const settingsDirtyRef = useRef(false);
+  const handleSettingsChange = useCallback((next: AgentMobileSettings) => {
+    settingsDirtyRef.current = true;
+    setSettingsDirty(true);
+    setSettings(next);
+  }, []);
   const [execWallets, setExecWallets] = useState<ExecutionWalletsResponse | null>(agentCache.execWallets);
   const [claudeUsage, setClaudeUsage] = useState<ClaudeUsageView | null>(agentCache.claudeUsage);
   const [validation, setValidation] = useState<CredentialValidationResponse | null>(null);
@@ -2229,7 +2250,10 @@ const AgentTab: FC<AgentTabProps> = ({
         fetchSpotView().then(setSpot),
         fetchPerpView().then(setPerp),
         fetchGlobalView().then(setGlobal),
-        fetchAgentSettings().then((r) => setSettings(r.settings)),
+        fetchAgentSettings().then((r) => {
+          // Con modifiche in corso non salvate, la copia locale ha precedenza.
+          if (!settingsDirtyRef.current) setSettings(r.settings);
+        }),
         fetchEquityCurve(equityRangeRef.current).then(setEquity),
         fetchAgentDecisions().then(setDecisions),
         fetchAssetBreakdown().then(setAssetBreakdown),
@@ -2359,6 +2383,8 @@ const AgentTab: FC<AgentTabProps> = ({
     setActionError('');
     try {
       const response = await saveAgentSettings(settings, adminToken);
+      settingsDirtyRef.current = false;
+      setSettingsDirty(false);
       setSettings(response.settings);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Save failed');
@@ -2546,7 +2572,8 @@ const AgentTab: FC<AgentTabProps> = ({
       {pane === 'setup' && (
         <SetupPane
           settings={settings}
-          onSettings={setSettings}
+          onSettings={handleSettingsChange}
+          dirty={settingsDirty}
           adminToken={adminToken}
           onAdminToken={onAdminToken}
           validation={validation}
