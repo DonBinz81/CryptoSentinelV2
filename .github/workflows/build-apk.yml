@@ -79,6 +79,31 @@ jobs:
             echo "Secret mancanti per la build APK: ${missing[*]}"
             exit 1
           fi
+
+          # ---- GUARDIA CONTRO I CARATTERI INVISIBILI ----
+          # Un BOM UTF-8 (EF BB BF) in testa a un secret finisce dentro il bundle e
+          # produce un URL malformato: l'app compila, si installa, e fallisce OGNI
+          # chiamata senza un errore comprensibile. E' gia' successo (build v1.0.3):
+          # 'gh secret set' via pipe da PowerShell aggiunge il BOM. Usare --body.
+          # Qui la build si ferma invece di produrre un APK silenziosamente rotto.
+          sporchi=()
+          for nome in VITE_BACKEND_API_BASE_URL VITE_API_READ_TOKEN VITE_API_DEVICE_TOKEN VITE_API_ALERTS_TOKEN; do
+            valore="${!nome}"
+            primi3=$(printf '%s' "$valore" | od -An -N3 -tx1 | tr -d ' \n')
+            if [ "$primi3" = "efbbbf" ]; then
+              sporchi+=("$nome (BOM UTF-8 in testa)")
+            elif printf '%s' "$valore" | grep -qP '[\s]'; then
+              sporchi+=("$nome (spazi, tabulazioni o a capo)")
+            fi
+          done
+          if [ ${#sporchi[@]} -gt 0 ]; then
+            echo "::error::Secret con caratteri invisibili — l'app risulterebbe rotta:"
+            for s in "${sporchi[@]}"; do echo "  - $s"; done
+            echo "Ricaricali con: gh secret set NOME --body \"valore\"  (MAI con la pipe)"
+            exit 1
+          fi
+          echo "Secret verificati: nessun carattere invisibile."
+
           npm run build
 
       - name: Sync Capacitor assets in Android
