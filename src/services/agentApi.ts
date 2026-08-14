@@ -1,4 +1,4 @@
-import { backendRequest } from './http';
+import { BackendHttpError, backendRequest } from './http';
 
 export type KillSwitchState = 'running' | 'soft_stop' | 'hard_stop' | 'degraded';
 
@@ -462,6 +462,21 @@ function request<T>(
   options: { method?: 'GET' | 'PUT' | 'POST'; body?: unknown; token?: string; timeoutMs?: number } = {},
 ): Promise<T> {
   return backendRequest<T>(path, { ...options, label: 'Agent API' });
+}
+
+/**
+ * Verifica il token admin contro un endpoint privilegiato senza effetti
+ * collaterali. true = accettato, false = rifiutato (401/403); gli errori di
+ * rete vengono rilanciati: "backend irraggiungibile" non e' "token sbagliato".
+ */
+export async function verifyAdminToken(adminToken: string): Promise<boolean> {
+  try {
+    await request('/api/v1/notifications/devices', { token: adminToken, timeoutMs: 8000 });
+    return true;
+  } catch (err) {
+    if (err instanceof BackendHttpError && (err.status === 401 || err.status === 403)) return false;
+    throw err;
+  }
 }
 
 export function fetchAgentStatus(): Promise<AgentStatus> {

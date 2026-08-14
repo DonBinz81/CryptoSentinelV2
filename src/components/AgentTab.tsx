@@ -35,6 +35,7 @@ import {
   type PerpView,
   type SpotView,
   type TradeDetail,
+  verifyAdminToken,
 } from '../services/agentApi';
 import { hapticLight } from '../utils/haptics';
 
@@ -1332,6 +1333,24 @@ const SetupPane: FC<{
   const equityValue = Number(equityInput);
   const equityValid = equityInput.trim() !== '' && Number.isFinite(equityValue) && equityValue !== 0;
 
+  // Verifica del token contro il backend, con debounce sulla digitazione.
+  // Senza feedback il token "restava li'" senza dire se era stato accettato.
+  const [adminCheck, setAdminCheck] = useState<'idle' | 'checking' | 'valid' | 'invalid' | 'unreachable'>('idle');
+  useEffect(() => {
+    if (!adminToken) { setAdminCheck('idle'); return; }
+    setAdminCheck('checking');
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const ok = await verifyAdminToken(adminToken);
+        if (!cancelled) setAdminCheck(ok ? 'valid' : 'invalid');
+      } catch {
+        if (!cancelled) setAdminCheck('unreachable');
+      }
+    }, 600);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [adminToken]);
+
   return (
     <div className="space-y-4">
       <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-3">
@@ -1344,6 +1363,23 @@ const SetupPane: FC<{
           autoComplete="off"
           className="w-full rounded-lg border border-dark-600 bg-dark-900 px-3 py-2 text-sm text-white outline-none focus:border-accent-blue"
         />
+        {adminCheck !== 'idle' && (
+          <p className={`text-xs flex items-center gap-1.5 ${
+            adminCheck === 'valid' ? 'text-accent-green'
+            : adminCheck === 'invalid' ? 'text-accent-red'
+            : 'text-gray-500'
+          }`}>
+            {adminCheck === 'checking' && (
+              <>
+                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>
+                Verifica del token…
+              </>
+            )}
+            {adminCheck === 'valid' && '✓ Admin attivo — funzioni privilegiate sbloccate'}
+            {adminCheck === 'invalid' && '✗ Token non valido: il backend lo rifiuta'}
+            {adminCheck === 'unreachable' && 'Backend non raggiungibile — impossibile verificare ora'}
+          </p>
+        )}
       </section>
 
       <section className="rounded-xl border border-accent-red/20 bg-dark-800 px-4 py-4 space-y-3">
