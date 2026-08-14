@@ -15,11 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-function formatPrice(price: number): string {
-  if (price >= 1000) return price.toLocaleString('it-IT', { maximumFractionDigits: 0 });
-  if (price >= 1) return price.toFixed(2);
-  return price.toFixed(6);
-}
+import { formatPrice } from '../utils/format';
 
 function parsePrice(input: string): number {
   let s = input.trim();

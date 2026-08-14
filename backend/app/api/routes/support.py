@@ -204,10 +204,14 @@ async def list_user_tickets(
 async def user_notifications(
     session: SessionDep,
     _: ReadAccessDep,
+    device_id: str | None = Query(default=None, min_length=1, max_length=128),
 ) -> SupportNotificationResponse:
+    # device_id opzionale per retrocompatibilita' con le build che non lo
+    # inviano; quando presente, il badge conta solo i ticket del dispositivo.
     count, latest = await SupportRepository(session).unread_count(
         user_id=str(DEFAULT_SINGLE_USER_ID),
         viewer="user",
+        device_id=device_id,
     )
     return _notification_response(count, latest)
 
@@ -251,10 +255,12 @@ async def mark_user_ticket_read(
 async def mark_user_tickets_read(
     session: SessionDep,
     _: ReadAccessDep,
+    device_id: str | None = Query(default=None, min_length=1, max_length=128),
 ) -> SupportReadAllResponse:
     updated = await SupportRepository(session).mark_all_seen(
         user_id=str(DEFAULT_SINGLE_USER_ID),
         viewer="user",
+        device_id=device_id,
     )
     return SupportReadAllResponse(updated=updated)
 

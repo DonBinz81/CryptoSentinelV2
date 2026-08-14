@@ -1,6 +1,7 @@
 import type { FC } from 'react';
 import type { FavAlertData } from '../hooks/useFavoritePriceAlerts';
 import type { Currency } from '../hooks/useCurrency';
+import { formatPrice } from '../utils/format';
 
 interface Props {
   alert: FavAlertData;
@@ -11,12 +12,7 @@ interface Props {
 
 const SYMBOL: Record<Currency, string> = { usd: '$', eur: '€', btc: '₿' };
 
-function fmt(v: number, currency: Currency): string {
-  if (currency === 'btc') return v.toFixed(8);
-  if (v >= 1000) return v.toLocaleString('it-IT', { maximumFractionDigits: 0 });
-  if (v >= 1) return v.toFixed(2);
-  return v.toFixed(6);
-}
+const fmt = formatPrice;
 
 const FavMovePopup: FC<Props> = ({ alert, currency, onClose, onDismiss }) => {
   const sym = SYMBOL[currency];

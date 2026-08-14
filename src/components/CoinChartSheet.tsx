@@ -3,6 +3,7 @@ import { createChart, ColorType, LineStyle, CrosshairMode, LineSeries, Candlesti
 import type { ISeriesApi, SeriesType, UTCTimestamp } from 'lightweight-charts';
 import type { Coin, PriceAlert, RangeAlert } from '../types';
 import type { Currency } from '../hooks/useCurrency';
+import { formatPrice } from '../utils/format';
 import { useCoinChart, type LinePoint, type CandlePoint } from '../hooks/useCoinChart';
 import { openExternalUrl } from '../utils/notifications';
 import { fetchMarkets } from '../services/marketData';
@@ -52,13 +53,7 @@ type TF = '1g' | '7g' | '30g' | '1a';
 
 const SYMBOL: Record<Currency, string> = { usd: '$', eur: '€', btc: '₿' };
 
-function fmt(v: number | null | undefined, currency: Currency): string {
-  if (v == null || !isFinite(v)) return '—';
-  if (currency === 'btc') return v.toFixed(8);
-  if (v >= 1000) return v.toLocaleString('it-IT', { maximumFractionDigits: 0 });
-  if (v >= 1) return v.toFixed(2);
-  return v.toFixed(6);
-}
+const fmt = formatPrice;
 
 const CoinChartSheet: FC<Props> = ({
   coin, alerts, rangeAlerts, currency,

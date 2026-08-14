@@ -163,9 +163,10 @@ class SupportRepository:
         *,
         user_id: str,
         viewer: str,
+        device_id: str | None = None,
     ) -> int:
         now = datetime.now(UTC)
-        tickets = await self.list_tickets(user_id=user_id, admin=(viewer == "admin"))
+        tickets = await self.list_tickets(user_id=user_id, device_id=device_id, admin=(viewer == "admin"))
         for ticket in tickets:
             if viewer == "admin":
                 ticket.admin_last_seen_at = now
@@ -180,7 +181,11 @@ class SupportRepository:
         *,
         user_id: str,
         viewer: str,
+        device_id: str | None = None,
     ) -> tuple[int, SupportTicket | None]:
+        # device_id: la vista utente e' per-dispositivo (come list/get ticket).
+        # Senza questo filtro il badge contava ticket di ALTRI device dello
+        # stesso utente, che il dettaglio poi non trovava (404 cross-device).
         seen_col = SupportTicket.admin_last_seen_at if viewer == "admin" else SupportTicket.user_last_seen_at
         sender = "user" if viewer == "admin" else "admin"
         stmt = (
@@ -191,6 +196,8 @@ class SupportRepository:
             .where(SupportMessage.sender_type == sender)
             .where(or_(seen_col.is_(None), SupportMessage.created_at > seen_col))
         )
+        if device_id is not None:
+            stmt = stmt.where(SupportTicket.device_id == device_id)
         count = int((await self._session.execute(stmt)).scalar_one() or 0)
         if count <= 0:
             return 0, None
@@ -205,6 +212,8 @@ class SupportRepository:
             .order_by(SupportMessage.created_at.desc())
             .limit(1)
         )
+        if device_id is not None:
+            latest_stmt = latest_stmt.where(SupportTicket.device_id == device_id)
         latest = (await self._session.execute(latest_stmt)).scalar_one_or_none()
         return count, latest
 

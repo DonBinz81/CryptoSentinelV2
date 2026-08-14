@@ -44,7 +44,7 @@ const MICRO_PRICE_FULL_THRESHOLD = 0.000001;
 
 const fmtUsd = (value: string | number | null | undefined) => {
   const n = Number(value ?? 0);
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const fmtMicroPrice = (value: number, maxDecimals = 18): string => {
@@ -62,8 +62,8 @@ const fmtPrice = (value: string | number | null | undefined): string => {
   const n = Number(value);
   if (!Number.isFinite(n) || value == null || value === '') return '$--';
   if (n === 0) return '$0';
-  if (n >= 1000) return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
-  if (n >= 1)    return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  if (n >= 1000) return `$${n.toLocaleString('it-IT', { maximumFractionDigits: 2 })}`;
+  if (n >= 1)    return `$${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
   return fmtSubDollarPrice(n);
 };
 
@@ -75,7 +75,7 @@ const fmtPriceFull = (value: string | number | null | undefined): string => {
   if (Math.abs(n) < 1) return fmtSubDollarPrice(n);
   const s = String(value);
   const dotIdx = s.indexOf('.');
-  const intStr = Math.trunc(Math.abs(n)).toLocaleString('en-US');
+  const intStr = Math.trunc(Math.abs(n)).toLocaleString('it-IT');
   const sign = n < 0 ? '-' : '';
   if (dotIdx === -1) return `${sign}$${intStr}`;
   const decStr = s.slice(dotIdx + 1).slice(0, 8).replace(/0+$/, '');
@@ -2236,15 +2236,25 @@ const AgentTab: FC<AgentTabProps> = ({
   }, [refresh]);
 
   useEffect(() => {
+    // document.hidden: in background i tick bruciano radio/batteria per dati che
+    // nessuno guarda; al rientro in foreground il listener qui sotto recupera.
     const timer = window.setInterval(() => {
-      refresh();
+      if (!document.hidden) refresh();
     }, AGENT_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refresh]);
 
   // Refresh leggero: aggiorna solo le viste principali e salta se un ciclo e' gia' in corso.
   useEffect(() => {
     const timer = window.setInterval(() => {
+      if (document.hidden) return;
       if (refreshInFlightRef.current) return;
       if (fastRefreshInFlightRef.current) return;
       fastRefreshInFlightRef.current = true;

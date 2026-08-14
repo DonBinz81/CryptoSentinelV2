@@ -118,11 +118,7 @@ interface Props {
   onEditRange: (id: string, minPrice: number, maxPrice: number, note?: string) => void;
 }
 
-function formatPrice(price: number): string {
-  if (price >= 1000) return price.toLocaleString('it-IT', { maximumFractionDigits: 0 });
-  if (price >= 1) return price.toFixed(2);
-  return price.toFixed(6);
-}
+import { formatPrice } from '../utils/format';
 
 function parseNum(s: string): number {
   let clean = s.trim().replace(/[^\d.,-]/g, '');
