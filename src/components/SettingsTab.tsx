@@ -1122,7 +1122,7 @@ const SettingsTab: FC<Props> = ({
           </div>
           <div className="px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-gray-400">Sviluppatore</span>
-            <span className="text-sm text-white font-medium">Iridexx</span>
+            <span className="text-sm text-white font-medium">Iridexx - DonBinz</span>
           </div>
           <a
             href="https://www.coingecko.com"
