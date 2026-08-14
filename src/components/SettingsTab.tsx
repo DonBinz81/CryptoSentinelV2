@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type FC } from 'react';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { ALERTS_TOKEN, BACKEND_URL, DEVICE_TOKEN, READ_TOKEN } from '../services/http';
 import { openNotificationSettings, getRegistrationLogs } from '../utils/notifications';
 import { openBatterySettings } from '../utils/energySaving';
 import { checkForUpdates, downloadAndInstall, openDownloadsFolder, getDevBuildInfo, mergeToMain, APK_PAGES_URL, type UpdateResult, type DevBuildInfo } from '../utils/update';
@@ -85,6 +86,7 @@ interface Props {
   dlState: 'idle' | 'downloading' | 'done' | 'error';
   onDownloadStart: () => void;
   onDownloadDone: () => void;
+  onDownloadError: () => void;
   currency: Currency;
   onCurrencyChange: (c: Currency) => void;
   sliderRange: number;
@@ -113,6 +115,7 @@ const SettingsTab: FC<Props> = ({
   dlState,
   onDownloadStart,
   onDownloadDone,
+  onDownloadError,
   currency,
   onCurrencyChange,
   sliderRange,
@@ -214,10 +217,10 @@ const SettingsTab: FC<Props> = ({
 
   const handleDiagnostic = async () => {
     setDiagState('checking');
-    const rawUrl = (import.meta.env.VITE_BACKEND_API_BASE_URL as string | undefined)?.replace(/\/+$/, '') ?? null;
-    const deviceTokenSet = !!(import.meta.env.VITE_API_DEVICE_TOKEN as string | undefined);
-    const alertsTokenSet = !!(import.meta.env.VITE_API_ALERTS_TOKEN as string | undefined);
-    const readTokenSet = !!(import.meta.env.VITE_API_READ_TOKEN as string | undefined);
+    const rawUrl = BACKEND_URL || null;
+    const deviceTokenSet = !!DEVICE_TOKEN;
+    const alertsTokenSet = !!ALERTS_TOKEN;
+    const readTokenSet = !!READ_TOKEN;
     let backendReachable = false;
     let backendLatencyMs: number | null = null;
     let deviceCount: number | null = null;
@@ -247,7 +250,7 @@ const SettingsTab: FC<Props> = ({
           error = msg;
         }
       }
-      const readToken = (import.meta.env.VITE_API_READ_TOKEN as string | undefined) ?? '';
+      const readToken = READ_TOKEN;
       if (backendReachable && readToken) {
         try {
           const rs = await CapacitorHttp.request({
@@ -527,8 +530,17 @@ const SettingsTab: FC<Props> = ({
 
   const handleDownload = async (url: string) => {
     onDownloadStart();
-    await downloadAndInstall(url);
-    onDownloadDone();
+    try {
+      await downloadAndInstall(url);
+      // Su Android il plugin risolve all'ENQUEUE nel DownloadManager, non al
+      // completamento: 'done'/'error' arrivano dall'evento nativo
+      // downloadComplete (registrato in App.tsx). Segnare 'done' qui
+      // mostrerebbe la spunta verde mentre il download e' ancora in corso.
+      // Solo sul web (window.open) la risoluzione coincide con la consegna.
+      if (!Capacitor.isNativePlatform()) onDownloadDone();
+    } catch {
+      onDownloadError();
+    }
   };
 
   const handleClearFavorites = () => {
@@ -597,7 +609,7 @@ const SettingsTab: FC<Props> = ({
 
           {updateState === 'available' ? (
             <button
-              onClick={() => handleDownload(APK_PAGES_URL)}
+              onClick={() => handleDownload(updateInfo?.downloadUrl ?? APK_PAGES_URL)}
               disabled={dlState === 'downloading'}
               className="w-full py-2.5 bg-accent-blue text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60"
             >
@@ -1402,12 +1414,14 @@ const SettingsTab: FC<Props> = ({
                     )}
                   </div>
                   {dlState !== 'idle' && (
-                    <div className={`rounded-lg px-3 py-2.5 flex items-center justify-between gap-3 ${dlState === 'done' ? 'bg-accent-green/10 border border-accent-green/20' : 'bg-accent-blue/10 border border-accent-blue/20'}`}>
+                    <div className={`rounded-lg px-3 py-2.5 flex items-center justify-between gap-3 ${dlState === 'done' ? 'bg-accent-green/10 border border-accent-green/20' : dlState === 'error' ? 'bg-accent-red/10 border border-accent-red/20' : 'bg-accent-blue/10 border border-accent-blue/20'}`}>
                       <div className="flex items-center gap-2 min-w-0">
-                        {dlState === 'downloading' ? (<svg className="w-4 h-4 text-accent-blue flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>) : (<span className="text-accent-green text-sm flex-shrink-0">✓</span>)}
-                        <p className="text-xs text-gray-300 truncate">{dlState === 'downloading' ? 'Download in corso…' : 'Download completato'}</p>
+                        {dlState === 'downloading' ? (<svg className="w-4 h-4 text-accent-blue flex-shrink-0 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>) : dlState === 'error' ? (<span className="text-accent-red text-sm flex-shrink-0">✗</span>) : (<span className="text-accent-green text-sm flex-shrink-0">✓</span>)}
+                        <p className="text-xs text-gray-300 truncate">{dlState === 'downloading' ? 'Download in corso…' : dlState === 'error' ? 'Download fallito — riprova' : 'Download completato'}</p>
                       </div>
-                      <button onClick={openDownloadsFolder} className="flex-shrink-0 text-xs text-accent-blue underline underline-offset-2 whitespace-nowrap">📁 Apri Download</button>
+                      {dlState !== 'error' && (
+                        <button onClick={openDownloadsFolder} className="flex-shrink-0 text-xs text-accent-blue underline underline-offset-2 whitespace-nowrap">📁 Apri Download</button>
+                      )}
                     </div>
                   )}
                   <div className="border-t border-dark-600 pt-3 space-y-2">
