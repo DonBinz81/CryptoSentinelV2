@@ -1,5 +1,6 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { getDeviceId } from '../utils/deviceId';
+import { BACKEND_URL, backendRequest } from './http';
 
 export type TicketCategory = 'bug' | 'alert' | 'market' | 'agent' | 'wallet' | 'other';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
@@ -44,50 +45,16 @@ export interface SupportNotificationResponse {
   latest_ticket: SupportTicketSummary | null;
 }
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_API_BASE_URL as string | undefined)?.replace(/\/+$/, '');
-const READ_TOKEN = import.meta.env.VITE_API_READ_TOKEN as string | undefined;
-
-function requireBackend(): string {
-  if (!BACKEND_URL) throw new Error('Backend URL is not configured');
-  return BACKEND_URL;
-}
-
-function authHeaders(token = READ_TOKEN): Record<string, string> {
-  if (!token) throw new Error('API token is not configured');
-  return { Authorization: `Bearer ${token}`, Accept: 'application/json' };
-}
-
-async function request<T>(
+function request<T>(
   path: string,
   options: { method?: 'GET' | 'POST' | 'PATCH'; body?: unknown; token?: string } = {},
 ): Promise<T> {
-  const method = options.method ?? 'GET';
-  const url = `${requireBackend()}${path}`;
-  const headers = {
-    ...authHeaders(options.token),
-    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-  };
-  if (Capacitor.isNativePlatform()) {
-    const response = await CapacitorHttp.request({
-      method,
-      url,
-      headers,
-      data: options.body,
-      connectTimeout: 10_000,
-      readTimeout: 20_000,
-    });
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(`Support API: ${response.status}`);
-    }
-    return response.data as T;
-  }
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+  return backendRequest<T>(path, {
+    ...options,
+    label: 'Support API',
+    connectTimeoutMs: 10_000,
+    timeoutMs: 20_000,
   });
-  if (!response.ok) throw new Error(`Support API: ${response.status}`);
-  return await response.json() as T;
 }
 
 export function supportDeviceId(): string {
@@ -113,7 +80,10 @@ export function listSupportTickets(): Promise<{ items: SupportTicketSummary[]; t
 }
 
 export function getSupportNotifications(): Promise<SupportNotificationResponse> {
-  return request('/api/v1/support/notifications');
+  // device_id: il badge deve contare solo i ticket di QUESTO dispositivo,
+  // come gia' fanno lista e dettaglio — altrimenti conta ticket che il
+  // dettaglio poi non trova (404 cross-device).
+  return request(`/api/v1/support/notifications?device_id=${encodeURIComponent(getDeviceId())}`);
 }
 
 export function getSupportTicket(ticketId: string): Promise<SupportTicketDetail> {
@@ -127,7 +97,7 @@ export function markSupportTicketRead(ticketId: string): Promise<SupportTicketDe
 }
 
 export function markAllSupportTicketsRead(): Promise<{ updated: number }> {
-  return request('/api/v1/support/tickets/read-all', {
+  return request(`/api/v1/support/tickets/read-all?device_id=${encodeURIComponent(getDeviceId())}`, {
     method: 'POST',
   });
 }

@@ -1,7 +1,8 @@
-import { Capacitor, CapacitorHttp, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { getDeviceId } from './deviceId';
+import { ALERTS_TOKEN, BACKEND_URL, DEVICE_TOKEN, BackendHttpError, backendRequest } from '../services/http';
 
 interface AppSettingsPlugin {
   openNotifications(): Promise<void>;
@@ -11,9 +12,6 @@ interface AppSettingsPlugin {
 }
 
 const AppSettings = registerPlugin<AppSettingsPlugin>('AppSettings');
-const BACKEND_API_BASE_URL = import.meta.env.VITE_BACKEND_API_BASE_URL as string | undefined;
-const API_DEVICE_TOKEN = import.meta.env.VITE_API_DEVICE_TOKEN as string | undefined;
-const API_ALERTS_TOKEN = import.meta.env.VITE_API_ALERTS_TOKEN as string | undefined;
 
 const PENDING_TOKEN_KEY = 'cs_push_token_pending';
 const LAST_VERIFIED_KEY = 'cs_push_last_verified';
@@ -145,35 +143,25 @@ export function dismissFavoritePushAlert(coinId: string): void {
 }
 
 export async function refreshPendingFavoritePushAlerts(): Promise<void> {
-  const baseUrl = BACKEND_API_BASE_URL?.replace(/\/+$/, '');
-  if (!baseUrl || !API_ALERTS_TOKEN) return;
+  if (!BACKEND_URL || !ALERTS_TOKEN) return;
   try {
-    const response = await CapacitorHttp.request({
-      method: 'GET',
-      url: `${baseUrl}/api/v1/alerts/pending-favorites?device_id=${encodeURIComponent(getDeviceId())}`,
-      headers: { Authorization: `Bearer ${API_ALERTS_TOKEN}` },
-      connectTimeout: 6000,
-      readTimeout: 6000,
-    });
-    if (response.status < 200 || response.status >= 300) return;
-    const items = (response.data as { items?: Record<string, unknown>[] })?.items ?? [];
-    for (const item of items) emitFavPush({ ...item, type: 'fav_alert' }, false);
+    const data = await backendRequest<{ items?: Record<string, unknown>[] }>(
+      `/api/v1/alerts/pending-favorites?device_id=${encodeURIComponent(getDeviceId())}`,
+      { token: ALERTS_TOKEN, label: 'Alerts API', timeoutMs: 6000, connectTimeoutMs: 6000 },
+    );
+    for (const item of data?.items ?? []) emitFavPush({ ...item, type: 'fav_alert' }, false);
   } catch {
     // The local persisted badge remains available while the backend is unreachable.
   }
 }
 
 async function dismissFavoritePushAlertOnBackend(coinId: string): Promise<void> {
-  const baseUrl = BACKEND_API_BASE_URL?.replace(/\/+$/, '');
-  if (!baseUrl || !API_ALERTS_TOKEN) return;
+  if (!BACKEND_URL || !ALERTS_TOKEN) return;
   try {
-    await CapacitorHttp.request({
-      method: 'DELETE',
-      url: `${baseUrl}/api/v1/alerts/pending-favorites/${encodeURIComponent(coinId)}?device_id=${encodeURIComponent(getDeviceId())}`,
-      headers: { Authorization: `Bearer ${API_ALERTS_TOKEN}` },
-      connectTimeout: 6000,
-      readTimeout: 6000,
-    });
+    await backendRequest(
+      `/api/v1/alerts/pending-favorites/${encodeURIComponent(coinId)}?device_id=${encodeURIComponent(getDeviceId())}`,
+      { method: 'DELETE', token: ALERTS_TOKEN, label: 'Alerts API', timeoutMs: 6000, connectTimeoutMs: 6000 },
+    );
   } catch {
     // Best effort: a later backend refresh may restore the badge until acknowledgement succeeds.
   }
@@ -182,20 +170,18 @@ async function dismissFavoritePushAlertOnBackend(coinId: string): Promise<void> 
 // ── Push token registration ───────────────────────────────────────────────────
 
 async function sendPushTokenToBackend(token: string): Promise<boolean> {
-  const baseUrl = BACKEND_API_BASE_URL?.replace(/\/+$/, '');
-  if (!baseUrl || !API_DEVICE_TOKEN) {
+  if (!BACKEND_URL || !DEVICE_TOKEN) {
     logReg('⚠️ env non configurato, skip registrazione');
     return false;
   }
   try {
-    const r = await CapacitorHttp.request({
+    await backendRequest('/api/v1/notifications/devices', {
       method: 'POST',
-      url: `${baseUrl}/api/v1/notifications/devices`,
-      headers: {
-        Authorization: `Bearer ${API_DEVICE_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      data: {
+      token: DEVICE_TOKEN,
+      label: 'Device API',
+      timeoutMs: 8000,
+      connectTimeoutMs: 8000,
+      body: {
         token,
         platform: 'android',
         device_id: getDeviceId(),
@@ -204,21 +190,17 @@ async function sendPushTokenToBackend(token: string): Promise<boolean> {
         display_name: localStorage.getItem(SUPPORT_DISPLAY_NAME_KEY) ?? undefined,
         locale: navigator.language,
       },
-      connectTimeout: 8000,
-      readTimeout: 8000,
     });
-    if (r.status >= 200 && r.status < 300) {
-      localStorage.removeItem(PENDING_TOKEN_KEY);
-      localStorage.setItem(LAST_VERIFIED_KEY, String(Date.now()));
-      logReg(`✓ token registrato (status ${r.status})`);
-      return true;
-    }
-    logReg(`✗ backend ha risposto ${r.status}, token salvato per retry`);
-    localStorage.setItem(PENDING_TOKEN_KEY, token);
-    return false;
+    localStorage.removeItem(PENDING_TOKEN_KEY);
+    localStorage.setItem(LAST_VERIFIED_KEY, String(Date.now()));
+    logReg('✓ token registrato');
+    return true;
   } catch (e) {
-    const msg = (e as Error).message ?? 'errore sconosciuto';
-    logReg(`✗ errore rete — ${msg} — token salvato per retry`);
+    if (e instanceof BackendHttpError) {
+      logReg(`✗ backend ha risposto ${e.status}, token salvato per retry`);
+    } else {
+      logReg(`✗ errore rete — ${(e as Error).message ?? 'errore sconosciuto'} — token salvato per retry`);
+    }
     localStorage.setItem(PENDING_TOKEN_KEY, token);
     return false;
   }
@@ -236,7 +218,7 @@ function scheduleRetry(token: string, attempt = 0): void {
 }
 
 async function registerRemotePushToken(): Promise<void> {
-  if (pushRegistrationStarted || !BACKEND_API_BASE_URL || !API_DEVICE_TOKEN) return;
+  if (pushRegistrationStarted || !BACKEND_URL || !DEVICE_TOKEN) return;
   pushRegistrationStarted = true;
   logReg('🚀 bootstrap push avviato');
 

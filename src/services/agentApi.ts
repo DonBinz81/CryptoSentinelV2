@@ -1,7 +1,4 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
-
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_API_BASE_URL as string | undefined)?.replace(/\/+$/, '');
-const READ_TOKEN = import.meta.env.VITE_API_READ_TOKEN as string | undefined;
+import { backendRequest } from './http';
 
 export type KillSwitchState = 'running' | 'soft_stop' | 'hard_stop' | 'degraded';
 
@@ -460,63 +457,11 @@ export interface ExecutionWalletsResponse {
   wallets: ExecutionWalletProviderView[];
 }
 
-function requireBackend(): string {
-  if (!BACKEND_URL) throw new Error('Backend URL is not configured');
-  if (!READ_TOKEN) throw new Error('Read token is not configured');
-  return BACKEND_URL;
-}
-
-function authHeaders(token = READ_TOKEN): Record<string, string> {
-  if (!token) throw new Error('API token is not configured');
-  return { Authorization: `Bearer ${token}`, Accept: 'application/json' };
-}
-
-async function request<T>(
+function request<T>(
   path: string,
   options: { method?: 'GET' | 'PUT' | 'POST'; body?: unknown; token?: string; timeoutMs?: number } = {},
 ): Promise<T> {
-  const method = options.method ?? 'GET';
-  const url = `${requireBackend()}${path}`;
-  const timeoutMs = options.timeoutMs ?? 30_000;
-  const headers = {
-    ...authHeaders(options.token),
-    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-  };
-
-  if (Capacitor.isNativePlatform()) {
-    const response = await CapacitorHttp.request({
-      method,
-      url,
-      headers,
-      data: options.body,
-      connectTimeout: Math.min(12_000, timeoutMs),
-      readTimeout: timeoutMs,
-    });
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(`Agent API: ${response.status}`);
-    }
-    return response.data as T;
-  }
-
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Agent API: ${response.status}`);
-    return await response.json() as T;
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('Agent API: timeout');
-    }
-    throw err;
-  } finally {
-    window.clearTimeout(timer);
-  }
+  return backendRequest<T>(path, { ...options, label: 'Agent API' });
 }
 
 export function fetchAgentStatus(): Promise<AgentStatus> {

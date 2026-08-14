@@ -64,8 +64,10 @@ export interface ProviderSelectionResponse {
   selection_scope: 'runtime_state';
 }
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_API_BASE_URL as string | undefined)?.replace(/\/+$/, '');
-const READ_TOKEN = import.meta.env.VITE_API_READ_TOKEN as string | undefined;
+// Config condivisa: unica fonte per URL e token (vedi services/http.ts).
+// Il wrapper request() qui sotto resta locale perche' aggiunge diagnostica
+// (X-Request-ID, recordMarketDataDiagnostic) che gli altri servizi non hanno.
+import { BACKEND_URL, READ_TOKEN } from './http';
 
 function requireBackend(): string {
   if (!BACKEND_URL) throw new Error('Backend market data URL is not configured');
