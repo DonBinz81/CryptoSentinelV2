@@ -315,7 +315,55 @@ export async function initNotifications(): Promise<void> {
     sound: 'default',
     visibility: 1,
   });
+  await LocalNotifications.createChannel({
+    id: 'app_updates',
+    name: 'Aggiornamenti app',
+    description: 'Nuove versioni disponibili',
+    importance: 3, // default: niente vibrazione/heads-up, ma badge sul launcher
+    vibration: false,
+    visibility: 1,
+  });
   await registerRemotePushToken();
+}
+
+const UPDATE_NOTIFIED_KEY = 'cs_update_notified_build';
+const UPDATE_NOTIF_ID = 910_001;
+
+/**
+ * Notifica locale "aggiornamento disponibile": e' cio' che fa comparire il
+ * pallino/badge sull'icona dell'app nel launcher Android — il banner interno
+ * si vede solo ad app aperta. Una sola notifica per build (deduplicata via
+ * localStorage), sostituita se arriva una build successiva (stesso id).
+ */
+export async function notifyUpdateAvailable(buildNumber: string | null): Promise<void> {
+  if (!Capacitor.isNativePlatform() || !buildNumber) return;
+  try {
+    if (localStorage.getItem(UPDATE_NOTIFIED_KEY) === buildNumber) return;
+    const perm = await LocalNotifications.checkPermissions();
+    if (perm.display !== 'granted') return;
+    await LocalNotifications.schedule({
+      notifications: [{
+        id: UPDATE_NOTIF_ID,
+        channelId: 'app_updates',
+        title: 'Aggiornamento disponibile',
+        body: `CryptoSentinelV2 AI build #${buildNumber} è pronta: apri l'app per installarla.`,
+        smallIcon: 'ic_notification',
+        iconColor: '#F7931A',
+        autoCancel: true,
+      }],
+    });
+    localStorage.setItem(UPDATE_NOTIFIED_KEY, buildNumber);
+  } catch {
+    // La notifica è cosmetica: un errore qui non deve toccare il flusso update.
+  }
+}
+
+/** Rimuove la notifica di update (chiamare quando l'update e' installato o ignorato). */
+export async function clearUpdateNotification(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: UPDATE_NOTIF_ID }] });
+  } catch { /* best effort */ }
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermission> {

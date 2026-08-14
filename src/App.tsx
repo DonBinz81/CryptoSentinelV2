@@ -7,9 +7,11 @@ import { useAlerts } from './hooks/useAlerts';
 import { useRangeAlerts } from './hooks/useRangeAlerts';
 import { useCurrency } from './hooks/useCurrency';
 import {
+  clearUpdateNotification,
   dismissFavoritePushAlert,
   getNotificationPermission,
   initNotifications,
+  notifyUpdateAvailable,
   refreshPendingFavoritePushAlerts,
   subscribeFavoritePushAlerts,
   syncFavAlertsNative,
@@ -144,6 +146,7 @@ export default function App() {
   }, [availableUpdate]);
 
   const handleUpdateDone = useCallback(() => {
+    void clearUpdateNotification();
     setAvailableUpdate(null);
     setDlState('idle');
     localStorage.removeItem('cs_snoozed_build');
@@ -157,14 +160,22 @@ export default function App() {
     lastUpdateCheckRef.current = Date.now();
     try {
       const result = await checkForUpdates(__APP_BUILD_NUMBER__);
-      if (result.available) setAvailableUpdate(result);
+      if (result.available) {
+        setAvailableUpdate(result);
+        // Notifica locale: fa comparire il pallino sull'icona nel launcher,
+        // cosi' l'aggiornamento si vede anche senza aprire l'app.
+        void notifyUpdateAvailable(result.buildNumber);
+      }
     } catch {
       // Rete non ancora pronta (primo avvio post-installazione): riprova dopo 15s
       lastUpdateCheckRef.current = 0;
       setTimeout(async () => {
         try {
           const result = await checkForUpdates(__APP_BUILD_NUMBER__);
-          if (result.available) setAvailableUpdate(result);
+          if (result.available) {
+            setAvailableUpdate(result);
+            void notifyUpdateAvailable(result.buildNumber);
+          }
         } catch { /* silent */ }
       }, 15_000);
     }
