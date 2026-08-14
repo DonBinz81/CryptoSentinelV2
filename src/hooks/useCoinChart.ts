@@ -44,10 +44,16 @@ export function useCoinChart(
               close: bar.close,
             });
           }
+          // Il ramo nativo di CapacitorHttp non supporta l'abort: la richiesta
+          // vecchia arriva comunque. Senza questa guardia due cambi timeframe
+          // ravvicinati sono una corsa e la risposta piu' lenta (vecchia)
+          // sovrascriverebbe i dati del timeframe selezionato.
+          if (ctrl.signal.aborted) return;
           // Always set both so switching mode is instant with no re-fetch.
           setLineData(line);
           setCandleData(candles);
         } catch (e) {
+          if (ctrl.signal.aborted) return;
           if ((e as Error).name !== 'AbortError') setError(true);
         } finally {
           if (!ctrl.signal.aborted) setLoading(false);
