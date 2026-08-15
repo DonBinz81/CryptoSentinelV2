@@ -191,6 +191,7 @@ const defaultSettings: AgentMobileSettings = {
   perp_trailing_pnl_pct: 0,
   perp_protection_mode: 'trailing' as const,
   perp_profit_lock_steps: [[0.6, 0.25], [0.8, 0.5], [0.95, 0.75]] as Array<[number, number]>,
+  perp_breakeven_min_profit_usd: 0,
   perp_tp1_close_pct: 70,
   perp_time_stop_hours: 8,
   perp_fee_mode: 'taker' as const,
@@ -1537,6 +1538,14 @@ const SetupPane: FC<{
             { value: 'tp1', label: 'Solo dopo TP1' },
           ]}
         />
+        {settings.perp_breakeven_enabled && (
+          <NumberInput
+            label="BE profitto min $ (0=solo costi)"
+            value={settings.perp_breakeven_min_profit_usd}
+            step={0.05}
+            onChange={(perp_breakeven_min_profit_usd) => patch({ perp_breakeven_min_profit_usd: Math.max(0, perp_breakeven_min_profit_usd) })}
+          />
+        )}
         <SelectInput
           label="Stop Loss Spot"
           value={settings.spot_sl_mode}

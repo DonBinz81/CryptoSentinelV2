@@ -26,6 +26,9 @@ class AgentMobileSettings(BaseModel):
     perp_time_stop_enabled: bool = False
     spot_breakeven_mode: str = Field(default="atr", pattern="^(atr|tp1)$")
     perp_breakeven_mode: str = Field(default="atr", pattern="^(atr|tp1)$")
+    # Profitto minimo fisso ($) del residuo chiuso a breakeven: lo stop BE viene
+    # piazzato a entry ± (N$ + fee residue)/size. 0 = solo copertura costi (storico).
+    perp_breakeven_min_profit_usd: float = Field(default=0.0, ge=0.0, le=50.0)
     spot_sl_mode: str = Field(default="atr", pattern="^(atr|lowest)$")
     perp_sl_mode: str = Field(default="atr", pattern="^(atr|lowest)$")
     spot_structural_stop_lookback_candles: int = Field(default=20, ge=2, le=100)

@@ -639,6 +639,8 @@ class Settings(BaseSettings):
     # con leva può cadere oltre i TP: in quel caso non scatta (i TP chiudono prima)
     # e resta valida la copertura fee andata+ritorno. 0 = disattivato.
     perp_breakeven_buffer_pct: float = Field(default=0.1, alias="PERP_BREAKEVEN_BUFFER_PCT")
+    # Profitto minimo fisso ($) a breakeven (0 = solo copertura costi).
+    perp_breakeven_min_profit_usd: float = Field(default=0.0, alias="PERP_BREAKEVEN_MIN_PROFIT_USD")
     # Trailing ATR dinamico: il moltiplicatore scala con la leva del trade tra base
     # (leva minima → largo) e floor (leva massima → stretto). Due preset Largo/Stretto.
     perp_trailing_base_atr_largo: float = Field(default=4.0, alias="PERP_TRAILING_BASE_ATR_LARGO")

@@ -391,6 +391,7 @@ export interface AgentMobileSettings {
   perp_trailing_pnl_pct: number;
   perp_protection_mode: 'off' | 'trailing' | 'profit_lock';
   perp_profit_lock_steps: Array<[number, number]>;
+  perp_breakeven_min_profit_usd: number;
   perp_tp1_close_pct: number;
   perp_time_stop_hours: number;
   perp_fee_mode: 'taker' | 'maker' | 'none';

@@ -1733,6 +1733,19 @@ class AgentService:
                         fee_only = ((pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))) * 2
                         offset = fee_only / pos.size
                         be_stop = pos.entry_price + offset if is_long else pos.entry_price - offset
+                    # Profitto minimo fisso a breakeven: il residuo deve chiudere ad
+                    # almeno +N$ (oltre alle fee residue). Vince il più protettivo tra
+                    # questo e l'offset costi; applicato solo se il prezzo l'ha già
+                    # superato (mai oltre il prezzo corrente → niente chiusura immediata).
+                    min_profit = Decimal(str(getattr(ms, "perp_breakeven_min_profit_usd", 0) or 0))
+                    if min_profit > 0 and pos.size > 0:
+                        fee_res = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
+                        dist = (min_profit + fee_res) / pos.size
+                        target = pos.entry_price + dist if is_long else pos.entry_price - dist
+                        if is_long and price > target and target > be_stop:
+                            be_stop = target
+                        elif not is_long and price < target and target < be_stop:
+                            be_stop = target
                     # Cuscinetto extra entry±X%, applicato solo se il prezzo l'ha superato
                     # (mai oltre il prezzo corrente → niente chiusura immediata).
                     buf_pct = Decimal(str(self.settings.perp_breakeven_buffer_pct))
