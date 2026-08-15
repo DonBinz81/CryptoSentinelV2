@@ -1592,40 +1592,59 @@ const SetupPane: FC<{
           onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
         />
         {settings.perp_smart_sl_enabled && (
-          <div className="grid grid-cols-2 gap-3">
-            <NumberInput label="L1 frac" value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
-            <NumberInput label="L2 frac" value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
-            <NumberInput label="Split L1 %" value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
-            <NumberInput label="Split L2 %" value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
-            <NumberInput label="Split L3 %" value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
-            <SelectInput label="Rebuy mode" value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
-              perp_smart_sl_rebuy_mode: v,
-              ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2, perp_smart_sl_max_reentries: 1 } : { perp_smart_sl_confirmation_candles: 3, perp_smart_sl_max_reentries: 2 }),
-            })} options={[
-              { value: 'above_entry', label: 'Sopra entry' },
-              { value: 'delta', label: 'Delta per livello' },
-            ]} />
-            {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
-              <>
-                <NumberInput label="Rebuy % venduto" value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
-                <NumberInput label="R2 Split L1 %" value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
-                <NumberInput label="R2 Split L2 %" value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
-                <NumberInput label="R2 Split L3 %" value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
-              </>
+          <>
+            {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="L1 frac" value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
+              <NumberInput label="L2 frac" value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
+              <NumberInput label="Split L1 %" value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
+              <NumberInput label="Split L2 %" value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
+              <NumberInput label="Split L3 %" value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
+              <NumberInput label="Candele conferma SSL" value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
+            </div>
+
+            {/* Rebuy: rientri dopo la vendita. max_reentries=0 = spenti (default consigliato). */}
+            <ToggleInput
+              label="Disattiva rebuy (consigliato)"
+              checked={settings.perp_smart_sl_max_reentries === 0}
+              onChange={(disattiva) => patch({ perp_smart_sl_max_reentries: disattiva ? 0 : 1 })}
+            />
+            {settings.perp_smart_sl_max_reentries === 0 ? (
+              <p className="text-xs text-gray-500 px-1">
+                Rebuy spenti: dopo le vendite a scaglioni la posizione non rientra.
+                Sui 301 trade V1 i rebuy hanno pesato −70&nbsp;USD su 6 sole posizioni.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <SelectInput label="Rebuy mode" value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
+                  perp_smart_sl_rebuy_mode: v,
+                  ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2 } : { perp_smart_sl_confirmation_candles: 3 }),
+                })} options={[
+                  { value: 'above_entry', label: 'Sopra entry' },
+                  { value: 'delta', label: 'Delta per livello' },
+                ]} />
+                <NumberInput label="Max reentries" value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.max(1, Math.round(perp_smart_sl_max_reentries)) })} />
+                {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
+                  <>
+                    <NumberInput label="Rebuy % venduto" value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
+                    <NumberInput label="R2 Split L1 %" value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
+                    <NumberInput label="R2 Split L2 %" value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
+                    <NumberInput label="R2 Split L3 %" value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
+                  </>
+                )}
+                {settings.perp_smart_sl_rebuy_mode === 'delta' && (
+                  <>
+                    <NumberInput label="Delta L1" value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
+                    <NumberInput label="Delta L2" value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
+                  </>
+                )}
+                <ToggleInput label="Adegua TP dopo rebuy" checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
+                {settings.perp_smart_sl_tp_adjust_after_rebuy && (
+                  <NumberInput label="Delta recovery TP %" value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
+                )}
+              </div>
             )}
-            {settings.perp_smart_sl_rebuy_mode === 'delta' && (
-              <>
-                <NumberInput label="Delta L1" value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
-                <NumberInput label="Delta L2" value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
-              </>
-            )}
-            <NumberInput label="Candele conferma SSL" value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
-            <NumberInput label="Max reentries" value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.round(perp_smart_sl_max_reentries) })} />
-            <ToggleInput label="Adegua TP dopo rebuy" checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
-            {settings.perp_smart_sl_tp_adjust_after_rebuy && (
-              <NumberInput label="Delta recovery TP %" value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
-            )}
-          </div>
+          </>
         )}
       </section>
 
