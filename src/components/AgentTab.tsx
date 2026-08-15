@@ -189,6 +189,8 @@ const defaultSettings: AgentMobileSettings = {
   perp_atr_stop_multiplier: 0.8,
   perp_trailing_mode: 'largo' as const,
   perp_trailing_pnl_pct: 0,
+  perp_protection_mode: 'trailing' as const,
+  perp_profit_lock_steps: [[0.6, 0.25], [0.8, 0.5], [0.95, 0.75]] as Array<[number, number]>,
   perp_tp1_close_pct: 70,
   perp_time_stop_hours: 8,
   perp_fee_mode: 'taker' as const,
@@ -1559,11 +1561,6 @@ const SetupPane: FC<{
           onChange={(spot_trailing_enabled) => patch({ spot_trailing_enabled })}
         />
         <ToggleInput
-          label="Trailing Stop Perp"
-          checked={settings.perp_trailing_enabled}
-          onChange={(perp_trailing_enabled) => patch({ perp_trailing_enabled })}
-        />
-        <ToggleInput
           label="Time Stop Spot"
           checked={settings.spot_time_stop_enabled}
           onChange={(spot_time_stop_enabled) => patch({ spot_time_stop_enabled })}
@@ -1727,11 +1724,20 @@ const SetupPane: FC<{
           <NumberInput label="Filtro R:R min (0=off)" value={settings.perp_min_rr} step={0.1} onChange={(perp_min_rr) => patch({ perp_min_rr })} />
           <NumberInput label="TP1 (× ATR)" value={settings.perp_tp1_atr_multiplier} step={0.1} onChange={(perp_tp1_atr_multiplier) => patch({ perp_tp1_atr_multiplier })} />
           <NumberInput label="TP2 (× ATR)" value={settings.perp_tp2_atr_multiplier} step={0.1} onChange={(perp_tp2_atr_multiplier) => patch({ perp_tp2_atr_multiplier })} />
-          <SelectInput label="Trailing ATR (adatta alla leva)" value={settings.perp_trailing_mode} onChange={(v) => patch({ perp_trailing_mode: v as 'largo' | 'stretto' })} options={[
-            { value: 'largo', label: 'Largo — lascia correre' },
-            { value: 'stretto', label: 'Stretto — blocca prima' },
+          <SelectInput label="Protezione profitto (post-TP1)" value={settings.perp_protection_mode} onChange={(v) => patch({ perp_protection_mode: v as 'off' | 'trailing' | 'profit_lock' })} options={[
+            { value: 'off', label: 'Off — solo breakeven' },
+            { value: 'trailing', label: 'Trailing ATR' },
+            { value: 'profit_lock', label: 'Profit Lock (ratchet)' },
           ]} />
-          <NumberInput label="Trailing dist. % (0=solo ATR)" value={settings.perp_trailing_pnl_pct} step={0.1} onChange={(perp_trailing_pnl_pct) => patch({ perp_trailing_pnl_pct })} />
+          {settings.perp_protection_mode === 'trailing' && (
+            <SelectInput label="Trailing ATR (adatta alla leva)" value={settings.perp_trailing_mode} onChange={(v) => patch({ perp_trailing_mode: v as 'largo' | 'stretto' })} options={[
+              { value: 'largo', label: 'Largo — lascia correre' },
+              { value: 'stretto', label: 'Stretto — blocca prima' },
+            ]} />
+          )}
+          {settings.perp_protection_mode === 'trailing' && (
+            <NumberInput label="Trailing dist. % (0=solo ATR)" value={settings.perp_trailing_pnl_pct} step={0.1} onChange={(perp_trailing_pnl_pct) => patch({ perp_trailing_pnl_pct })} />
+          )}
           <NumberInput label="Chiudi a TP1 %" value={settings.perp_tp1_close_pct} step={5} onChange={(perp_tp1_close_pct) => patch({ perp_tp1_close_pct })} />
           <NumberInput label="Time Stop ore" value={settings.perp_time_stop_hours} step={1} onChange={(perp_time_stop_hours) => patch({ perp_time_stop_hours: Math.round(perp_time_stop_hours) })} />
           <SelectInput label="Fee mode (dry-run)" value={settings.perp_fee_mode} onChange={(v) => patch({ perp_fee_mode: v as 'taker' | 'maker' | 'none' })} options={[
@@ -1740,6 +1746,24 @@ const SetupPane: FC<{
             { value: 'none', label: 'Nessuna (strategia lorda)' },
           ]} />
         </div>
+        {settings.perp_protection_mode === 'profit_lock' && (
+          <div className="space-y-2 rounded-lg border border-gray-700 p-3">
+            <p className="text-xs font-semibold text-gray-400">Scalini Profit Lock — progresso verso TP2 → quota di profitto bloccata</p>
+            {settings.perp_profit_lock_steps.map((stepPair, i) => (
+              <div key={i} className="grid grid-cols-2 gap-3">
+                <NumberInput label={`Soglia ${i + 1} (%)`} value={Math.round(stepPair[0] * 100)} step={5} onChange={(v) => {
+                  const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [Math.max(0, Math.min(100, v)) / 100, s[1]] : s)) as Array<[number, number]>;
+                  patch({ perp_profit_lock_steps: next });
+                }} />
+                <NumberInput label={`Lock ${i + 1} (%)`} value={Math.round(stepPair[1] * 100)} step={5} onChange={(v) => {
+                  const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [s[0], Math.max(0, Math.min(100, v)) / 100] : s)) as Array<[number, number]>;
+                  patch({ perp_profit_lock_steps: next });
+                }} />
+              </div>
+            ))}
+            <p className="text-xs text-gray-500">Soglie e lock crescenti, lock &lt; soglia. Dopo il TP1 lo stop sale a gradini verso il TP2 e non scende mai (immune alle spike).</p>
+          </div>
+        )}
         <p className="px-1 text-xs text-gray-500">
           Leva modulata sulla volatilità ATR(72) in apertura: bassa volatilità → leva max, alta volatilità → leva min. Volatilità anomala (oltre il massimo storico) → leva forzata al minimo. Range 1–50.
         </p>
@@ -1762,7 +1786,11 @@ const SetupPane: FC<{
   );
 };
 
-const TradeCandleChart: FC<{ chart: NonNullable<TradeDetail['chart']> }> = ({ chart }) => {
+const TradeCandleChart: FC<{
+  chart: NonNullable<TradeDetail['chart']>;
+  breakeven?: string | null;
+  trailing?: string | null;
+}> = ({ chart, breakeven, trailing }) => {
   const candles = chart.candles ?? [];
   const postClose = chart.post_close_candles ?? [];
   const allCandles = [...candles, ...postClose];
@@ -1783,8 +1811,10 @@ const TradeCandleChart: FC<{ chart: NonNullable<TradeDetail['chart']> }> = ({ ch
   const sl = chart.stop_loss != null ? Number(chart.stop_loss) : null;
   const tp1 = chart.take_profit_1 != null ? Number(chart.take_profit_1) : null;
   const tp2 = chart.take_profit_2 != null ? Number(chart.take_profit_2) : null;
+  const be = breakeven != null ? Number(breakeven) : null;
+  const trail = trailing != null ? Number(trailing) : null;
 
-  const levels = [entry, exit, sl, tp1, tp2].filter((v): v is number => v != null && !Number.isNaN(v));
+  const levels = [entry, exit, sl, tp1, tp2, be, trail].filter((v): v is number => v != null && !Number.isNaN(v));
   let hi = Math.max(...allCandles.map((c) => c.h), ...levels);
   let lo = Math.min(...allCandles.map((c) => c.l), ...levels);
   if (hi === lo) { hi += 1; lo -= 1; }
@@ -1834,7 +1864,7 @@ const TradeCandleChart: FC<{ chart: NonNullable<TradeDetail['chart']> }> = ({ ch
 
   const levelLine = (price: number | null, color: string, dash: string) =>
     price == null || Number.isNaN(price) ? null : (
-      <line x1={padX} x2={plotR} y1={y(price)} y2={y(price)} stroke={color} strokeWidth="1" strokeDasharray={dash} opacity="0.7" />
+      <line x1={padX} x2={plotR} y1={y(price)} y2={y(price)} stroke={color} strokeWidth="1" strokeDasharray={dash} opacity="0.5" />
     );
 
   const stopRefLine = (idx: number) => {
@@ -1919,10 +1949,13 @@ const TradeCandleChart: FC<{ chart: NonNullable<TradeDetail['chart']> }> = ({ ch
           )}
         </>
       )}
-      {levelLine(sl, '#ef4444', '4 3')}
-      {levelLine(tp1, '#22c55e', '4 3')}
-      {levelLine(tp2, '#16a34a', '2 3')}
-      {levelLine(entry, '#9ca3af', '1 0')}
+      {/* Livelli di uscita — colori pastello distinti e tenui (opacità 0.5). */}
+      {levelLine(sl, '#fca5a5', '4 3')}
+      {levelLine(be, '#fcd34d', '3 3')}
+      {levelLine(trail, '#7dd3fc', '3 3')}
+      {levelLine(tp1, '#86efac', '4 3')}
+      {levelLine(tp2, '#5eead4', '2 3')}
+      {levelLine(entry, '#cbd5e1', '1 0')}
       {/* marker ingresso/uscita */}
       <circle cx={cx(entryIdx)} cy={y(entry)} r="3.5" fill="#e5e7eb" stroke="#0b0e11" strokeWidth="1" />
       <circle cx={cx(exitIdx)} cy={y(exit)} r="3.5" fill={exitGood ? '#22c55e' : '#ef4444'} stroke="#0b0e11" strokeWidth="1" />
@@ -1973,13 +2006,16 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               <h3 className="text-sm font-semibold text-white">{detail.chart.live ? 'Grafico posizione (live)' : 'Grafico del trade'}</h3>
               <span className="text-xs text-gray-500">{detail.chart.interval}</span>
             </div>
-            <TradeCandleChart chart={detail.chart} />
+            <TradeCandleChart chart={detail.chart} breakeven={detail.breakeven_price} trailing={detail.trailing_stop} />
             <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
               <span>⚪ Entry</span>
               <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.chart.live ? 'Ora' : 'Exit'}</span>
-              <span className="text-accent-red">- - SL</span>
+              <span style={{ color: '#fca5a5' }}>- - SL</span>
               {detail.chart.stop_reference && <span className="text-purple-300">- - SL ref</span>}
-              <span className="text-accent-green">- - TP</span>
+              {detail.breakeven_price != null && <span style={{ color: '#fcd34d' }}>- - Breakeven</span>}
+              {detail.trailing_stop != null && <span style={{ color: '#7dd3fc' }}>- - Trailing</span>}
+              <span style={{ color: '#86efac' }}>- - TP1</span>
+              <span style={{ color: '#5eead4' }}>- - TP2</span>
             </div>
           </section>
         )}

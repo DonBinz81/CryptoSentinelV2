@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from fastapi import APIRouter
 
 from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SettingsDep
@@ -23,6 +25,7 @@ from backend.app.schemas.mobile_agent import (
 )
 
 router = APIRouter(prefix="/api/v1/mobile/agent", tags=["mobile-agent"])
+logger = structlog.get_logger(__name__)
 SETTINGS_KEY = "mobile_agent_settings"
 
 # Mapping mobile_field → Settings attribute name (solo parametri globali e di strategia;
@@ -161,6 +164,10 @@ def _settings_from_config(settings: SettingsDep) -> AgentMobileSettings:
         perp_atr_stop_multiplier=settings.perp_atr_stop_multiplier,
         perp_trailing_mode=settings.perp_trailing_mode,
         perp_trailing_pnl_pct=0.0,
+        perp_protection_mode=getattr(settings, "perp_protection_mode", "trailing"),
+        perp_profit_lock_steps=getattr(
+            settings, "perp_profit_lock_steps", [(0.60, 0.25), (0.80, 0.50), (0.95, 0.75)]
+        ),
         perp_tp1_close_pct=70.0,
         perp_time_stop_hours=settings.perp_time_stop_hours,
         post_close_candles=10,
@@ -187,6 +194,17 @@ async def update_mobile_agent_settings(
     """Persist the mobile agent settings and apply them immediately to the live agent."""
 
     serialized = request.model_dump_json()
+    # Audit dei campi cambiati (timestamp implicito nel log; serve per l'analisi A/B,
+    # es. il momento in cui si attiva perp_protection_mode="profit_lock").
+    try:
+        prev_raw = get_runtime_value(str(settings.default_user_id), SETTINGS_KEY)
+        prev = json.loads(prev_raw) if prev_raw else {}
+    except (ValueError, TypeError):
+        prev = {}
+    new_values = json.loads(serialized)
+    changed = {k: {"from": prev.get(k), "to": v} for k, v in new_values.items() if prev.get(k) != v}
+    if changed:
+        logger.info("mobile_settings_changed", changed=changed, at=datetime.now(UTC).isoformat())
     set_runtime_value(str(settings.default_user_id), SETTINGS_KEY, serialized)
     # Applica subito al Settings singleton: nessun riavvio necessario.
     apply_mobile_settings_to_config(request, settings)

@@ -109,6 +109,16 @@ class AgentMobileSettings(BaseModel):
     # Se > 0, viene calcolato anche un trailing a distanza fissa dal massimo (% del prezzo).
     # Vince il più protettivo tra ATR e questa %. Con 0 si usa solo l'ATR.
     perp_trailing_pnl_pct: float = Field(default=0.0, ge=0.0, le=20.0)
+    # Protezione profitto post-TP1. Selettore unico che ASSORBE il trailing:
+    #   off = solo breakeven · trailing = trailing ATR (comportamento storico) ·
+    #   profit_lock = ratchet a scalini verso TP2. None = deriva da perp_trailing_enabled
+    #   (migrazione dei settings salvati prima di questo campo → nessun cambio di comportamento).
+    perp_protection_mode: str | None = Field(default=None)
+    # Scalini del profit lock: coppie (soglia_progresso, lock) verso TP2. Attivi solo con
+    # perp_protection_mode="profit_lock". Validati: soglie e lock crescenti in (0,1), lock < soglia.
+    perp_profit_lock_steps: list[tuple[float, float]] = Field(
+        default_factory=lambda: [(0.60, 0.25), (0.80, 0.50), (0.95, 0.75)]
+    )
     perp_tp1_close_pct: float = Field(default=70.0, ge=1.0, le=99.0)
     perp_time_stop_hours: int = Field(default=8, ge=0, le=168)
     perp_fee_mode: str = Field(default="taker", pattern="^(taker|maker|none)$")
@@ -120,6 +130,29 @@ class AgentMobileSettings(BaseModel):
     def _check_leverage_range(self) -> "AgentMobileSettings":
         if self.perp_min_leverage > self.perp_max_leverage:
             raise ValueError("perp_min_leverage must be <= perp_max_leverage")
+        # Protezione profitto: il selettore è la fonte di verità e ASSORBE il trailing.
+        # None = settings pre-esistenti → deriva la modalità dal vecchio flag (migrazione
+        # trasparente). Altrimenti, allinea perp_trailing_enabled alla modalità scelta.
+        if self.perp_protection_mode is None:
+            self.perp_protection_mode = "trailing" if self.perp_trailing_enabled else "off"
+        elif self.perp_protection_mode not in ("off", "trailing", "profit_lock"):
+            raise ValueError("perp_protection_mode must be off|trailing|profit_lock")
+        else:
+            self.perp_trailing_enabled = self.perp_protection_mode == "trailing"
+        # Scalini profit lock: (soglia, lock) strettamente crescenti in (0,1), lock < soglia.
+        prev_thr = 0.0
+        prev_lock = 0.0
+        for pair in self.perp_profit_lock_steps or []:
+            if len(pair) != 2:
+                raise ValueError("ogni scalino profit lock deve essere (soglia, lock)")
+            thr, lock = float(pair[0]), float(pair[1])
+            if not (0.0 < thr < 1.0) or not (0.0 < lock < 1.0):
+                raise ValueError("soglia e lock degli scalini devono essere in (0,1)")
+            if lock >= thr:
+                raise ValueError("il lock di uno scalino deve essere < della sua soglia")
+            if thr <= prev_thr or lock <= prev_lock:
+                raise ValueError("soglie e lock degli scalini devono essere strettamente crescenti")
+            prev_thr, prev_lock = thr, lock
         return self
 
 
