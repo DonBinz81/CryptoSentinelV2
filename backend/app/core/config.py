@@ -625,6 +625,11 @@ class Settings(BaseSettings):
     perp_structural_stop_lookback_candles: int = Field(default=20, alias="PERP_STRUCTURAL_STOP_LOOKBACK_CANDLES")
     perp_structural_stop_buffer_pct: float = Field(default=1.10, alias="PERP_STRUCTURAL_STOP_BUFFER_PCT")
     perp_min_rr: float = Field(default=1.2, alias="PERP_MIN_RR")  # FIX-2: R:R minimo TP1 vs SL (0 = disattivo)
+    # ── Push aggiornamento app: il backend controlla le release GitHub e manda un
+    # FCM quando ne esce una nuova (arriva anche ad app chiusa) ──────────────────
+    update_push_enabled: bool = Field(default=True, alias="UPDATE_PUSH_ENABLED")
+    update_push_check_minutes: int = Field(default=15, alias="UPDATE_PUSH_CHECK_MINUTES")
+
     # ── Protezione posizione perp (breakeven + trailing dinamico sulla leva) ──────
     # Breakeven: a +N×ATR dall'entry lo SL sale a entry (+costi), niente più perdita.
     perp_breakeven_enabled: bool = Field(default=True, alias="PERP_BREAKEVEN_ENABLED")

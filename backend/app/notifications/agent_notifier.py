@@ -25,6 +25,7 @@ class AgentNotifier:
     PREFS_KEY = "notification_preferences"
     NOTIFIED_TRADES_KEY = "notified_trade_ids"
     RISK_STATE_KEY = "last_risk_notification"
+    UPDATE_ANNOUNCED_KEY = "last_announced_app_update"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -248,6 +249,38 @@ class AgentNotifier:
                 "detail": detail,
             },
         )
+
+    async def notify_update_available(
+        self,
+        user_id: str,
+        version_tag: str,
+        release_name: str | None,
+    ) -> bool:
+        """Nuova release APK pubblicata: push anche ad app chiusa.
+
+        Idempotente: annuncia ogni tag una sola volta (RuntimeState)."""
+        prefs = self.get_preferences(user_id)
+        if not prefs.app_updates:
+            return False
+        if get_runtime_value(user_id, self.UPDATE_ANNOUNCED_KEY) == version_tag:
+            return False
+
+        title = "Aggiornamento disponibile"
+        body = f"{release_name or 'CryptoSentinelV2'} pronto da installare — apri l'app per aggiornare"
+        sent = await self._send(
+            user_id=user_id,
+            title=title,
+            body=body,
+            severity="info",
+            data={
+                "topic": self.settings.fcm_critical_topic or "cryptosentinelv2-critical",
+                "event": "app_update_available",
+                "version": version_tag,
+            },
+        )
+        if sent:
+            set_runtime_value(user_id, self.UPDATE_ANNOUNCED_KEY, version_tag)
+        return sent
 
     # ------------------------------------------------------------------
     # Idempotenza trade

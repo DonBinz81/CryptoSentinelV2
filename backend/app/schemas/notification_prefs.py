@@ -11,6 +11,7 @@ class NotificationPreferences(BaseModel):
     risk_alerts: bool = True
     daily_summary: bool = True
     critical: bool = True
+    app_updates: bool = True
 
 
 class NotificationPreferencesResponse(BaseModel):

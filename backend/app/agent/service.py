@@ -2015,6 +2015,10 @@ class AgentService:
             await self._maybe_send_daily_summary(session, _now)
         except Exception as exc:
             logger.warning("daily_summary_failed", error=str(exc))
+        try:
+            await self._maybe_notify_app_update(_now)
+        except Exception as exc:
+            logger.warning("app_update_check_failed", error=str(exc))
         return {
             "status": "idle" if trade_heartbeat["status"] != "executed" else "heartbeat_trade_executed",
             "reason": "watchlist_empty" if not selected_assets else "watchlist_scanned",
@@ -2023,6 +2027,45 @@ class AgentService:
             "scanner_results": [_scanner_summary(result) for result in scanner_results],
             "daily_trade_heartbeat": trade_heartbeat,
         }
+
+    _UPDATE_RELEASES_API = "https://api.github.com/repos/DonBinz81/CryptoSentinelV2/releases/latest"
+
+    async def _maybe_notify_app_update(self, now: datetime) -> None:
+        """Push FCM quando esce una nuova release APK: arriva anche ad app chiusa.
+
+        Il check in-app scatta solo con l'app aperta; questo copre il resto.
+        Throttle in-memory (update_push_check_minutes, default 15); idempotente per
+        tag (notify_update_available salva l'ultimo annunciato in RuntimeState).
+        Limite noto: il backend non conosce la versione installata sul telefono,
+        quindi al massimo un push ridondante per release se hai già aggiornato."""
+        if not getattr(self.settings, "update_push_enabled", True):
+            return
+        interval_min = int(getattr(self.settings, "update_push_check_minutes", 15) or 15)
+        last = getattr(self, "_last_update_check", None)
+        if last is not None and (now - last).total_seconds() < interval_min * 60:
+            return
+        self._last_update_check = now
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                self._UPDATE_RELEASES_API,
+                headers={"Accept": "application/vnd.github+json"},
+            )
+        if resp.status_code != 200:
+            logger.debug("app_update_check_http", status=resp.status_code)
+            return
+        release = resp.json()
+        tag = str(release.get("tag_name") or "")
+        if not tag:
+            return
+        sent = await get_agent_notifier().notify_update_available(
+            user_id=str(self.settings.default_user_id),
+            version_tag=tag,
+            release_name=release.get("name"),
+        )
+        if sent:
+            logger.info("app_update_push_sent", version=tag)
 
     async def _handle_signal(self, signal: dict, session: AsyncSession) -> dict:
         if signal.get("action") == "skip":
