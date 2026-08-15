@@ -111,18 +111,16 @@ class ClaudeMetaController:
                 reasoning=f"{reason_prefix}; risk blocked: {risk.get('reason')}",
             )
         quality = Decimal(str(signal.get("quality", 0)))
-        if quality >= Decimal("0.85"):
+        # Allineato al gate del segnale (quality >= 0.6 in volume_profile): il fallback
+        # non ri-filtra. Le vecchie soglie (approve 0.85 / reduce 0.65) scartavano la
+        # fascia 0.60-0.65 e non approvavano mai a size piena: il massimo teorico della
+        # formula quality e' 0.805, quindi 0.85 era irraggiungibile (vedi NOTE/21).
+        # Con la API key configurata questo fallback non viene usato: decide Claude.
+        if quality >= Decimal("0.6"):
             return BrainDecision(
                 action="approve",
                 confidence=quality,
-                reasoning=f"{reason_prefix}; deterministic dry-run approval.",
-            )
-        if quality >= Decimal("0.65"):
-            return BrainDecision(
-                action="reduce",
-                confidence=quality,
-                size_multiplier=Decimal("0.5"),
-                reasoning=f"{reason_prefix}; deterministic dry-run reduced size.",
+                reasoning=f"{reason_prefix}; deterministic dry-run approval (signal gate).",
             )
         return BrainDecision(
             action="skip",
