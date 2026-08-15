@@ -21,11 +21,33 @@ export const ALERTS_TOKEN = (import.meta.env.VITE_API_ALERTS_TOKEN as string | u
 /** Errore HTTP con status leggibile dal chiamante (retry, logging, messaggi). */
 export class BackendHttpError extends Error {
   readonly status: number;
-  constructor(status: number, label: string) {
-    super(`${label}: ${status}`);
+  constructor(status: number, label: string, detail?: string) {
+    super(detail ? `${label}: ${status} — ${detail}` : `${label}: ${status}`);
     this.name = 'BackendHttpError';
     this.status = status;
   }
+}
+
+/**
+ * Rende leggibile il corpo di errore di FastAPI.
+ * Su 422 il body è {"detail":[{"loc":["body","perp_min_rr"],"msg":"..."}]}:
+ * senza questa estrazione l'utente vedeva solo "422" e non sapeva QUALE
+ * campo avesse un valore fuori dai limiti.
+ */
+function describeError(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === 'string') return detail;
+  if (!Array.isArray(detail)) return undefined;
+  const parts = detail.slice(0, 3).map((d) => {
+    const item = d as { loc?: unknown[]; msg?: string };
+    const campo = Array.isArray(item.loc)
+      ? item.loc.filter((x) => x !== 'body').join('.')
+      : '';
+    const msg = item.msg ?? 'valore non valido';
+    return campo ? `${campo}: ${msg}` : msg;
+  });
+  return parts.length ? parts.join(' · ') : undefined;
 }
 
 export interface BackendRequestOptions {
@@ -70,7 +92,7 @@ export async function backendRequest<T>(path: string, options: BackendRequestOpt
       readTimeout: timeoutMs,
     });
     if (response.status < 200 || response.status >= 300) {
-      throw new BackendHttpError(response.status, label);
+      throw new BackendHttpError(response.status, label, describeError(response.data));
     }
     return response.data as T;
   }
@@ -84,7 +106,10 @@ export async function backendRequest<T>(path: string, options: BackendRequestOpt
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
-    if (!response.ok) throw new BackendHttpError(response.status, label);
+    if (!response.ok) {
+      const body = await response.json().catch(() => undefined);
+      throw new BackendHttpError(response.status, label, describeError(body));
+    }
     if (response.status === 204) return undefined as T;
     return await response.json() as T;
   } catch (err) {
