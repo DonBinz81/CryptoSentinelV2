@@ -1790,7 +1790,9 @@ const TradeCandleChart: FC<{
   chart: NonNullable<TradeDetail['chart']>;
   breakeven?: string | null;
   trailing?: string | null;
-}> = ({ chart, breakeven, trailing }) => {
+  smartSlLevels?: string[] | null;
+  smartSlState?: { status: string }[] | null;
+}> = ({ chart, breakeven, trailing, smartSlLevels, smartSlState }) => {
   const candles = chart.candles ?? [];
   const postClose = chart.post_close_candles ?? [];
   const allCandles = [...candles, ...postClose];
@@ -1813,8 +1815,13 @@ const TradeCandleChart: FC<{
   const tp2 = chart.take_profit_2 != null ? Number(chart.take_profit_2) : null;
   const be = breakeven != null ? Number(breakeven) : null;
   const trail = trailing != null ? Number(trailing) : null;
+  // Smart SL: [L1, L2, L3]; L3 = stop iniziale, già rappresentato dalla linea SL.
+  const s1 = smartSlLevels?.[0] != null ? Number(smartSlLevels[0]) : null;
+  const s2 = smartSlLevels?.[1] != null ? Number(smartSlLevels[1]) : null;
+  const s1Sold = smartSlState?.[0]?.status === 'sold';
+  const s2Sold = smartSlState?.[1]?.status === 'sold';
 
-  const levels = [entry, exit, sl, tp1, tp2, be, trail].filter((v): v is number => v != null && !Number.isNaN(v));
+  const levels = [entry, exit, sl, tp1, tp2, be, trail, s1, s2].filter((v): v is number => v != null && !Number.isNaN(v));
   let hi = Math.max(...allCandles.map((c) => c.h), ...levels);
   let lo = Math.min(...allCandles.map((c) => c.l), ...levels);
   if (hi === lo) { hi += 1; lo -= 1; }
@@ -1862,9 +1869,18 @@ const TradeCandleChart: FC<{
   const last = allCandles.length - 1;
   const xTickIdx = [0, Math.round(last / 3), Math.round((2 * last) / 3), last];
 
-  const levelLine = (price: number | null, color: string, dash: string) =>
+  // Linea di livello con etichetta: tag right-aligned appena sopra la linea, dentro il
+  // plot (l'asse destro resta ai tick di prezzo). strong=true = livello già eseguito.
+  const levelLine = (price: number | null, color: string, dash: string, tag?: string, strong?: boolean) =>
     price == null || Number.isNaN(price) ? null : (
-      <line x1={padX} x2={plotR} y1={y(price)} y2={y(price)} stroke={color} strokeWidth="1" strokeDasharray={dash} opacity="0.5" />
+      <g opacity={strong ? 0.85 : 0.5}>
+        <line x1={padX} x2={plotR} y1={y(price)} y2={y(price)} stroke={color} strokeWidth={strong ? 1.4 : 1} strokeDasharray={dash} />
+        {tag && (
+          <text x={plotR - 3} y={y(price) - 2.5} fontSize="7" fill={color} textAnchor="end" fontWeight={strong ? 600 : 400}>
+            {tag}
+          </text>
+        )}
+      </g>
     );
 
   const stopRefLine = (idx: number) => {
@@ -1949,13 +1965,16 @@ const TradeCandleChart: FC<{
           )}
         </>
       )}
-      {/* Livelli di uscita — colori pastello distinti e tenui (opacità 0.5). */}
-      {levelLine(sl, '#fca5a5', '4 3')}
-      {levelLine(be, '#fcd34d', '3 3')}
-      {levelLine(trail, '#7dd3fc', '3 3')}
-      {levelLine(tp1, '#86efac', '4 3')}
-      {levelLine(tp2, '#5eead4', '2 3')}
-      {levelLine(entry, '#cbd5e1', '1 0')}
+      {/* Livelli di uscita — pastello tenue, tag per livello; Smart SL in gradazione
+          arancio (perdita parziale, tra BE giallo e SL rosso), ✓ = già eseguito. */}
+      {levelLine(sl, '#fca5a5', '4 3', 'SL')}
+      {levelLine(s1, '#fdba74', '6 4', s1Sold ? 'S1 ✓' : 'S1', s1Sold)}
+      {levelLine(s2, '#fb923c', '6 4', s2Sold ? 'S2 ✓' : 'S2', s2Sold)}
+      {levelLine(be, '#fcd34d', '3 3', 'BE')}
+      {levelLine(trail, '#7dd3fc', '3 3', 'TRL')}
+      {levelLine(tp1, '#86efac', '4 3', 'TP1')}
+      {levelLine(tp2, '#5eead4', '2 3', 'TP2')}
+      {levelLine(entry, '#cbd5e1', '1 0', 'E')}
       {/* marker ingresso/uscita */}
       <circle cx={cx(entryIdx)} cy={y(entry)} r="3.5" fill="#e5e7eb" stroke="#0b0e11" strokeWidth="1" />
       <circle cx={cx(exitIdx)} cy={y(exit)} r="3.5" fill={exitGood ? '#22c55e' : '#ef4444'} stroke="#0b0e11" strokeWidth="1" />
@@ -2006,14 +2025,21 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               <h3 className="text-sm font-semibold text-white">{detail.chart.live ? 'Grafico posizione (live)' : 'Grafico del trade'}</h3>
               <span className="text-xs text-gray-500">{detail.chart.interval}</span>
             </div>
-            <TradeCandleChart chart={detail.chart} breakeven={detail.breakeven_price} trailing={detail.trailing_stop} />
+            <TradeCandleChart
+              chart={detail.chart}
+              breakeven={detail.breakeven_price}
+              trailing={detail.trailing_stop}
+              smartSlLevels={detail.smart_sl_levels}
+              smartSlState={detail.smart_sl_state_summary}
+            />
             <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
               <span>⚪ Entry</span>
               <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.chart.live ? 'Ora' : 'Exit'}</span>
               <span style={{ color: '#fca5a5' }}>- - SL</span>
+              {detail.smart_sl_levels && <span style={{ color: '#fb923c' }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
               {detail.chart.stop_reference && <span className="text-purple-300">- - SL ref</span>}
               {detail.breakeven_price != null && <span style={{ color: '#fcd34d' }}>- - Breakeven</span>}
-              {detail.trailing_stop != null && <span style={{ color: '#7dd3fc' }}>- - Trailing</span>}
+              {detail.trailing_stop != null && <span style={{ color: '#7dd3fc' }}>- - Trailing/Lock</span>}
               <span style={{ color: '#86efac' }}>- - TP1</span>
               <span style={{ color: '#5eead4' }}>- - TP2</span>
             </div>

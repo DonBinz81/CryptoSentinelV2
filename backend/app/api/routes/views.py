@@ -858,7 +858,7 @@ def _level(position, attr: str, chart: dict | None, key: str) -> str | None:
     return None
 
 
-def _smart_sl_detail(position) -> dict:
+def _smart_sl_detail(position, settings=None) -> dict:
     """Livelli Smart SL calcolati da original_entry/initial_stop_loss + stato corrente."""
     if position is None or getattr(position, "initial_stop_loss", None) is None:
         return {"original_entry_price": None, "smart_sl_levels": None, "smart_sl_state_summary": None}
@@ -878,7 +878,21 @@ def _smart_sl_detail(position) -> dict:
     if dist == 0:
         return {"original_entry_price": _fmt_price(entry), "smart_sl_levels": None, "smart_sl_state_summary": None}
 
+    # Frazioni dai settings runtime (le stesse del motore, service._process_smart_sl):
+    # i valori hardcoded restano solo come fallback se i settings non sono leggibili.
     fracs = [Decimal("0.333"), Decimal("0.666"), Decimal("1")]
+    if settings is not None:
+        try:
+            from backend.app.api.routes.mobile_agent import _settings_from_runtime
+
+            ms, _, _ = _settings_from_runtime(settings)
+            fracs = [
+                Decimal(str(ms.perp_smart_sl_l1_frac)),
+                Decimal(str(ms.perp_smart_sl_l2_frac)),
+                Decimal("1"),
+            ]
+        except (ValueError, TypeError, ImportError):
+            pass
     if is_long:
         prices = [entry - f * dist for f in fracs]
     else:
@@ -1127,7 +1141,7 @@ def _perp_trade_detail(
             "close_reason": _close_reason(trade),
             "decision": None,
             "events": [],
-            **_smart_sl_detail(position),
+            **_smart_sl_detail(position, settings),
             "chart": None,
             "is_simulated": trade.trade_id.startswith("dry_") or trade.venue == "dry_run",
         }
@@ -1166,7 +1180,7 @@ def _perp_trade_detail(
         "close_reason": _close_reason(trade),
         "decision": _decision_payload(decision),
         "events": [{"name": "tp1", "reached": position.tp1_reached}] if position else [],
-        **_smart_sl_detail(position),
+        **_smart_sl_detail(position, settings),
         "chart": chart,
         "is_simulated": trade.trade_id.startswith("dry_") or trade.venue == "dry_run",
     }
