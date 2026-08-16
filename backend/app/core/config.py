@@ -539,7 +539,7 @@ class Settings(BaseSettings):
     bnb_gas_reserve_min: float | None = Field(default=None, alias="BNB_GAS_RESERVE_MIN")
     min_portfolio_value_usd: float = Field(default=5.0, alias="MIN_PORTFOLIO_VALUE_USD")
     minimum_trades_per_day: int = Field(default=1, alias="MINIMUM_TRADES_PER_DAY")
-    dry_run_capital_usd: float = Field(default=500.0, alias="DRY_RUN_CAPITAL_USD")
+    dry_run_capital_usd: float = Field(default=1000.0, alias="DRY_RUN_CAPITAL_USD")
     min_trade_size_usd: float = Field(default=7.0, alias="MIN_TRADE_SIZE_USD")
     risk_capital_per_trade_pct: float = Field(default=6.0, alias="RISK_CAPITAL_PER_TRADE_PCT")
     risk_per_trade_pct: float = Field(default=1.5, alias="RISK_PER_TRADE_PCT")
