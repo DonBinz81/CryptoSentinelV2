@@ -1313,6 +1313,15 @@ const CoinsPane: FC<{
   );
 };
 
+type SetupTab = 'generale' | 'spot' | 'perp' | 'sistema';
+
+const SETUP_TABS: Array<{ id: SetupTab; label: string }> = [
+  { id: 'generale', label: 'Generale' },
+  { id: 'spot', label: 'Spot' },
+  { id: 'perp', label: 'Perp' },
+  { id: 'sistema', label: 'Sistema' },
+];
+
 const SetupPane: FC<{
   settings: AgentMobileSettings;
   onSettings: (settings: AgentMobileSettings) => void;
@@ -1345,6 +1354,9 @@ const SetupPane: FC<{
   onAdjustEquity,
 }) => {
   const patch = (partial: Partial<AgentMobileSettings>) => onSettings({ ...settings, ...partial });
+  // Sotto-schede del setup: separano i parametri per mercato (stesso schema di CoinsPane).
+  // I settings restano un unico oggetto: cambiare scheda non tocca né i valori né il dirty.
+  const [setupTab, setSetupTab] = useState<SetupTab>('generale');
   const [equityInput, setEquityInput] = useState('');
   const equityValue = Number(equityInput);
   const equityValid = equityInput.trim() !== '' && Number.isFinite(equityValue) && equityValue !== 0;
@@ -1369,6 +1381,22 @@ const SetupPane: FC<{
 
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-4 gap-1">
+        {SETUP_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSetupTab(t.id)}
+            className={`rounded-lg py-1.5 text-xs font-semibold transition-colors ${
+              setupTab === t.id ? 'bg-accent-blue text-white' : 'bg-dark-700 text-gray-400 hover:text-white'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {setupTab === 'sistema' && (
+        <>
       <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-3">
         <h3 className="text-sm font-semibold text-white">Admin session</h3>
         <input
@@ -1489,7 +1517,11 @@ const SetupPane: FC<{
       <section className="rounded-xl bg-dark-800 px-4 py-3">
         <p className="text-xs text-gray-500">Per indirizzi e posizioni aperte usa il tab <span className="text-accent-blue font-semibold">Wallet</span>.</p>
       </section>
+        </>
+      )}
 
+      {setupTab === 'generale' && (
+        <>
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">General</h3>
         <div className="grid grid-cols-2 gap-3">
@@ -1512,154 +1544,12 @@ const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri mercato</h3>
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri globali</h3>
         <ToggleInput
           label="Filtro inversione mercato"
           checked={settings.market_reversal_filter_enabled}
           onChange={(market_reversal_filter_enabled) => patch({ market_reversal_filter_enabled })}
         />
-        <ToggleInput
-          label="Breakeven Spot"
-          checked={settings.spot_breakeven_enabled}
-          onChange={(spot_breakeven_enabled) => patch({ spot_breakeven_enabled })}
-        />
-        <SelectInput
-          label="Modalità breakeven Spot"
-          value={settings.spot_breakeven_mode}
-          onChange={(v) => patch({ spot_breakeven_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'tp1', label: 'Solo dopo TP1' },
-          ]}
-        />
-        <ToggleInput
-          label="Breakeven Perp"
-          checked={settings.perp_breakeven_enabled}
-          onChange={(perp_breakeven_enabled) => patch({ perp_breakeven_enabled })}
-        />
-        <SelectInput
-          label="Modalità breakeven Perp"
-          value={settings.perp_breakeven_mode}
-          onChange={(v) => patch({ perp_breakeven_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'tp1', label: 'Solo dopo TP1' },
-          ]}
-        />
-        {settings.perp_breakeven_enabled && (
-          <NumberInput
-            label="BE profitto min $ (0=solo costi)"
-            value={settings.perp_breakeven_min_profit_usd}
-            step={0.05}
-            onChange={(perp_breakeven_min_profit_usd) => patch({ perp_breakeven_min_profit_usd: Math.max(0, perp_breakeven_min_profit_usd) })}
-          />
-        )}
-        <SelectInput
-          label="Stop Loss Spot"
-          value={settings.spot_sl_mode}
-          onChange={(v) => patch({ spot_sl_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'lowest', label: 'Minimo 20 candele' },
-          ]}
-        />
-        <SelectInput
-          label="Stop Loss Perp"
-          value={settings.perp_sl_mode}
-          onChange={(v) => patch({ perp_sl_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'lowest', label: 'Min/Max 20 candele' },
-          ]}
-        />
-        <ToggleInput
-          label="Trailing Stop Spot"
-          checked={settings.spot_trailing_enabled}
-          onChange={(spot_trailing_enabled) => patch({ spot_trailing_enabled })}
-        />
-        <ToggleInput
-          label="Time Stop Spot"
-          checked={settings.spot_time_stop_enabled}
-          onChange={(spot_time_stop_enabled) => patch({ spot_time_stop_enabled })}
-        />
-        <ToggleInput
-          label="Time Stop Perp"
-          checked={settings.perp_time_stop_enabled}
-          onChange={(perp_time_stop_enabled) => patch({ perp_time_stop_enabled })}
-        />
-        <ToggleInput
-          label="Filtro shock BTC perp"
-          checked={settings.perp_trend_shock_enabled}
-          onChange={(perp_trend_shock_enabled) => patch({ perp_trend_shock_enabled })}
-        />
-        {settings.perp_trend_shock_enabled && (
-          <div className="grid grid-cols-2 gap-3">
-            <NumberInput label="ADX threshold" value={settings.perp_trend_shock_adx_threshold} onChange={(perp_trend_shock_adx_threshold) => patch({ perp_trend_shock_adx_threshold })} />
-            <NumberInput label="NATR percentile" value={settings.perp_trend_shock_natr_percentile} onChange={(perp_trend_shock_natr_percentile) => patch({ perp_trend_shock_natr_percentile })} />
-            <NumberInput label="Volume threshold" value={settings.perp_trend_shock_volume_threshold} onChange={(perp_trend_shock_volume_threshold) => patch({ perp_trend_shock_volume_threshold })} />
-            <NumberInput label="Recovery checks" value={settings.perp_trend_shock_recovery_confirmations} onChange={(perp_trend_shock_recovery_confirmations) => patch({ perp_trend_shock_recovery_confirmations })} />
-          </div>
-        )}
-        <ToggleInput
-          label="Smart Stop Loss Perp"
-          checked={settings.perp_smart_sl_enabled}
-          onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
-        />
-        {settings.perp_smart_sl_enabled && (
-          <>
-            {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
-            <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="L1 frac" value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
-              <NumberInput label="L2 frac" value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
-              <NumberInput label="Split L1 %" value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
-              <NumberInput label="Split L2 %" value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
-              <NumberInput label="Split L3 %" value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
-              <NumberInput label="Candele conferma SSL" value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
-            </div>
-
-            {/* Rebuy: rientri dopo la vendita. max_reentries=0 = spenti (default consigliato). */}
-            <ToggleInput
-              label="Disattiva rebuy (consigliato)"
-              checked={settings.perp_smart_sl_max_reentries === 0}
-              onChange={(disattiva) => patch({ perp_smart_sl_max_reentries: disattiva ? 0 : 1 })}
-            />
-            {settings.perp_smart_sl_max_reentries === 0 ? (
-              <p className="text-xs text-gray-500 px-1">
-                Rebuy spenti: dopo le vendite a scaglioni la posizione non rientra.
-                Sui 301 trade V1 i rebuy hanno pesato −70&nbsp;USD su 6 sole posizioni.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                <SelectInput label="Rebuy mode" value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
-                  perp_smart_sl_rebuy_mode: v,
-                  ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2 } : { perp_smart_sl_confirmation_candles: 3 }),
-                })} options={[
-                  { value: 'above_entry', label: 'Sopra entry' },
-                  { value: 'delta', label: 'Delta per livello' },
-                ]} />
-                <NumberInput label="Max reentries" value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.max(1, Math.round(perp_smart_sl_max_reentries)) })} />
-                {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
-                  <>
-                    <NumberInput label="Rebuy % venduto" value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
-                    <NumberInput label="R2 Split L1 %" value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
-                    <NumberInput label="R2 Split L2 %" value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
-                    <NumberInput label="R2 Split L3 %" value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
-                  </>
-                )}
-                {settings.perp_smart_sl_rebuy_mode === 'delta' && (
-                  <>
-                    <NumberInput label="Delta L1" value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
-                    <NumberInput label="Delta L2" value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
-                  </>
-                )}
-                <ToggleInput label="Adegua TP dopo rebuy" checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
-                {settings.perp_smart_sl_tp_adjust_after_rebuy && (
-                  <NumberInput label="Delta recovery TP %" value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
-                )}
-              </div>
-            )}
-          </>
-        )}
       </section>
 
       <section className="space-y-3">
@@ -1681,7 +1571,11 @@ const SetupPane: FC<{
           <NumberInput label="Candele post-chiusura (0=off)" value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
         </div>
       </section>
+        </>
+      )}
 
+      {setupTab === 'spot' && (
+        <>
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — risk</h3>
         <div className="grid grid-cols-2 gap-3">
@@ -1711,6 +1605,47 @@ const SetupPane: FC<{
         </div>
       </section>
 
+      <section className="space-y-3">
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — protezioni</h3>
+        <ToggleInput
+          label="Breakeven Spot"
+          checked={settings.spot_breakeven_enabled}
+          onChange={(spot_breakeven_enabled) => patch({ spot_breakeven_enabled })}
+        />
+        <SelectInput
+          label="Modalità breakeven Spot"
+          value={settings.spot_breakeven_mode}
+          onChange={(v) => patch({ spot_breakeven_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'tp1', label: 'Solo dopo TP1' },
+          ]}
+        />
+        <SelectInput
+          label="Stop Loss Spot"
+          value={settings.spot_sl_mode}
+          onChange={(v) => patch({ spot_sl_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'lowest', label: 'Minimo 20 candele' },
+          ]}
+        />
+        <ToggleInput
+          label="Trailing Stop Spot"
+          checked={settings.spot_trailing_enabled}
+          onChange={(spot_trailing_enabled) => patch({ spot_trailing_enabled })}
+        />
+        <ToggleInput
+          label="Time Stop Spot"
+          checked={settings.spot_time_stop_enabled}
+          onChange={(spot_time_stop_enabled) => patch({ spot_time_stop_enabled })}
+        />
+      </section>
+        </>
+      )}
+
+      {setupTab === 'perp' && (
+        <>
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — risk</h3>
         <div className="grid grid-cols-2 gap-3">
@@ -1809,6 +1744,121 @@ const SetupPane: FC<{
           Leva modulata sulla volatilità ATR(72) in apertura: bassa volatilità → leva max, alta volatilità → leva min. Volatilità anomala (oltre il massimo storico) → leva forzata al minimo. Range 1–50.
         </p>
       </section>
+
+      <section className="space-y-3">
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — protezioni</h3>
+        <ToggleInput
+          label="Breakeven Perp"
+          checked={settings.perp_breakeven_enabled}
+          onChange={(perp_breakeven_enabled) => patch({ perp_breakeven_enabled })}
+        />
+        <SelectInput
+          label="Modalità breakeven Perp"
+          value={settings.perp_breakeven_mode}
+          onChange={(v) => patch({ perp_breakeven_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'tp1', label: 'Solo dopo TP1' },
+          ]}
+        />
+        {settings.perp_breakeven_enabled && (
+          <NumberInput
+            label="BE profitto min $ (0=solo costi)"
+            value={settings.perp_breakeven_min_profit_usd}
+            step={0.05}
+            onChange={(perp_breakeven_min_profit_usd) => patch({ perp_breakeven_min_profit_usd: Math.max(0, perp_breakeven_min_profit_usd) })}
+          />
+        )}
+        <SelectInput
+          label="Stop Loss Perp"
+          value={settings.perp_sl_mode}
+          onChange={(v) => patch({ perp_sl_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'lowest', label: 'Min/Max 20 candele' },
+          ]}
+        />
+        <ToggleInput
+          label="Time Stop Perp"
+          checked={settings.perp_time_stop_enabled}
+          onChange={(perp_time_stop_enabled) => patch({ perp_time_stop_enabled })}
+        />
+        <ToggleInput
+          label="Filtro shock BTC perp"
+          checked={settings.perp_trend_shock_enabled}
+          onChange={(perp_trend_shock_enabled) => patch({ perp_trend_shock_enabled })}
+        />
+        {settings.perp_trend_shock_enabled && (
+          <div className="grid grid-cols-2 gap-3">
+            <NumberInput label="ADX threshold" value={settings.perp_trend_shock_adx_threshold} onChange={(perp_trend_shock_adx_threshold) => patch({ perp_trend_shock_adx_threshold })} />
+            <NumberInput label="NATR percentile" value={settings.perp_trend_shock_natr_percentile} onChange={(perp_trend_shock_natr_percentile) => patch({ perp_trend_shock_natr_percentile })} />
+            <NumberInput label="Volume threshold" value={settings.perp_trend_shock_volume_threshold} onChange={(perp_trend_shock_volume_threshold) => patch({ perp_trend_shock_volume_threshold })} />
+            <NumberInput label="Recovery checks" value={settings.perp_trend_shock_recovery_confirmations} onChange={(perp_trend_shock_recovery_confirmations) => patch({ perp_trend_shock_recovery_confirmations })} />
+          </div>
+        )}
+        <ToggleInput
+          label="Smart Stop Loss Perp"
+          checked={settings.perp_smart_sl_enabled}
+          onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
+        />
+        {settings.perp_smart_sl_enabled && (
+          <>
+            {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="L1 frac" value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
+              <NumberInput label="L2 frac" value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
+              <NumberInput label="Split L1 %" value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
+              <NumberInput label="Split L2 %" value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
+              <NumberInput label="Split L3 %" value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
+              <NumberInput label="Candele conferma SSL" value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
+            </div>
+
+            {/* Rebuy: rientri dopo la vendita. max_reentries=0 = spenti (default consigliato). */}
+            <ToggleInput
+              label="Disattiva rebuy (consigliato)"
+              checked={settings.perp_smart_sl_max_reentries === 0}
+              onChange={(disattiva) => patch({ perp_smart_sl_max_reentries: disattiva ? 0 : 1 })}
+            />
+            {settings.perp_smart_sl_max_reentries === 0 ? (
+              <p className="text-xs text-gray-500 px-1">
+                Rebuy spenti: dopo le vendite a scaglioni la posizione non rientra.
+                Sui 301 trade V1 i rebuy hanno pesato −70&nbsp;USD su 6 sole posizioni.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <SelectInput label="Rebuy mode" value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
+                  perp_smart_sl_rebuy_mode: v,
+                  ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2 } : { perp_smart_sl_confirmation_candles: 3 }),
+                })} options={[
+                  { value: 'above_entry', label: 'Sopra entry' },
+                  { value: 'delta', label: 'Delta per livello' },
+                ]} />
+                <NumberInput label="Max reentries" value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.max(1, Math.round(perp_smart_sl_max_reentries)) })} />
+                {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
+                  <>
+                    <NumberInput label="Rebuy % venduto" value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
+                    <NumberInput label="R2 Split L1 %" value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
+                    <NumberInput label="R2 Split L2 %" value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
+                    <NumberInput label="R2 Split L3 %" value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
+                  </>
+                )}
+                {settings.perp_smart_sl_rebuy_mode === 'delta' && (
+                  <>
+                    <NumberInput label="Delta L1" value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
+                    <NumberInput label="Delta L2" value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
+                  </>
+                )}
+                <ToggleInput label="Adegua TP dopo rebuy" checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
+                {settings.perp_smart_sl_tp_adjust_after_rebuy && (
+                  <NumberInput label="Delta recovery TP %" value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+        </>
+      )}
 
       {dirty && !saving && (
         <p className="rounded-lg border border-accent-yellow/30 bg-accent-yellow/10 px-3 py-2 text-xs text-accent-yellow">
