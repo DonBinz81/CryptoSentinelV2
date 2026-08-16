@@ -1,8 +1,9 @@
 # Competition eligible-token universe.
-# This list contains 149 unique entries (added BTC for perp/spot trading).
+# This list contains 150 unique entries (added BTC and BNB for perp/spot trading).
 
 eligible_tokens:
   - BTC
+  - BNB
   - ETH
   - USDT
   - USDC
