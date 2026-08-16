@@ -1,7 +1,8 @@
 # Competition eligible-token universe.
-# This list contains 148 unique entries after removing the duplicated SLX from the official appendix copy.
+# This list contains 149 unique entries (added BTC for perp/spot trading).
 
 eligible_tokens:
+  - BTC
   - ETH
   - USDT
   - USDC
