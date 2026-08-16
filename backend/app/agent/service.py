@@ -1074,6 +1074,22 @@ class AgentService:
             close_trade_id=close_trade.trade_id, now=now,
         )
         logger.info("spot_position_closed", asset=pos.asset, reason=reason, partial=partial, pnl_usd=float(pnl))
+        # Notifica chiusura trade (fire-and-forget)
+        try:
+            notifier = get_agent_notifier()
+            pnl_pct = (pnl / (pos.size * pos.entry_price)) * Decimal("100") if pos.size and pos.entry_price else Decimal("0")
+            await notifier.notify_trade_closed(
+                user_id=str(self.settings.default_user_id),
+                trade_id=close_trade.trade_id,
+                asset=pos.asset,
+                market="spot",
+                pnl_usd=pnl,
+                pnl_pct=pnl_pct,
+                close_reason=reason,
+                is_dry_run=self._ms.execution_mode == "dry_run",
+            )
+        except Exception:
+            pass  # le notifiche non bloccano mai l'agente
         return pnl
 
     async def _maybe_scale_in_spot(
@@ -1271,6 +1287,22 @@ class AgentService:
             "perp_position_closed",
             asset=pos.asset, reason=reason, partial=partial, pnl_usd=float(pnl), mfe_to_tp2=mfe_to_tp2,
         )
+        # Notifica chiusura trade (fire-and-forget)
+        try:
+            notifier = get_agent_notifier()
+            pnl_pct = (pnl / (pos.size * pos.entry_price)) * Decimal("100") if pos.size and pos.entry_price else Decimal("0")
+            await notifier.notify_trade_closed(
+                user_id=str(self.settings.default_user_id),
+                trade_id=close_trade.trade_id,
+                asset=pos.asset,
+                market="perp",
+                pnl_usd=pnl,
+                pnl_pct=pnl_pct,
+                close_reason=reason,
+                is_dry_run=self._ms.execution_mode == "dry_run",
+            )
+        except Exception:
+            pass  # le notifiche non bloccano mai l'agente
         return pnl
 
     async def _process_smart_sl(
