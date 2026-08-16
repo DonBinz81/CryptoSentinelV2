@@ -621,7 +621,7 @@ class Settings(BaseSettings):
     # Se True, TP2 usa il POC (livello strutturale di volume) quando è più ambizioso
     # del target ATR; altrimenti resta sul target ATR. Garantisce R:R minimo.
     perp_use_poc_for_tp2: bool = Field(default=True, alias="PERP_USE_POC_FOR_TP2")
-    perp_sl_mode: str = Field(default="atr", alias="PERP_SL_MODE")
+    perp_sl_mode: str = Field(default="lowest", alias="PERP_SL_MODE")
     perp_structural_stop_lookback_candles: int = Field(default=20, alias="PERP_STRUCTURAL_STOP_LOOKBACK_CANDLES")
     perp_structural_stop_buffer_pct: float = Field(default=1.10, alias="PERP_STRUCTURAL_STOP_BUFFER_PCT")
     perp_min_rr: float = Field(default=1.2, alias="PERP_MIN_RR")  # FIX-2: R:R minimo TP1 vs SL (0 = disattivo)
