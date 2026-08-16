@@ -24,8 +24,21 @@ def normalize_symbol(symbol: str) -> str:
     return symbol.strip().upper()
 
 
-def _load_symbols(user_id: str, key: str, eligible: set[str]) -> list[str]:
-    """Load and validate a symbol list from runtime state."""
+def _load_symbols(
+    user_id: str,
+    key: str,
+    eligible: set[str],
+    restrict_to: set[str] | None = None,
+) -> list[str]:
+    """Load and validate a symbol list from runtime state.
+
+    `restrict_to` applica un secondo filtro (la master watchlist per le liste di
+    mercato). Senza di esso lettura e scrittura divergevano: la lettura ammetteva
+    ogni simbolo `eligible`, mentre `set_market_watchlist` pretende che stia nella
+    master. Bastava restringere la master perche' la lista persistita contenesse
+    simboli non piu' validi: il client la rileggeva, la rispediva intera al primo
+    toggle e il backend rispondeva 400 su QUALSIASI coin.
+    """
     raw = get_runtime_value(user_id, key)
     if not raw:
         return []
@@ -39,9 +52,12 @@ def _load_symbols(user_id: str, key: str, eligible: set[str]) -> list[str]:
     seen: set[str] = set()
     for value in values:
         symbol = normalize_symbol(str(value))
-        if symbol in eligible and symbol not in seen:
-            selected.append(symbol)
-            seen.add(symbol)
+        if symbol not in eligible or symbol in seen:
+            continue
+        if restrict_to is not None and symbol not in restrict_to:
+            continue
+        selected.append(symbol)
+        seen.add(symbol)
     return selected
 
 
@@ -55,22 +71,24 @@ def selected_spot_watchlist(settings: Settings) -> list[str]:
     """Return the spot-specific watchlist. Falls back to master if not set."""
     user_id = str(settings.default_user_id)
     eligible = {normalize_symbol(t) for t in settings.eligible_tokens}
-    spot = _load_symbols(user_id, WATCHLIST_SPOT_KEY, eligible)
+    master = _load_symbols(user_id, WATCHLIST_STATE_KEY, eligible)
+    spot = _load_symbols(user_id, WATCHLIST_SPOT_KEY, eligible, restrict_to=set(master))
     if spot:
         return spot
     # Fallback: usa la master watchlist
-    return _load_symbols(user_id, WATCHLIST_STATE_KEY, eligible)
+    return master
 
 
 def selected_perp_watchlist(settings: Settings) -> list[str]:
     """Return the perp-specific watchlist. Falls back to master if not set."""
     user_id = str(settings.default_user_id)
     eligible = {normalize_symbol(t) for t in settings.eligible_tokens}
-    perp = _load_symbols(user_id, WATCHLIST_PERP_KEY, eligible)
+    master = _load_symbols(user_id, WATCHLIST_STATE_KEY, eligible)
+    perp = _load_symbols(user_id, WATCHLIST_PERP_KEY, eligible, restrict_to=set(master))
     if perp:
         return perp
     # Fallback: usa la master watchlist
-    return _load_symbols(user_id, WATCHLIST_STATE_KEY, eligible)
+    return master
 
 
 def set_selected_watchlist(settings: Settings, symbols: list[str]) -> list[str]:
@@ -85,8 +103,26 @@ def set_selected_watchlist(settings: Settings, symbols: list[str]) -> list[str]:
         if symbol not in seen:
             selected.append(symbol)
             seen.add(symbol)
-    set_runtime_value(str(settings.default_user_id), WATCHLIST_STATE_KEY, json.dumps(selected))
+    user_id = str(settings.default_user_id)
+    set_runtime_value(user_id, WATCHLIST_STATE_KEY, json.dumps(selected))
+    _prune_market_watchlists(user_id, eligible, set(selected))
     return selected
+
+
+def _prune_market_watchlists(user_id: str, eligible: set[str], master: set[str]) -> None:
+    """Rimuove da spot e perp i simboli non piu' presenti nella master.
+
+    Senza questa potatura restringere la master lasciava nelle liste di mercato
+    simboli orfani, che il backend poi rifiutava in scrittura: la watchlist
+    diventava non salvabile finche' non si riscriveva il DB a mano.
+    """
+    for key in (WATCHLIST_SPOT_KEY, WATCHLIST_PERP_KEY):
+        current = _load_symbols(user_id, key, eligible)
+        if not current:
+            continue
+        pruned = [symbol for symbol in current if symbol in master]
+        if pruned != current:
+            set_runtime_value(user_id, key, json.dumps(pruned))
 
 
 def set_market_watchlist(settings: Settings, market: str, symbols: list[str]) -> list[str]:
@@ -96,13 +132,22 @@ def set_market_watchlist(settings: Settings, market: str, symbols: list[str]) ->
         raise ValueError("Master watchlist is empty — set the master watchlist first")
     selected: list[str] = []
     seen: set[str] = set()
+    invalid: list[str] = []
     for value in symbols:
         symbol = normalize_symbol(value)
         if symbol not in master:
-            raise ValueError(f"Asset is not in the master watchlist: {value}")
+            # Elenca TUTTI i simboli fuori master, non solo il primo: con un solo
+            # nome per volta la diagnosi dal client richiedeva un tentativo a coin.
+            if symbol not in invalid:
+                invalid.append(symbol)
+            continue
         if symbol not in seen:
             selected.append(symbol)
             seen.add(symbol)
+    if invalid:
+        raise ValueError(
+            "Assets not in the master watchlist: " + ", ".join(invalid)
+        )
     key = WATCHLIST_SPOT_KEY if market == "spot" else WATCHLIST_PERP_KEY
     set_runtime_value(str(settings.default_user_id), key, json.dumps(selected))
     return selected

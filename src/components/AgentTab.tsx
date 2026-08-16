@@ -1188,8 +1188,12 @@ const CoinsPane: FC<{
         const result = await updatePerpWatchlist([...current], adminToken);
         setPerpData(result);
       }
-    } catch {
-      setMarketError('Errore salvataggio watchlist');
+    } catch (e) {
+      // Il messaggio del backend va mostrato: con un catch muto un 400
+      // "Assets not in the master watchlist: TRX" diventava un generico
+      // "Errore salvataggio watchlist" e la causa restava invisibile.
+      const detail = e instanceof Error ? e.message : String(e);
+      setMarketError(`Errore salvataggio watchlist — ${detail}`);
     } finally {
       setMarketSaving(false);
     }
