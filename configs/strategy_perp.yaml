@@ -30,6 +30,17 @@ perp:
   trailing_mode: largo             # default; override da setup mobile (largo|stretto)
   time_stop_enabled: false        # toggle UI/app-dashboard; default off
   time_stop_hours: 8
+  # Profit Lock Ratchet: lavora SOLO nel tratto TP1→TP2 (si attiva dopo il TP1).
+  # Ogni scalino e' [quota del tratto raggiunta, quota CUMULATIVA del residuo da
+  # chiudere]: al 95% del tratto si e' chiuso l'80% e il 20% corre verso il TP2.
+  profit_lock_steps:
+    - [0.50, 0.25]
+    - [0.70, 0.50]
+    - [0.95, 0.80]
+  ratchet_breakeven_pct: 50.0        # rientro dopo l'ultimo scalino: chiude tutto a meta' tratto
+  ratchet_breakeven_after_step: 3    # da quale scalino si arma il breakeven del ratchet
+  ratchet_run_beyond_tp2: true       # oltre il TP2 non chiude: lascia correre col trailing
+  ratchet_trailing_pct: 1.0          # distacco del trailing dal massimo, oltre il TP2
   dynamic_leverage_enabled: true
   min_volume_profile_liquidity_usd: 50000.0
   default_leverage: 2

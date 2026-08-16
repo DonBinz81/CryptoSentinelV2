@@ -56,7 +56,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |-- agent/ - agent autonomous trading.
 |   |   |   |-- heartbeat.py - heartbeat interno in memoria.
 |   |   |   |-- service.py - orchestratore Step 6/9: segnali, risk, meta-controller, watchlist scanner Spot/Perp, filtro inversione mercato BTC 15m per nuove aperture, slow tick con watchlist combinata, dry-run DB, daily Spot heartbeat 20:00-23:30 UTC, chiusure ATR/breakeven/trailing con breakeven Spot/Perp configurabile e trailing etichettato separatamente dal breakeven, alert drawdown configurabile, snapshot grafici trade con finestra completa delle 20 candele strutturali SL, stop iniziale separato dallo stop dinamico, runtime settings con margine fisso Perp opzionale e provider execution astratti.
-|   |   |   |-- watchlist.py - helper RuntimeState per watchlist operativa AI selezionata dall'utente e validata contro `Settings.eligible_tokens`.
+|   |   |   |-- watchlist.py - helper RuntimeState per watchlist operativa AI selezionata dall'utente e validata contro `Settings.eligible_tokens`; le liste di mercato (spot/perp) sono filtrate anche sulla master in lettura (`restrict_to`) e potate quando la master si restringe, cosi' cio' che il client rilegge resta sempre salvabile.
 |   |   |   |-- ohlcv_warmup.py - warm-up storico delle klines 5m Binance per watchlist AI, con lock/cadenza anti-burst e popolamento cache Data Coverage/signal engine.
 |   |   |   |-- brain/ - Claude meta-controller con poteri limitati; fallback dry-run deterministico e fail-closed fuori dry-run.
 |   |   |   |-- loops/ - loop veloce gestione posizioni e loop lento scansione/decisione safe-by-default.
@@ -137,7 +137,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |   |   |-- alerts.py - AlertConfig (legacy, una riga per utente, config_json + state_json).
 |   |   |   |   |-- device_alert_configs.py - DeviceAlertConfig (una riga per (user_id, device_id): alert separati per device).
 |   |   |   |   |-- trades.py - SpotTrade e PerpTrade con timestamp_utc/block_timestamp_utc separati, prezzi a 18 decimali, PnL, fee, slippage e funding snapshot.
-|   |   |   |   |-- positions.py - SpotPosition e PerpPosition con prezzi/livelli a 18 decimali, livelli SL/TP/trailing, ATR entry, candela riferimento stop loss, fee/slippage/funding, margin e stato TP1.
+|   |   |   |   |-- positions.py - SpotPosition e PerpPosition con prezzi/livelli a 18 decimali, livelli SL/TP/trailing, ATR entry, candela riferimento stop loss, fee/slippage/funding, margin, stato TP1 e `ratchet_state` (JSON: base_size, closed_frac, last_step del Profit Lock Ratchet).
 |   |   |   |   |-- decisions.py - AgentDecision (action, confidence, reasoning Text, trade_id).
 |   |   |   |   |-- pnl.py - PnlSnapshot (orari) e PortfolioState (una riga per utente, upsert).
 |   |   |   |   |-- archives.py - ArchivedRun: snapshot JSON dei dati dry-run simulati esclusi dalle viste live.
@@ -198,6 +198,8 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |       |-- unit/test_agent_step6.py - regressioni Step 6/9 per segnali Spot/Perp, risk guardrail, meta-controller, kill switch, daily heartbeat, watchlist scanner e dry-run agent service con persistenza decisione/trade.
 |       |-- unit/test_mobile_agent_step7.py - regressioni Step 7 per settings mobile persistiti/applicati live, onboarding validation e wallet multi-network.
 |       |-- unit/test_signal_stop_loss_modes.py - regressioni signal engine per stop loss Spot/Perp in modalita' ATR e Min/Max 20 candele con buffer.
+|       |-- unit/test_watchlist_market_sync.py - regressione coerenza master/spot/perp: la lettura filtra anche sulla master (`restrict_to`), la PUT master pota le liste di mercato, l'errore elenca tutti i simboli fuori master.
+|       |-- unit/test_profit_lock.py - Profit Lock Ratchet: progresso misurato sul tratto TP1->TP2, livelli con quote cumulative sul residuo post-TP1, breakeven del ratchet, validazione scalini e parametri.
 |       |-- integration/test_market_data_providers.py - regressioni provider market-data, inclusa cache identità su refresh ripetuti dei prezzi.
 |       |-- unit/test_persistence_layer.py - test async: check_db, migrazione idempotente, x402 budget, SpotTrade dual timestamp, PerpPosition leverage/liquidation, portfolio upsert, decision reasoning, GlobalView, SpotView/PerpView, archiviazione dry-run e backup.
 |       `-- integration/ - gate Step 3 e API execution Step 4.
