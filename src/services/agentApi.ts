@@ -390,7 +390,12 @@ export interface AgentMobileSettings {
   perp_trailing_mode: 'largo' | 'stretto';
   perp_trailing_pnl_pct: number;
   perp_protection_mode: 'off' | 'trailing' | 'profit_lock';
+  /** Scalini del ratchet: [punto del tratto TP1→TP2, quota cumulativa del residuo da chiudere]. */
   perp_profit_lock_steps: Array<[number, number]>;
+  perp_ratchet_breakeven_pct: number;
+  perp_ratchet_breakeven_after_step: number;
+  perp_ratchet_run_beyond_tp2: boolean;
+  perp_ratchet_trailing_pct: number;
   perp_breakeven_min_profit_usd: number;
   perp_tp1_close_pct: number;
   perp_time_stop_hours: number;

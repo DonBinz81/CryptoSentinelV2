@@ -167,8 +167,12 @@ def _settings_from_config(settings: SettingsDep) -> AgentMobileSettings:
         perp_trailing_pnl_pct=0.0,
         perp_protection_mode=getattr(settings, "perp_protection_mode", "trailing"),
         perp_profit_lock_steps=getattr(
-            settings, "perp_profit_lock_steps", [(0.60, 0.25), (0.80, 0.50), (0.95, 0.75)]
+            settings, "perp_profit_lock_steps", [(0.50, 0.25), (0.70, 0.50), (0.95, 0.80)]
         ),
+        perp_ratchet_breakeven_pct=getattr(settings, "perp_ratchet_breakeven_pct", 50.0),
+        perp_ratchet_breakeven_after_step=getattr(settings, "perp_ratchet_breakeven_after_step", 3),
+        perp_ratchet_run_beyond_tp2=getattr(settings, "perp_ratchet_run_beyond_tp2", True),
+        perp_ratchet_trailing_pct=getattr(settings, "perp_ratchet_trailing_pct", 1.0),
         perp_tp1_close_pct=70.0,
         perp_time_stop_hours=settings.perp_time_stop_hours,
         post_close_candles=10,

@@ -119,9 +119,15 @@ class AgentMobileSettings(BaseModel):
     perp_protection_mode: str | None = Field(default=None)
     # Scalini del profit lock: coppie (soglia_progresso, lock) verso TP2. Attivi solo con
     # perp_protection_mode="profit_lock". Validati: soglie e lock crescenti in (0,1), lock < soglia.
+    # Scalini del ratchet: (quota del tratto TP1→TP2, quota CUMULATIVA del residuo da
+    # chiudere). Vedi _ratchet_level in agent/service.py.
     perp_profit_lock_steps: list[tuple[float, float]] = Field(
-        default_factory=lambda: [(0.60, 0.25), (0.80, 0.50), (0.95, 0.75)]
+        default_factory=lambda: [(0.50, 0.25), (0.70, 0.50), (0.95, 0.80)]
     )
+    perp_ratchet_breakeven_pct: float = Field(default=50.0, ge=0.0, le=100.0)
+    perp_ratchet_breakeven_after_step: int = Field(default=3, ge=1, le=10)
+    perp_ratchet_run_beyond_tp2: bool = Field(default=True)
+    perp_ratchet_trailing_pct: float = Field(default=1.0, ge=0.1, le=20.0)
     perp_tp1_close_pct: float = Field(default=70.0, ge=1.0, le=99.0)
     perp_time_stop_hours: int = Field(default=8, ge=0, le=168)
     perp_fee_mode: str = Field(default="taker", pattern="^(taker|maker|none)$")
@@ -142,20 +148,28 @@ class AgentMobileSettings(BaseModel):
             raise ValueError("perp_protection_mode must be off|trailing|profit_lock")
         else:
             self.perp_trailing_enabled = self.perp_protection_mode == "trailing"
-        # Scalini profit lock: (soglia, lock) strettamente crescenti in (0,1), lock < soglia.
+        # Scalini del ratchet: (quota del tratto TP1→TP2, quota CUMULATIVA del residuo da
+        # chiudere), entrambe strettamente crescenti. La quota di chiusura può arrivare a 1
+        # (l'ultimo scalino chiude tutto) e NON è vincolata a stare sotto la soglia: sono
+        # due grandezze diverse — dove sono arrivato vs quanto chiudo.
         prev_thr = 0.0
-        prev_lock = 0.0
+        prev_frac = 0.0
         for pair in self.perp_profit_lock_steps or []:
             if len(pair) != 2:
-                raise ValueError("ogni scalino profit lock deve essere (soglia, lock)")
-            thr, lock = float(pair[0]), float(pair[1])
-            if not (0.0 < thr < 1.0) or not (0.0 < lock < 1.0):
-                raise ValueError("soglia e lock degli scalini devono essere in (0,1)")
-            if lock >= thr:
-                raise ValueError("il lock di uno scalino deve essere < della sua soglia")
-            if thr <= prev_thr or lock <= prev_lock:
-                raise ValueError("soglie e lock degli scalini devono essere strettamente crescenti")
-            prev_thr, prev_lock = thr, lock
+                raise ValueError("ogni scalino del ratchet deve essere (livello, quota_da_chiudere)")
+            thr, frac = float(pair[0]), float(pair[1])
+            if not (0.0 < thr < 1.0):
+                raise ValueError("il livello di uno scalino deve essere in (0,1)")
+            if not (0.0 < frac <= 1.0):
+                raise ValueError("la quota da chiudere deve essere in (0,1]")
+            if thr <= prev_thr or frac <= prev_frac:
+                raise ValueError("livelli e quote degli scalini devono essere strettamente crescenti")
+            prev_thr, prev_frac = thr, frac
+        # Se gli scalini vengono ridotti, il breakeven si aggancia all'ultimo disponibile
+        # invece di far fallire il salvataggio con un errore incomprensibile dall'app.
+        n_steps = len(self.perp_profit_lock_steps or [])
+        if n_steps and self.perp_ratchet_breakeven_after_step > n_steps:
+            self.perp_ratchet_breakeven_after_step = n_steps
         return self
 
 

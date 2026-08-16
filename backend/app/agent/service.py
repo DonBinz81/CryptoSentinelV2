@@ -216,6 +216,13 @@ class AgentService:
             perp_trailing_mode=self.settings.perp_trailing_mode,
             perp_trailing_pnl_pct=0.0,
             perp_tp1_close_pct=70.0,
+            perp_profit_lock_steps=getattr(
+                self.settings, "perp_profit_lock_steps", [(0.50, 0.25), (0.70, 0.50), (0.95, 0.80)]
+            ),
+            perp_ratchet_breakeven_pct=getattr(self.settings, "perp_ratchet_breakeven_pct", 50.0),
+            perp_ratchet_breakeven_after_step=getattr(self.settings, "perp_ratchet_breakeven_after_step", 3),
+            perp_ratchet_run_beyond_tp2=getattr(self.settings, "perp_ratchet_run_beyond_tp2", True),
+            perp_ratchet_trailing_pct=getattr(self.settings, "perp_ratchet_trailing_pct", 1.0),
             perp_time_stop_hours=self.settings.perp_time_stop_hours,
             post_close_candles=10,
         )
@@ -1225,15 +1232,29 @@ class AgentService:
         now: datetime,
         *,
         partial: bool = False,
+        close_fraction: Decimal | None = None,
     ) -> Decimal:
-        """Chiude (totalmente o al 50% per TP1) una posizione perp; crea trade di chiusura con pnl_usd."""
+        """Chiude una posizione perp (totale o parziale); crea trade di chiusura con pnl_usd.
+
+        `partial` senza `close_fraction` usa `perp_tp1_close_pct` (chiusura al TP1).
+        `close_fraction` (0,1] chiude quella quota della size CORRENTE ed è la via usata
+        dagli scalini del ratchet, che chiudono frazioni arbitrarie del residuo.
+        """
         is_long = pos.side == "long"
         pnl_per_unit = (exit_price - pos.entry_price) if is_long else (pos.entry_price - exit_price)
         # Fee pura = opening_fee_usd escludendo lo slippage già incluso nell'entry_price.
         fee_only = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
 
+        f_req = close_fraction if close_fraction is not None else Decimal(str(self._ms.perp_tp1_close_pct)) / Decimal("100")
+        f_req = max(Decimal("0"), min(Decimal("1"), f_req))
+        # Una quota del 100% (o che lascerebbe una size trascurabile) è una chiusura piena:
+        # altrimenti la posizione resterebbe "open" con size 0.
+        residual = (pos.size * (Decimal("1") - f_req)).quantize(Decimal("0.000001"))
+        if partial and residual <= 0:
+            partial = False
+
         if partial:
-            f = Decimal(str(self._ms.perp_tp1_close_pct)) / Decimal("100")
+            f = f_req
             close_size = (pos.size * f).quantize(Decimal("0.000001"))
             funding_share = pos.funding_accrued_usd * f
             raw_pnl = pnl_per_unit * close_size
@@ -1832,40 +1853,101 @@ class AgentService:
                     if ms.perp_trailing_enabled and trail <= pos.entry_price and (pos.stop_loss is None or trail < pos.stop_loss) and (pos.trailing_stop is None or trail < pos.trailing_stop):
                         pos.trailing_stop = trail; pos.updated_at = now; session.add(pos)
 
-            # ── Profit Lock Ratchet: dopo TP1, lo stop sale a gradini verso TP2. ──
-            # Usa l'estremo favorevole (max_price) → immune alle spike; scrive su
-            # trailing_stop come il trailing (mai su stop_loss, per non collidere col breakeven).
-            # Non richiede l'ATR (a differenza di breakeven/trailing).
+            # ── Profit Lock Ratchet: dopo il TP1 lavora SOLO nel tratto TP1→TP2. ──
+            # Tre meccanismi distinti:
+            #  1. uscite parziali agli scalini (quote CUMULATIVE del residuo post-TP1);
+            #  2. "breakeven del ratchet": dopo lo scalino configurato, stop fisso a
+            #     `perp_ratchet_breakeven_pct` del tratto (scritto su trailing_stop);
+            #  3. oltre il TP2 si lascia correre con un trailing percentuale (gestito
+            #     più sotto, dove il TP2 chiuderebbe).
+            # Usa l'estremo favorevole (max_price) → monotono e immune alle spike.
             if (
                 prot_mode == "profit_lock"
                 and not _ssl_suspended
                 and pos.tp1_reached
+                and pos.take_profit_1
                 and pos.take_profit_2
                 and pos.max_price is not None
             ):
-                _pl = _profit_lock_stop(pos.entry_price, pos.take_profit_2, pos.max_price, profit_lock_steps, is_long)
-                if _pl is not None:
-                    candidate, progress, lock = _pl
-                    improves = (
-                        pos.trailing_stop is None
-                        or (is_long and candidate > pos.trailing_stop)
-                        or (not is_long and candidate < pos.trailing_stop)
-                    )
-                    # Mai oltre il prezzo corrente → niente chiusura immediata.
-                    not_beyond = (candidate < price) if is_long else (candidate > price)
-                    if improves and not_beyond:
-                        old_stop = pos.trailing_stop
-                        pos.trailing_stop = candidate
-                        pos.updated_at = now
-                        session.add(pos)
-                        logger.info(
-                            "profit_lock_step",
-                            asset=pos.asset,
-                            progress=float(progress),
-                            lock=float(lock),
-                            old_stop=float(old_stop) if old_stop is not None else None,
-                            new_stop=float(candidate),
+                progress = _ratchet_progress(pos.take_profit_1, pos.take_profit_2, pos.max_price, is_long)
+                if progress is not None:
+                    try:
+                        r_state = json.loads(pos.ratchet_state) if pos.ratchet_state else {}
+                    except (TypeError, ValueError):
+                        r_state = {}
+                    # Riferimento fisso: il residuo nel momento in cui il ratchet si arma.
+                    # Le quote degli scalini sono cumulative SU QUESTA base, non a catena.
+                    if "base_size" not in r_state:
+                        r_state["base_size"] = str(pos.size)
+                    base_size = Decimal(r_state["base_size"])
+                    already = Decimal(str(r_state.get("closed_frac", "0")))
+
+                    step_idx, cum_frac = _ratchet_level(progress, profit_lock_steps)
+
+                    # 1. Uscita parziale: chiude la differenza rispetto a quanto già chiuso.
+                    if step_idx >= 0 and cum_frac > already and pos.size > 0:
+                        delta = cum_frac - already
+                        want_size = base_size * delta
+                        frac_now = min(Decimal("1"), want_size / pos.size) if pos.size > 0 else Decimal("0")
+                        if frac_now > 0:
+                            thr = Decimal(str(profit_lock_steps[step_idx][0]))
+                            level_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, thr, is_long)
+                            # Fill al livello dello scalino, non al mercato: se il feed è in
+                            # ritardo il prezzo può averlo superato di molto.
+                            fill = level_price if ((is_long and price >= level_price) or (not is_long and price <= level_price)) else price
+                            pnl_step = await self._close_perp_position(
+                                session, pos, fill, "ratchet_step", now, partial=True, close_fraction=frac_now
+                            )
+                            r_state["closed_frac"] = str(cum_frac)
+                            r_state["last_step"] = step_idx
+                            logger.info(
+                                "ratchet_step_closed",
+                                asset=pos.asset,
+                                step=step_idx + 1,
+                                progress=float(progress),
+                                closed_cum_pct=float(cum_frac * 100),
+                                size_closed=float(want_size),
+                                fill=float(fill),
+                                pnl=float(pnl_step),
+                            )
+                            margin_step = pos.entry_price * base_size / Decimal(max(int(pos.leverage or 1), 1))
+                            asyncio.create_task(
+                                notifier.notify_trade_closed(
+                                    user_id=user_id,
+                                    trade_id=f"cls_{pos.position_id}",
+                                    asset=pos.asset,
+                                    market="perp",
+                                    pnl_usd=pnl_step,
+                                    pnl_pct=(pnl_step / margin_step * 100) if margin_step > 0 else Decimal("0"),
+                                    close_reason="ratchet_step",
+                                    is_dry_run=ms.execution_mode == "dry_run",
+                                )
+                            )
+
+                    # 2. Breakeven del ratchet: si arma solo dallo scalino configurato in poi.
+                    be_after = max(1, int(getattr(ms, "perp_ratchet_breakeven_after_step", 3)))
+                    if step_idx >= (be_after - 1):
+                        be_pct = Decimal(str(getattr(ms, "perp_ratchet_breakeven_pct", 50.0))) / Decimal("100")
+                        be_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, be_pct, is_long)
+                        improves = (
+                            pos.trailing_stop is None
+                            or (is_long and be_price > pos.trailing_stop)
+                            or (not is_long and be_price < pos.trailing_stop)
                         )
+                        # Mai oltre il prezzo corrente → niente chiusura immediata.
+                        not_beyond = (be_price < price) if is_long else (be_price > price)
+                        if improves and not_beyond:
+                            pos.trailing_stop = be_price
+                            logger.info(
+                                "ratchet_breakeven_armed",
+                                asset=pos.asset,
+                                step=step_idx + 1,
+                                level=float(be_price),
+                            )
+
+                    pos.ratchet_state = json.dumps(r_state)
+                    pos.updated_at = now
+                    session.add(pos)
 
             # ── Smart Stop Loss (vende parzialmente prima del SL classico) ──
             if ms.perp_smart_sl_enabled and pos.initial_stop_loss is not None:
@@ -1887,7 +1969,36 @@ class AgentService:
                     reason = "breakeven" if at_be else "stop_loss"
 
             if reason is None and pos.tp1_reached and pos.take_profit_2:
-                if (is_long and price >= pos.take_profit_2) or (not is_long and price <= pos.take_profit_2):
+                at_or_past = (is_long and price >= pos.take_profit_2) or (not is_long and price <= pos.take_profit_2)
+                # "Superato di slancio": al controllo il prezzo è GIÀ oltre il TP2 (lo ha
+                # attraversato fra un tick e l'altro). In quel caso non si chiude: si lascia
+                # correre con un trailing percentuale. Se invece lo tocca esattamente, il
+                # TP2 chiude come sempre.
+                beyond = (is_long and price > pos.take_profit_2) or (not is_long and price < pos.take_profit_2)
+                run_on = prot_mode == "profit_lock" and bool(getattr(ms, "perp_ratchet_run_beyond_tp2", True))
+                if at_or_past and beyond and run_on:
+                    pct = Decimal(str(getattr(ms, "perp_ratchet_trailing_pct", 1.0))) / Decimal("100")
+                    ref = pos.max_price if pos.max_price is not None else price
+                    cand = ref * (Decimal("1") - pct) if is_long else ref * (Decimal("1") + pct)
+                    improves = (
+                        pos.trailing_stop is None
+                        or (is_long and cand > pos.trailing_stop)
+                        or (not is_long and cand < pos.trailing_stop)
+                    )
+                    not_beyond = (cand < price) if is_long else (cand > price)
+                    if improves and not_beyond:
+                        pos.trailing_stop = cand
+                        pos.updated_at = now
+                        session.add(pos)
+                        logger.info(
+                            "ratchet_running_beyond_tp2",
+                            asset=pos.asset,
+                            price=float(price),
+                            tp2=float(pos.take_profit_2),
+                            trailing=float(cand),
+                            pct=float(pct * 100),
+                        )
+                elif at_or_past:
                     reason = "take_profit_2"
 
             if reason is None and not pos.tp1_reached and pos.take_profit_1:
@@ -2757,28 +2868,41 @@ def _stop_reference_from_signal(signal: dict) -> dict[str, datetime | Decimal | 
     return {"time": parsed_time, "price": parsed_price, "field": field}
 
 
-def _profit_lock_stop(entry: Decimal, tp2: Decimal, extreme: Decimal, steps, is_long: bool):
-    """Profit Lock Ratchet: livello di stop protettivo verso TP2, o None se nessuno scalino.
+def _ratchet_progress(tp1: Decimal, tp2: Decimal, extreme: Decimal, is_long: bool) -> Decimal | None:
+    """Quota del tratto TP1→TP2 percorsa dall'estremo favorevole, clampata in [0,1].
 
-    progress = quota dell'estremo favorevole (max_price long / min short) percorsa verso TP2,
-    clampata in [0,1]. lock = massimo lock_pct fra gli scalini con soglia <= progress.
-    stop = entry + lock*(tp2-entry) [long; simmetrico short]. Usa l'estremo, non il prezzo
-    corrente → monotono e immune alle spike. Ritorna (stop, progress, lock) o None.
+    Il ratchet entra in gioco solo dopo il TP1, quindi lo spazio rilevante è quello che
+    resta da percorrere. Misurando dall'entry, con TP1 a 2,5 ATR e TP2 a 4,0 il progresso
+    varrebbe già 62,5% appena toccato il TP1 e ogni scalino sotto quella quota scatterebbe
+    tutto insieme. Usa l'estremo (max_price long / min short), non il prezzo corrente →
+    monotono e immune alle spike. None se il tratto non è definito.
     """
-    span = (tp2 - entry) if is_long else (entry - tp2)
+    if tp1 is None or tp2 is None or extreme is None:
+        return None
+    span = (tp2 - tp1) if is_long else (tp1 - tp2)
     if span <= 0:
         return None
-    fav = (extreme - entry) if is_long else (entry - extreme)
-    progress = max(Decimal("0"), min(Decimal("1"), fav / span))
-    lock = None
-    for pair in steps:  # attesi crescenti per soglia → resta l'ultimo raggiunto
-        thr, lk = Decimal(str(pair[0])), Decimal(str(pair[1]))
+    fav = (extreme - tp1) if is_long else (tp1 - extreme)
+    return max(Decimal("0"), min(Decimal("1"), fav / span))
+
+
+def _ratchet_level(progress: Decimal, steps) -> tuple[int, Decimal]:
+    """Ultimo scalino raggiunto e quota CUMULATIVA del residuo da aver chiuso.
+
+    steps = [(soglia_sul_tratto, quota_cumulativa_da_chiudere), ...] crescenti.
+    Ritorna (indice, quota); (-1, 0) se non è stato raggiunto nemmeno il primo.
+    """
+    idx, cum = -1, Decimal("0")
+    for i, pair in enumerate(steps):
+        thr, frac = Decimal(str(pair[0])), Decimal(str(pair[1]))
         if progress >= thr:
-            lock = lk
-    if lock is None:
-        return None
-    stop = (entry + lock * (tp2 - entry)) if is_long else (entry - lock * (entry - tp2))
-    return stop, progress, lock
+            idx, cum = i, frac
+    return idx, cum
+
+
+def _ratchet_breakeven_price(tp1: Decimal, tp2: Decimal, pct: Decimal, is_long: bool) -> Decimal:
+    """Prezzo del 'breakeven del ratchet': punto fisso a `pct` del tratto TP1→TP2."""
+    return (tp1 + pct * (tp2 - tp1)) if is_long else (tp1 - pct * (tp1 - tp2))
 
 
 def _level_fill_price(pos, reason: str, market_price: Decimal) -> Decimal:

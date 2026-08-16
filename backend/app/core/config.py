@@ -651,10 +651,19 @@ class Settings(BaseSettings):
     # Protezione profitto post-TP1: off|trailing|profit_lock. Default "trailing" = storico.
     perp_protection_mode: str = Field(default="trailing", alias="PERP_PROTECTION_MODE")
     # Ratchet profit lock: coppie (soglia_progresso→TP2, lock). Attive solo con profit_lock.
+    # Scalini del ratchet: (quota del tratto TP1→TP2, quota CUMULATIVA del residuo da
+    # chiudere). Misurati sul tratto, non dall'entry: il ratchet lavora solo dopo il TP1.
     perp_profit_lock_steps: list[tuple[float, float]] = Field(
-        default_factory=lambda: [(0.60, 0.25), (0.80, 0.50), (0.95, 0.75)],
+        default_factory=lambda: [(0.50, 0.25), (0.70, 0.50), (0.95, 0.80)],
         alias="PERP_PROFIT_LOCK_STEPS",
     )
+    # Breakeven del ratchet: punto fisso sul tratto TP1→TP2 dove si chiude tutto al
+    # rientro, armato solo a partire dallo scalino indicato.
+    perp_ratchet_breakeven_pct: float = Field(default=50.0, alias="PERP_RATCHET_BREAKEVEN_PCT")
+    perp_ratchet_breakeven_after_step: int = Field(default=3, alias="PERP_RATCHET_BREAKEVEN_AFTER_STEP")
+    # Oltre il TP2: invece di chiudere, si lascia correre con un trailing percentuale.
+    perp_ratchet_run_beyond_tp2: bool = Field(default=True, alias="PERP_RATCHET_RUN_BEYOND_TP2")
+    perp_ratchet_trailing_pct: float = Field(default=1.0, alias="PERP_RATCHET_TRAILING_PCT")
     perp_time_stop_enabled: bool = Field(default=False, alias="PERP_TIME_STOP_ENABLED")
     perp_time_stop_hours: int = Field(default=8, alias="PERP_TIME_STOP_HOURS")
     perp_dynamic_leverage_enabled: bool = Field(default=True, alias="PERP_DYNAMIC_LEVERAGE_ENABLED")

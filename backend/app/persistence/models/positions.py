@@ -84,6 +84,9 @@ class PerpPosition(Base):
     slippage_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)      # solo taker
     funding_accrued_usd: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False, default=Decimal("0"))
     smart_sl_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stato del Profit Lock Ratchet (JSON): base_size = residuo quando si arma,
+    # closed_frac = quota cumulativa già chiusa dagli scalini, last_step = ultimo scalino.
+    ratchet_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     tp1_reached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open / closed
     venue: Mapped[str | None] = mapped_column(String(64), nullable=True)

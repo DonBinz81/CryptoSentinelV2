@@ -190,7 +190,11 @@ const defaultSettings: AgentMobileSettings = {
   perp_trailing_mode: 'largo' as const,
   perp_trailing_pnl_pct: 0,
   perp_protection_mode: 'trailing' as const,
-  perp_profit_lock_steps: [[0.6, 0.25], [0.8, 0.5], [0.95, 0.75]] as Array<[number, number]>,
+  perp_profit_lock_steps: [[0.5, 0.25], [0.7, 0.5], [0.95, 0.8]] as Array<[number, number]>,
+  perp_ratchet_breakeven_pct: 50,
+  perp_ratchet_breakeven_after_step: 3,
+  perp_ratchet_run_beyond_tp2: true,
+  perp_ratchet_trailing_pct: 1,
   perp_breakeven_min_profit_usd: 0,
   perp_tp1_close_pct: 70,
   perp_time_stop_hours: 8,
@@ -1761,20 +1765,44 @@ const SetupPane: FC<{
         </div>
         {settings.perp_protection_mode === 'profit_lock' && (
           <div className="space-y-2 rounded-lg border border-gray-700 p-3">
-            <p className="text-xs font-semibold text-gray-400">Scalini Profit Lock — progresso verso TP2 → quota di profitto bloccata</p>
+            <p className="text-xs font-semibold text-gray-400">Scalini ratchet — punto del tratto TP1→TP2 → quota del residuo da chiudere</p>
             {settings.perp_profit_lock_steps.map((stepPair, i) => (
               <div key={i} className="grid grid-cols-2 gap-3">
-                <NumberInput label={`Soglia ${i + 1} (%)`} value={Math.round(stepPair[0] * 100)} step={5} onChange={(v) => {
+                <NumberInput label={`Livello ${i + 1} (%)`} value={Math.round(stepPair[0] * 100)} step={5} onChange={(v) => {
                   const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [Math.max(0, Math.min(100, v)) / 100, s[1]] : s)) as Array<[number, number]>;
                   patch({ perp_profit_lock_steps: next });
                 }} />
-                <NumberInput label={`Lock ${i + 1} (%)`} value={Math.round(stepPair[1] * 100)} step={5} onChange={(v) => {
+                <NumberInput label={`Chiudi ${i + 1} (%)`} value={Math.round(stepPair[1] * 100)} step={5} onChange={(v) => {
                   const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [s[0], Math.max(0, Math.min(100, v)) / 100] : s)) as Array<[number, number]>;
                   patch({ perp_profit_lock_steps: next });
                 }} />
               </div>
             ))}
-            <p className="text-xs text-gray-500">Soglie e lock crescenti, lock &lt; soglia. Dopo il TP1 lo stop sale a gradini verso il TP2 e non scende mai (immune alle spike).</p>
+            <p className="text-xs text-gray-500">
+              Livelli e quote crescenti. Le quote sono <span className="text-gray-400">cumulative</span> sul residuo rimasto dopo il TP1:
+              50→25 / 70→50 / 95→80 significa che al 95% del tratto si è chiuso l'80% in tutto, e il 20% corre verso il TP2.
+            </p>
+            <div className="grid grid-cols-2 gap-3 border-t border-gray-700 pt-3">
+              <NumberInput label="Breakeven ratchet (% del tratto)" value={settings.perp_ratchet_breakeven_pct} step={5}
+                onChange={(v) => patch({ perp_ratchet_breakeven_pct: Math.max(0, Math.min(100, v)) })} />
+              <NumberInput label="Si arma dallo scalino n." value={settings.perp_ratchet_breakeven_after_step} step={1}
+                onChange={(v) => patch({ perp_ratchet_breakeven_after_step: Math.max(1, Math.min(settings.perp_profit_lock_steps.length, Math.round(v))) })} />
+            </div>
+            <p className="text-xs text-gray-500">Raggiunto quello scalino, un rientro chiude tutto a quel punto del tratto TP1→TP2.</p>
+            <div className="border-t border-gray-700 pt-3">
+              <ToggleInput label="Lascia correre oltre il TP2" checked={settings.perp_ratchet_run_beyond_tp2}
+                onChange={(v) => patch({ perp_ratchet_run_beyond_tp2: v })} />
+              {settings.perp_ratchet_run_beyond_tp2 && (
+                <div className="mt-2">
+                  <NumberInput label="Trailing oltre TP2 (% dal massimo)" value={settings.perp_ratchet_trailing_pct} step={0.5}
+                    onChange={(v) => patch({ perp_ratchet_trailing_pct: Math.max(0.1, Math.min(20, v)) })} />
+                </div>
+              )}
+              <p className="mt-1 text-xs text-gray-500">
+                Se il prezzo supera il TP2 di slancio non si chiude: parte un trailing a questa distanza dal massimo raggiunto.
+                Toccando il TP2 esatto, invece, si chiude come sempre.
+              </p>
+            </div>
           </div>
         )}
         <p className="px-1 text-xs text-gray-500">
