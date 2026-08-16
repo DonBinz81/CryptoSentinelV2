@@ -1,5 +1,5 @@
 # Competition eligible-token universe.
-# This list contains 150 unique entries (added BTC and BNB for perp/spot trading).
+# This list contains 148 unique entries (added BTC and BNB for perp/spot trading; removed XAUt and XAUM — too low volatility for VP strategy).
 
 eligible_tokens:
   - BTC
@@ -22,7 +22,6 @@ eligible_tokens:
   - LTC
   - AVAX
   - SHIB
-  - XAUt
   - WLFI
   - H
   - DOT
@@ -151,4 +150,3 @@ eligible_tokens:
   - PEAQ
   - COAI
   - BDCA
-  - XAUM
