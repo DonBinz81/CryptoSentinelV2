@@ -1,5 +1,5 @@
 # Competition eligible-token universe.
-# This list contains 148 unique entries (added BTC and BNB for perp/spot trading; removed XAUt and XAUM — too low volatility for VP strategy).
+# This list contains 148 unique entries (added BTC, BNB, SOL, NEAR; removed XAUt, XAUM, ATOM, INJ — volatility and liquidity optimization for VP mean-reversion).
 
 eligible_tokens:
   - BTC
@@ -31,11 +31,11 @@ eligible_tokens:
   - USDD
   - ETC
   - AAVE
-  - ATOM
+  - SOL
+  - NEAR
   - U
   - STABLE
   - FIL
-  - INJ
   - 币安人生
   - NIGHT
   - FET
