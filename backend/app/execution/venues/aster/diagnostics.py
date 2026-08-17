@@ -154,7 +154,18 @@ async def run_connection_test(settings) -> DiagnosticsReport:
             f"Servizio Aster raggiungibile: {markets} mercati pubblicati.",
         ))
     except AsterError as exc:
-        detail, code = _describe(exc)
+        # This call carries no credentials: a refusal here is about the address of
+        # the service or the network, never about the keys. Saying "authentication
+        # failed" would send the reader hunting for the wrong problem.
+        if exc.status in (401, 403, 404):
+            detail = (
+                f"Il servizio Aster ha rifiutato la richiesta pubblica (codice {exc.status}). "
+                "Questa chiamata non usa credenziali: verifica l'indirizzo del servizio "
+                "configurato in ASTER_BASE_URL, oppure un blocco di rete verso quell'host."
+            )
+            code = str(exc.status)
+        else:
+            detail, code = _describe(exc)
         checks.append(Check("reachability", "Connessione API", ERROR, detail, code))
         return finish(ERROR, "CONNESSIONE ASTER: ERRORE")
 

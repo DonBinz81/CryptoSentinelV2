@@ -643,7 +643,7 @@ class Settings(BaseSettings):
     #   signer = API wallet address, whose private key signs every request
     # Values live only in .env on the server; .env.example keeps them empty.
     aster_enabled: bool = Field(default=False, alias="ASTER_ENABLED")
-    aster_base_url: str = Field(default="https://fapi3.asterdex.com", alias="ASTER_BASE_URL")
+    aster_base_url: str = Field(default="https://fapi.asterdex.com", alias="ASTER_BASE_URL")
     aster_account_address: str = Field(default="", alias="ASTER_ACCOUNT_ADDRESS")
     aster_api_wallet_address: str = Field(default="", alias="ASTER_API_WALLET_ADDRESS")
     aster_api_wallet_private_key: str = Field(default="", alias="ASTER_API_WALLET_PRIVATE_KEY")
