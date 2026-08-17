@@ -526,11 +526,14 @@ const TokenToggle: FC<{
 // aprirne uno chiude gli altri (evento globale), e si chiude anche toccando
 // altrove o scorrendo. Sta dentro <label>, quindi il click va fermato o
 // attiverebbe il campo associato (sui toggle invertirebbe la spunta).
-const HelpTip: FC<{ text: string }> = ({ text }) => {
+const HelpTip: FC<{ text: string; top?: boolean }> = ({ text, top }) => {
   // `pos` nullo = chiuso. Il riquadro è `fixed` e centrato sullo schermo, non
   // ancorato al "?": ancorandolo, i campi della colonna destra lo facevano
   // uscire dal bordo. Verticalmente sta sotto il "?", oppure sopra se in fondo
   // allo schermo non ci sta.
+  // `top` forza invece la posizione in cima allo schermo: serve alle spiegazioni
+  // lunghe, che superano qualsiasi altezza stimata e uscirebbero dal bordo
+  // inferiore.
   const [pos, setPos] = useState<{ top: number; above: boolean } | null>(null);
   const idRef = useRef(`ht${Math.random().toString(36).slice(2, 9)}`);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -559,11 +562,15 @@ const HelpTip: FC<{ text: string }> = ({ text }) => {
           e.preventDefault();
           e.stopPropagation();
           if (pos) { setPos(null); return; }
-          const r = btnRef.current?.getBoundingClientRect();
-          if (!r) return;
-          const STIMA = 170; // altezza tipica del riquadro
-          const above = r.bottom + STIMA > window.innerHeight;
-          setPos({ top: above ? r.top - 8 : r.bottom + 8, above });
+          if (top) {
+            setPos({ top: 64, above: false });
+          } else {
+            const r = btnRef.current?.getBoundingClientRect();
+            if (!r) return;
+            const STIMA = 170; // altezza tipica del riquadro
+            const above = r.bottom + STIMA > window.innerHeight;
+            setPos({ top: above ? r.top - 8 : r.bottom + 8, above });
+          }
           document.dispatchEvent(new CustomEvent('helptip:open', { detail: idRef.current }));
         }}
         className={`ml-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition-colors ${
@@ -579,7 +586,7 @@ const HelpTip: FC<{ text: string }> = ({ text }) => {
             top: pos.above ? undefined : pos.top,
             bottom: pos.above ? window.innerHeight - pos.top : undefined,
           }}
-          className="fixed left-1/2 z-50 block w-max max-w-[min(19rem,calc(100vw-2.5rem))] -translate-x-1/2 whitespace-pre-line rounded-xl border border-dark-600 bg-dark-900 px-4 py-3 text-[13px] font-normal leading-relaxed text-gray-200 shadow-2xl"
+          className="fixed left-1/2 z-50 block max-h-[70vh] w-max max-w-[min(19rem,calc(100vw-2.5rem))] -translate-x-1/2 overflow-y-auto whitespace-pre-line rounded-xl border border-dark-600 bg-dark-900 px-4 py-3 text-[13px] font-normal leading-relaxed text-gray-200 shadow-2xl"
         >
           {text}
         </span>
@@ -1596,7 +1603,10 @@ const SetupPane: FC<{
       </section>
 
       <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-3">
-        <h3 className="text-sm font-semibold text-white">Onboarding</h3>
+        <h3 className="text-sm font-semibold text-white">
+          Onboarding
+          <HelpTip top text={'Controlla quali servizi esterni sono impostati sul backend:\n\nCMC — i prezzi delle monete\nClaude — il modello che valuta i segnali\nWallet — l\'indirizzo e la chiave per operare\nBSC RPC — il collegamento alla blockchain\nFCM — le notifiche push sul telefono\nTWAK — le credenziali dell\'exchange\nx402 — i pagamenti in USDC\n\nVerde "ready" = il valore c\'è. Rosso "missing" = manca.\n\nControlla solo che siano impostati, non che funzionino davvero. Richiede l\'admin token.'} />
+        </h3>
         <button onClick={onValidate} disabled={!adminToken || saving} className="w-full rounded-lg bg-accent-blue px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">
           {saving ? 'Checking...' : 'Validate'}
         </button>
