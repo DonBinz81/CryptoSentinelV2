@@ -8,6 +8,7 @@ from .decisions import AgentDecision
 from .device_alert_configs import DeviceAlertConfig
 from .device_profiles import DeviceProfile
 from .equity_adjustments import EquityAdjustment
+from .orders import PerpOrder
 from .device_tokens import DeviceToken
 from .pnl import PnlSnapshot, PortfolioState
 from .positions import PerpPosition, SpotPosition
@@ -23,6 +24,7 @@ __all__ = [
     "ClaudeApiUsage",
     "ArchivedRun",
     "AgentDecision",
+    "PerpOrder",
     "DeviceAlertConfig",
     "DeviceProfile",
     "EquityAdjustment",

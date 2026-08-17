@@ -50,12 +50,44 @@ async def _apply_column_migrations(conn) -> None:
         ("perp_positions", "ratchet_state", "TEXT"),
         ("support_tickets", "user_last_seen_at", "DATETIME"),
         ("support_tickets", "admin_last_seen_at", "DATETIME"),
+        ("perp_trades", "position_id", "VARCHAR(64)"),
     ]
     for table, column, col_type in new_columns:
         try:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
         except Exception:
             pass  # column already exists
+
+    await _backfill_perp_trade_position_id(conn)
+
+
+async def _backfill_perp_trade_position_id(conn) -> None:
+    """Fill position_id on historical perp trades from the trade_id prefix.
+
+    Historical rows encode the link only inside the id, as
+    ``<prefix>_<position_id>_<hex8>`` with a 4-char prefix (cls_/add_/ssl_).
+    substr strips both ends; opening trades carry no position id and stay NULL.
+
+    Idempotent: only touches rows where position_id is still NULL.
+    """
+    try:
+        result = await conn.execute(
+            text(
+                """
+                UPDATE perp_trades
+                   SET position_id = substr(trade_id, 5, length(trade_id) - 13)
+                 WHERE position_id IS NULL
+                   AND length(trade_id) > 13
+                   AND (trade_id LIKE 'cls\\_%' ESCAPE '\\'
+                     OR trade_id LIKE 'add\\_%' ESCAPE '\\'
+                     OR trade_id LIKE 'ssl\\_%' ESCAPE '\\')
+                """
+            )
+        )
+        if result.rowcount:
+            logger.info("perp_trades_position_id_backfilled", rows=result.rowcount)
+    except Exception as exc:  # pragma: no cover - never block startup on a backfill
+        logger.warning("perp_trades_position_id_backfill_failed", error=str(exc))
 
 
 async def close_db() -> None:

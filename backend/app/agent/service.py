@@ -1282,6 +1282,7 @@ class AgentService:
         session.add(pos)
         close_trade = PerpTrade(
             trade_id=f"cls_{pos.position_id}_{uuid4().hex[:8]}",
+            position_id=pos.position_id,
             user_id=pos.user_id,
             asset=pos.asset,
             side=pos.side,
@@ -1416,6 +1417,7 @@ class AgentService:
 
                     close_trade = PerpTrade(
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
+                        position_id=pos.position_id,
                         user_id=pos.user_id, asset=pos.asset, side=pos.side,
                         direction="close", size=split_size, price=sell_price,
                         leverage=pos.leverage, status="confirmed",
@@ -1480,6 +1482,7 @@ class AgentService:
 
                     rebuy_trade = PerpTrade(
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
+                        position_id=pos.position_id,
                         user_id=pos.user_id, asset=pos.asset, side=pos.side,
                         direction="open", size=split_size, price=price,
                         leverage=pos.leverage, status="confirmed",
@@ -1544,6 +1547,7 @@ class AgentService:
 
                             rebuy_trade = PerpTrade(
                                 trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
+                                position_id=pos.position_id,
                                 user_id=pos.user_id, asset=pos.asset, side=pos.side,
                                 direction="open", size=total_rebuy_size, price=price,
                                 leverage=pos.leverage, status="confirmed",
@@ -2578,9 +2582,13 @@ class AgentService:
             leveraged_size = size_quote * Decimal(leverage) / effective_price
             stop_ref = _stop_reference_from_signal(signal)
 
+            # The opening trade is an execution of this position too: generate the
+            # position id first so both rows carry the same explicit link.
+            perp_position_id = f"pos_{uuid4().hex}"
             await PerpTradeRepository(session).save(
                 PerpTrade(
                     trade_id=trade_id,
+                    position_id=perp_position_id,
                     user_id=str(self.settings.default_user_id),
                     asset=str(signal.get("asset")),
                     side=side,
@@ -2604,7 +2612,7 @@ class AgentService:
             )
             await PerpPositionRepository(session).save(
                 PerpPosition(
-                    position_id=f"pos_{uuid4().hex}",
+                    position_id=perp_position_id,
                     user_id=str(self.settings.default_user_id),
                     asset=str(signal.get("asset")),
                     side=side,

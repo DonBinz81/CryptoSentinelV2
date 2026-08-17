@@ -49,6 +49,10 @@ class PerpTrade(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     trade_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Official link to the position. Historical rows only encoded it inside trade_id
+    # (cls_<position_id>_<hex>); parsing that string stays as backfill/compat only.
+    # Nullable for historical rows and for opening trades created before the position.
+    position_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     asset: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)  # long / short
