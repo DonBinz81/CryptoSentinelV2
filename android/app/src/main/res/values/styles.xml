@@ -8,6 +8,8 @@
         <item name="android:windowBackground">#0a0e1a</item>
         <item name="android:statusBarColor">#0a0e1a</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
 
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
@@ -16,6 +18,22 @@
         <item name="android:windowBackground">#0a0e1a</item>
         <item name="android:statusBarColor">#0a0e1a</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
+    </style>
+
+    <!-- The dropdown picker is a system window, so its text colour comes from
+         here and not from the stylesheet. Pinned to light text on the same dark
+         surface the picker already uses, so it stays readable whatever theme
+         the phone is set to. -->
+    <style name="AppAlertDialog" parent="Theme.AppCompat.DayNight.Dialog.Alert">
+        <item name="android:textColor">#f9fafb</item>
+        <item name="android:textColorPrimary">#f9fafb</item>
+        <item name="android:textColorSecondary">#e5e7eb</item>
+        <item name="android:textColorAlertDialogListItem">#f9fafb</item>
+        <item name="android:background">#111827</item>
+        <item name="android:windowBackground">#111827</item>
+        <item name="colorAccent">#3b82f6</item>
     </style>
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">

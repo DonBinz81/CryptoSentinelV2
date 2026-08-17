@@ -23,6 +23,14 @@
     box-sizing: border-box;
   }
 
+  /* Dropdown options: force light text so they stay readable whatever
+     colour scheme the device applies to the native picker. */
+  select option,
+  select optgroup {
+    background-color: #111827;
+    color: #f9fafb;
+  }
+
   ::-webkit-scrollbar {
     width: 4px;
   }

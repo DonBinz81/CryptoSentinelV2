@@ -3,10 +3,16 @@
     <!-- Android 15+ forza l'edge-to-edge e ignora statusBarColor.
          Questo opt-out ripristina il comportamento pre-API 35
          evitando la fascia bianca sopra la WebView. -->
+    <!-- A qualified resource replaces the base one outright, it does not merge:
+         every item the theme needs on API 35+ has to be repeated here. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+        <item name="alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+        <item name="alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
 </resources>
