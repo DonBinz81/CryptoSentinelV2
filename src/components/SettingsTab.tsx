@@ -11,7 +11,8 @@ import {
   type ProviderName,
   type ProviderSelectionResponse,
 } from '../services/marketData';
-import { resetDatabase } from '../services/agentApi';
+import { resetDatabase, testAsterConnection } from '../services/agentApi';
+import type { AsterConnectionReport } from '../services/agentApi';
 import {
   adminListSupportTickets,
   adminGetSupportTicket,
@@ -173,6 +174,9 @@ const SettingsTab: FC<Props> = ({
     error?: string;
   }
   const [diagState, setDiagState] = useState<DiagState>('idle');
+  const [asterState, setAsterState] = useState<'idle' | 'testing'>('idle');
+  const [asterReport, setAsterReport] = useState<AsterConnectionReport | null>(null);
+  const [asterError, setAsterError] = useState<string | null>(null);
   const [diagResult, setDiagResult] = useState<DiagResult | null>(null);
 
   const handleCheckUpdate = async () => {
@@ -212,6 +216,24 @@ const SettingsTab: FC<Props> = ({
     } catch (e) {
       setMergeError((e as Error).message);
       setMergeState('error');
+    }
+  };
+
+  const handleAsterTest = async () => {
+    if (!adminToken || asterState === 'testing') return;
+    setAsterState('testing');
+    setAsterError(null);
+    try {
+      setAsterReport(await testAsterConnection(adminToken));
+    } catch (err) {
+      setAsterReport(null);
+      setAsterError(
+        err instanceof Error
+          ? "Impossibile eseguire il test: " + err.message
+          : "Impossibile eseguire il test."
+      );
+    } finally {
+      setAsterState('idle');
     }
   };
 
@@ -1359,6 +1381,73 @@ const SettingsTab: FC<Props> = ({
                 </p>
                 {providerLoadState === 'error' && (
                   <p className="text-xs text-accent-red">Unable to read or update the provider.</p>
+                )}
+              </div>
+
+              <div className="border-t border-dark-600" />
+
+              {/* ── Connessione Aster (test in sola lettura) ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Aster</span>
+                  <button
+                    onClick={handleAsterTest}
+                    disabled={asterState === 'testing' || !adminToken}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-dark-700 text-gray-300 text-xs rounded-lg hover:bg-dark-600 transition-colors disabled:opacity-50"
+                  >
+                    {asterState === 'testing' && (
+                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" /></svg>
+                    )}
+                    {asterState === 'testing' ? 'Test in corso…' : 'Test connessione Aster'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600">
+                  Verifica solo la comunicazione con il tuo account Aster: legge saldo e posizioni, non invia mai ordini.
+                </p>
+
+                {asterError && <p className="text-xs text-accent-red">{asterError}</p>}
+
+                {asterReport && (
+                  <div className="space-y-2">
+                    <div className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                      asterReport.overall === 'ok' ? 'bg-accent-green/10 text-accent-green'
+                      : asterReport.overall === 'warning' ? 'bg-accent-yellow/10 text-accent-yellow'
+                      : 'bg-accent-red/10 text-accent-red'}`}>
+                      {asterReport.summary}
+                    </div>
+
+                    <div className="bg-dark-700 rounded-lg divide-y divide-dark-600">
+                      {asterReport.checks.map((check) => (
+                        <div key={check.key} className="px-3 py-2 space-y-0.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-gray-400">{check.label}</span>
+                            <span className={`text-xs font-semibold flex-shrink-0 ${
+                              check.status === 'ok' ? 'text-accent-green'
+                              : check.status === 'warning' ? 'text-accent-yellow'
+                              : 'text-accent-red'}`}>
+                              {check.status === 'ok' ? '● OK'
+                                : check.status === 'warning' ? '● ATTENZIONE'
+                                : check.status === 'critical' ? '● CRITICO' : '● ERRORE'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 leading-snug">{check.detail}</p>
+                          {check.technical && (
+                            <p className="text-[10px] text-gray-600 font-mono">codice Aster: {check.technical}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-xs text-gray-600">
+                      Ultimo test {new Date(asterReport.started_at).toLocaleString('it-IT')} · durata {asterReport.duration_ms} ms
+                      {asterReport.account ? ` · account ${asterReport.account}` : ''}
+                    </p>
+                    {asterReport.blocked && (
+                      <p className="text-xs text-accent-red font-semibold">
+                        Operazioni Aster bloccate finché l'identità dell'account non corrisponde a quella configurata.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 

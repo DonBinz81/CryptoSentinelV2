@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from backend.app.api.routes import (
+    aster,
     agent,
     admin,
     alerts,
@@ -31,4 +32,5 @@ api_router.include_router(execution.router)
 api_router.include_router(views.router)
 api_router.include_router(mobile_agent.router)
 api_router.include_router(observability.router)
+api_router.include_router(aster.router)
 api_router.include_router(support.router)

@@ -45,6 +45,7 @@ import {
   normalizeBackendBaseUrl,
   type DashboardSession,
   type EquityAdjustment,
+  testAsterConnection,
 } from './api';
 import type {
   AgentDecisionResponse,
@@ -76,6 +77,7 @@ import type {
   TradeChart,
   TradeDetail,
 } from './types';
+import type { AsterConnectionReport } from './api';
 
 type Tab = 'overview' | 'spot' | 'perp' | 'global' | 'analytics' | 'health' | 'wallet' | 'support' | 'logs' | 'settings' | 'onboarding' | 'markets' | 'export';
 type LoadState<T> = { data: T | null; loading: boolean; error: string | null };
@@ -738,6 +740,8 @@ export default function App() {
                 </table>
               )}
             </Panel>
+            <AsterPanel session={session} canAdmin={canAdmin} />
+
             <Panel title="Modalità sviluppatore" className="wide">
               <p className="hint">Azzera tutto il database: trade, decisioni, posizioni, PnL, portfolio e grafici. Impostazioni e watchlist restano. Prima di azzerare puoi salvare un backup con un nome.</p>
               <button className="danger" onClick={() => void submitResetDb()} disabled={!canAdmin}>🗑 Resetta database</button>
@@ -754,6 +758,77 @@ export default function App() {
         {tab === 'export' && <ExportPanel payload={exportPayload} />}
       </main>
     </div>
+  );
+}
+
+function AsterPanel({ session, canAdmin }: { session: DashboardSession; canAdmin: boolean }) {
+  const [testing, setTesting] = useState(false);
+  const [report, setReport] = useState<AsterConnectionReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Sola lettura: il backend interroga saldo e posizioni, non invia mai ordini.
+  const run = async () => {
+    if (!canAdmin || testing) return;
+    setTesting(true);
+    setError(null);
+    try {
+      setReport(await testAsterConnection(session));
+    } catch (err) {
+      setReport(null);
+      setError(err instanceof Error ? err.message : 'Test non riuscito');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const mark = (status: string) =>
+    status === 'ok' ? '● OK' : status === 'warning' ? '● ATTENZIONE' : status === 'critical' ? '● CRITICO' : '● ERRORE';
+
+  return (
+    <Panel
+      title="Connessione Aster"
+      className="wide"
+      action={
+        <button onClick={() => void run()} disabled={!canAdmin || testing}>
+          {testing ? 'Test in corso…' : 'Test connessione Aster'}
+        </button>
+      }
+    >
+      <p className="hint">
+        Verifica la comunicazione con il sub-account Aster: legge saldo e posizioni, non invia mai ordini.
+      </p>
+      {!canAdmin && <p className="hint">Serve il token admin.</p>}
+      {error && <p className="hint">{error}</p>}
+      {report && (
+        <>
+          <p><strong>{report.summary}</strong></p>
+          <table className="table">
+            <thead>
+              <tr><th>Controllo</th><th>Stato</th><th>Descrizione</th></tr>
+            </thead>
+            <tbody>
+              {report.checks.map((check) => (
+                <tr key={check.key}>
+                  <td>{check.label}</td>
+                  <td>{mark(check.status)}</td>
+                  <td>
+                    {check.detail}
+                    {check.technical ? <><br /><small>codice Aster: {check.technical}</small></> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="hint">
+            Ultimo test {new Date(report.started_at).toLocaleString('it-IT')} · durata {report.duration_ms} ms
+            {report.account ? ` · account ${report.account}` : ''}
+          </p>
+          {report.blocked && (
+            <p className="hint"><strong>Operazioni Aster bloccate: identità dell'account non corrispondente.</strong></p>
+          )}
+        </>
+      )}
+    </Panel>
   );
 }
 

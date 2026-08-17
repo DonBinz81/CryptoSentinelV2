@@ -663,3 +663,34 @@ export function adjustEquity(amount: number, note: string | null, adminToken: st
     token: adminToken,
   });
 }
+
+// ── Diagnostica connessione Aster (sola lettura) ─────────────────────────────
+// Il backend esegue solo chiamate informative: non può aprire, modificare o
+// chiudere ordini. Le credenziali restano sul server e non transitano mai qui.
+export type AsterCheckStatus = 'ok' | 'warning' | 'error' | 'critical';
+
+export interface AsterCheck {
+  key: string;
+  label: string;
+  status: AsterCheckStatus;
+  detail: string;
+  technical?: string | null;
+}
+
+export interface AsterConnectionReport {
+  overall: AsterCheckStatus;
+  summary: string;
+  checks: AsterCheck[];
+  started_at: string;
+  duration_ms: number;
+  account: string | null;
+  subaccount_name: string | null;
+  blocked: boolean;
+}
+
+export function testAsterConnection(adminToken: string): Promise<AsterConnectionReport> {
+  return request<AsterConnectionReport>('/api/v1/aster/connection-test', {
+    method: 'POST',
+    token: adminToken,
+  });
+}

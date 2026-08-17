@@ -637,6 +637,18 @@ class Settings(BaseSettings):
     update_push_enabled: bool = Field(default=True, alias="UPDATE_PUSH_ENABLED")
     update_push_check_minutes: int = Field(default=15, alias="UPDATE_PUSH_CHECK_MINUTES")
 
+    # ── Aster perp venue (read-only in this phase) ──────────────────────────────
+    # V3 authenticates with an EIP-712 signature, not an API key + HMAC:
+    #   user   = account wallet address (our sub-account)
+    #   signer = API wallet address, whose private key signs every request
+    # Values live only in .env on the server; .env.example keeps them empty.
+    aster_enabled: bool = Field(default=False, alias="ASTER_ENABLED")
+    aster_base_url: str = Field(default="https://fapi3.asterdex.com", alias="ASTER_BASE_URL")
+    aster_account_address: str = Field(default="", alias="ASTER_ACCOUNT_ADDRESS")
+    aster_api_wallet_address: str = Field(default="", alias="ASTER_API_WALLET_ADDRESS")
+    aster_api_wallet_private_key: str = Field(default="", alias="ASTER_API_WALLET_PRIVATE_KEY")
+    aster_subaccount_name: str = Field(default="CryptosentinelV2", alias="ASTER_SUBACCOUNT_NAME")
+
     # ── Engine health watchdog: push FCM when the scanner is failing ─────────────
     # A broken DB session makes every asset of a scan cycle fail after the first
     # error, so the agent silently stops opening. These thresholds turn that into

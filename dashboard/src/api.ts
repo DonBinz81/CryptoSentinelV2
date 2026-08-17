@@ -363,3 +363,31 @@ export function updatePerpWatchlist(session: DashboardSession, tokens: string[])
     body: JSON.stringify({ tokens }),
   });
 }
+
+// ── Diagnostica connessione Aster (sola lettura) ─────────────────────────────
+export type AsterCheckStatus = 'ok' | 'warning' | 'error' | 'critical';
+
+export interface AsterCheck {
+  key: string;
+  label: string;
+  status: AsterCheckStatus;
+  detail: string;
+  technical?: string | null;
+}
+
+export interface AsterConnectionReport {
+  overall: AsterCheckStatus;
+  summary: string;
+  checks: AsterCheck[];
+  started_at: string;
+  duration_ms: number;
+  account: string | null;
+  subaccount_name: string | null;
+  blocked: boolean;
+}
+
+export function testAsterConnection(session: DashboardSession) {
+  return requestJson<AsterConnectionReport>(session, '/api/v1/aster/connection-test', 'admin', {
+    method: 'POST',
+  });
+}
