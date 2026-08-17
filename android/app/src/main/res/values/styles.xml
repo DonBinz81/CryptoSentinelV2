@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <!-- Every colour the app relies on lives here, so it is declared once and
+         inherited. Qualified variants (see values-v35) must extend this style
+         rather than redeclare AppTheme from scratch: a qualified resource
+         REPLACES the base one outright instead of merging with it, so anything
+         redeclared without these items silently loses them on that API level. -->
+    <style name="AppThemeBase" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="colorPrimary">#0a0e1a</item>
         <item name="colorPrimaryDark">#0a0e1a</item>
         <item name="colorAccent">#3b82f6</item>
@@ -12,14 +17,11 @@
         <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
 
-    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <style name="AppTheme" parent="AppThemeBase" />
+
+    <style name="AppTheme.NoActionBar" parent="AppThemeBase">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="android:windowBackground">#0a0e1a</item>
-        <item name="android:statusBarColor">#0a0e1a</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="alertDialogTheme">@style/AppAlertDialog</item>
-        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
 
     <!-- The dropdown picker is a system window, so its text colour comes from
@@ -36,11 +38,20 @@
         <item name="colorAccent">#3b82f6</item>
     </style>
 
+    <!-- The launcher activity declares this theme, and its splash-screen parent
+         rules out inheriting from AppThemeBase. Whether the activity keeps it
+         after startup depends on the splash-screen handoff, so the colours and
+         the dialog theme are repeated here: that way they apply either way. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">#0a0e1a</item>
         <item name="windowSplashScreenBackground">#0a0e1a</item>
         <item name="android:statusBarColor">#0a0e1a</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="colorPrimary">#0a0e1a</item>
+        <item name="colorPrimaryDark">#0a0e1a</item>
+        <item name="colorAccent">#3b82f6</item>
+        <item name="alertDialogTheme">@style/AppAlertDialog</item>
+        <item name="android:alertDialogTheme">@style/AppAlertDialog</item>
     </style>
 
 </resources>
