@@ -46,6 +46,7 @@ import {
   type DashboardSession,
   type EquityAdjustment,
   testAsterConnection,
+  fetchAsterWallet,
 } from './api';
 import type {
   AgentDecisionResponse,
@@ -77,7 +78,7 @@ import type {
   TradeChart,
   TradeDetail,
 } from './types';
-import type { AsterConnectionReport } from './api';
+import type { AsterConnectionReport, AsterWalletView } from './api';
 
 type Tab = 'overview' | 'spot' | 'perp' | 'global' | 'analytics' | 'health' | 'wallet' | 'support' | 'logs' | 'settings' | 'onboarding' | 'markets' | 'export';
 type LoadState<T> = { data: T | null; loading: boolean; error: string | null };
@@ -667,6 +668,7 @@ export default function App() {
           <WalletPanel
             wallets={wallets}
             spot={spot}
+            session={session}
             canAdmin={canAdmin}
             onSpotProvider={(provider) => void updateSpotProvider(provider)}
             onPerpProvider={(provider) => void updatePerpProvider(provider)}
@@ -1637,6 +1639,7 @@ function WalletPanel({
   wallets,
   spot,
   canAdmin,
+  session,
   onSpotProvider,
   onPerpProvider,
   onRpcEndpoint,
@@ -1650,6 +1653,7 @@ function WalletPanel({
   wallets: LoadState<ExecutionWalletsResponse>;
   spot: LoadState<SpotView>;
   canAdmin: boolean;
+  session: DashboardSession;
   onSpotProvider: (provider: string) => void;
   onPerpProvider: (provider: string) => void;
   onRpcEndpoint: (index: number) => void;
@@ -1697,6 +1701,25 @@ function WalletPanel({
   const spotData = spot.data;
   const activeWallet = data?.available_wallets?.find((w) => w.active) ?? data?.available_wallets?.[0];
 
+  // Wallet Aster: sola lettura, con aggiornamento manuale (il backend tiene una
+  // cache breve, quindi non si martella la venue a ogni refresh della dashboard).
+  const [aster, setAster] = useState<AsterWalletView | null>(null);
+  const [asterLoading, setAsterLoading] = useState(false);
+  const loadAster = async () => {
+    setAsterLoading(true);
+    try {
+      setAster(await fetchAsterWallet(session));
+    } catch {
+      setAster(null);
+    } finally {
+      setAsterLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadAster();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.baseUrl, session.readToken]);
+
   function toggleCoin(asset: string) {
     setExpandedCoin((prev) => (prev === asset ? null : asset));
     setTxSearch('');
@@ -1722,6 +1745,40 @@ function WalletPanel({
 
   return (
     <Panel title="Wallet" className="wide">
+      {/* ── Aster: dove stanno i fondi per il Perp ── */}
+      <div className="wallet-detail-info" style={{ marginBottom: 16 }}>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <strong>Aster · venue Perp</strong>
+          <button onClick={() => void loadAster()} disabled={asterLoading}>
+            {asterLoading ? 'Aggiorno…' : 'Aggiorna'}
+          </button>
+        </div>
+        {!aster && !asterLoading && <div style={{ gridColumn: '1 / -1' }}><span>Dati non disponibili</span></div>}
+        {aster && !aster.configured && (
+          <div style={{ gridColumn: '1 / -1' }}><span>{aster.error ?? 'Aster non configurato'}</span></div>
+        )}
+        {aster && aster.configured && (
+          <>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span>Sub-account{aster.subaccount_name ? ` · ${aster.subaccount_name}` : ''}</span>
+              <code>{aster.subaccount_address}</code>
+            </div>
+            <div><span>Wallet API (firma)</span><strong>{aster.api_wallet_address_short}</strong></div>
+            <div>
+              <span>Saldo su Aster</span>
+              <strong>{aster.reachable ? `${aster.total_balance_usdt ?? '0.00'} USDT` : '—'}</strong>
+            </div>
+            <div><span>Posizioni aperte</span><strong>{aster.open_positions ?? '—'}</strong></div>
+            {aster.error && <div style={{ gridColumn: '1 / -1' }}><span>{aster.error}</span></div>}
+            {aster.reachable && aster.balances.length === 0 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span>Nessun asset: il sub-account non è ancora finanziato. I fondi vanno inviati all'indirizzo qui sopra.</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       <StateBlock state={wallets} empty="Nessun snapshot wallet caricato" />
 
       {/* ── HOLDINGS ─────────────────────────────────────────────── */}

@@ -391,3 +391,25 @@ export function testAsterConnection(session: DashboardSession) {
     method: 'POST',
   });
 }
+
+export interface AsterAssetBalance {
+  asset: string;
+  balance: string;
+  available: string;
+}
+
+export interface AsterWalletView {
+  configured: boolean;
+  subaccount_name: string | null;
+  subaccount_address: string | null;
+  api_wallet_address_short: string | null;
+  balances: AsterAssetBalance[];
+  total_balance_usdt: string | null;
+  open_positions: number | null;
+  reachable: boolean;
+  error: string | null;
+}
+
+export function fetchAsterWallet(session: DashboardSession) {
+  return requestJson<AsterWalletView>(session, '/api/v1/aster/wallet');
+}

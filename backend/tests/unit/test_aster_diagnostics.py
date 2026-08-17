@@ -111,3 +111,34 @@ def test_signature_is_deterministic_and_hex() -> None:
     assert first == second
     assert int(first.replace("0x", ""), 16) > 0
     assert len(first.replace("0x", "")) == 130  # 65 bytes: r + s + v
+
+
+# ── Vista wallet: cosa può essere mostrato e cosa no ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_wallet_view_without_credentials_says_so() -> None:
+    from backend.app.execution.venues.aster.wallet import get_wallet_view
+
+    view = await get_wallet_view(_settings(aster_api_wallet_private_key=""))
+
+    assert view.configured is False
+    assert view.subaccount_address is None
+    assert "non configurate" in (view.error or "")
+
+
+@pytest.mark.asyncio
+async def test_wallet_view_shows_subaccount_in_full_and_api_wallet_abbreviated() -> None:
+    """Decisione di David: sub-account per intero (ci si versano i fondi), API abbreviato."""
+    from backend.app.execution.venues.aster import wallet as wallet_module
+
+    wallet_module._cache.update(at=0.0, value=None)  # niente cache fra i test
+    view = await wallet_module.get_wallet_view(_settings(), force_refresh=True)
+    payload = str(view.to_dict())
+
+    assert view.subaccount_address == "0x1111111111111111111111111111111111111111"
+    assert view.api_wallet_address_short == "0x19E7...ff2A"
+    # L'indirizzo completo del wallet API non deve comparire, e la chiave mai.
+    assert TEST_SIGNER not in payload
+    assert TEST_KEY not in payload
+    assert TEST_KEY[2:] not in payload

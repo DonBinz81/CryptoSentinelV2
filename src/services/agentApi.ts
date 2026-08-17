@@ -23,10 +23,22 @@ export interface AgentWatchlistResponse {
   selected_tokens: string[];
 }
 
+export type VenueAvailabilityStatus = 'available' | 'unavailable' | 'unknown';
+
+export interface VenueAvailability {
+  venue: string;
+  status: VenueAvailabilityStatus;
+  reason?: string;
+}
+
+/** Per-symbol availability, keyed by symbol. Absent when the backend could not compute it. */
+export type WatchlistAvailability = Record<string, { spot: VenueAvailability; perp: VenueAvailability }>;
+
 export interface AgentMarketWatchlistResponse {
   master_tokens: string[];
   selected_tokens: string[];
   selected_count: number;
+  availability?: WatchlistAvailability;
 }
 
 export interface SpotPositionView {
@@ -693,4 +705,27 @@ export function testAsterConnection(adminToken: string): Promise<AsterConnection
     method: 'POST',
     token: adminToken,
   });
+}
+
+// ── Wallet Aster (sola lettura) ──────────────────────────────────────────────
+export interface AsterAssetBalance {
+  asset: string;
+  balance: string;
+  available: string;
+}
+
+export interface AsterWalletView {
+  configured: boolean;
+  subaccount_name: string | null;
+  subaccount_address: string | null;
+  api_wallet_address_short: string | null;
+  balances: AsterAssetBalance[];
+  total_balance_usdt: string | null;
+  open_positions: number | null;
+  reachable: boolean;
+  error: string | null;
+}
+
+export function fetchAsterWallet(): Promise<AsterWalletView> {
+  return request<AsterWalletView>('/api/v1/aster/wallet');
 }

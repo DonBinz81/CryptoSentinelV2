@@ -7,6 +7,7 @@ import {
   fetchEquityCurve,
   type ClaudeUsageView,
   fetchClaudeUsage,
+  fetchAsterWallet,
   fetchExecutionWallets,
   fetchGlobalView,
   fetchPerpView,
@@ -29,6 +30,7 @@ import {
   type CredentialValidationResponse,
   type EquityCurveResponse,
   type EquityRange,
+  type AsterWalletView,
   type ExecutionWalletsResponse,
   type GlobalView,
   type KillSwitchState,
@@ -503,26 +505,56 @@ const SegmentButton: FC<{ id: AgentPane; active: boolean; label: string; onClick
   </button>
 );
 
+// `availability` arriva dal backend (venue + stato). Quando manca, il toggle si
+// comporta esattamente come prima: la scheda master non conosce le venue.
+// Una coin non disponibile non è selezionabile, ma se è GIÀ selezionata resta
+// cliccabile: altrimenti le scelte salvate prima (es. COMP su Aster) non
+// sarebbero più rimovibili dall'app.
 const TokenToggle: FC<{
   symbol: string;
   selected: boolean;
   disabled: boolean;
   onToggle: (symbol: string) => void;
-}> = ({ symbol, selected, disabled, onToggle }) => (
-  <button
-    type="button"
-    disabled={disabled}
-    onClick={() => { hapticLight(); onToggle(symbol); }}
-    className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-45 ${
-      selected
-        ? 'border-accent-yellow/50 bg-accent-yellow/10 text-accent-yellow'
-        : 'border-dark-700 bg-dark-800 text-gray-300'
-    }`}
-  >
-    <span className="min-w-0 truncate text-sm font-semibold">{symbol}</span>
-    <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${selected ? 'bg-accent-yellow' : 'bg-gray-600'}`} />
-  </button>
-);
+  availability?: VenueAvailability;
+}> = ({ symbol, selected, disabled, onToggle, availability }) => {
+  const status = availability?.status;
+  const blocked = status === 'unavailable' && !selected;
+  const tone = selected
+    ? 'border-accent-yellow/50 bg-accent-yellow/10 text-accent-yellow'
+    : status === 'unavailable'
+      ? 'border-accent-red/40 bg-accent-red/5 text-gray-500'
+      : 'border-dark-700 bg-dark-800 text-gray-300';
+  return (
+    <button
+      type="button"
+      disabled={disabled || blocked}
+      onClick={() => { hapticLight(); onToggle(symbol); }}
+      title={availability?.reason}
+      className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-45 ${tone}`}
+    >
+      <span className="flex items-center justify-between gap-3">
+        <span className={`min-w-0 truncate text-sm font-semibold ${status === 'unavailable' ? 'line-through' : ''}`}>{symbol}</span>
+        <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${selected ? 'bg-accent-yellow' : 'bg-gray-600'}`} />
+      </span>
+      {availability && (
+        <span className="flex items-center justify-between gap-2 text-[10px] leading-tight">
+          <span className="truncate capitalize text-gray-500">{availability.venue}</span>
+          <span
+            className={
+              status === 'available'
+                ? 'flex-shrink-0 text-accent-green'
+                : status === 'unavailable'
+                  ? 'flex-shrink-0 text-accent-red'
+                  : 'flex-shrink-0 text-gray-500'
+            }
+          >
+            {status === 'available' ? '✓' : status === 'unavailable' ? 'Non disponibile' : 'Non verificato'}
+          </span>
+        </span>
+      )}
+    </button>
+  );
+};
 
 // Punto interrogativo con spiegazione breve. Un solo riquadro aperto per volta:
 // aprirne uno chiude gli altri (evento globale), e si chiude anche toccando
@@ -1098,6 +1130,17 @@ const WalletPane: FC<{
   const activeWallet = execWallets?.available_wallets.find((w) => w.active)
     ?? execWallets?.available_wallets[0];
 
+  // Wallet Aster (venue Perp): sola lettura. Il backend tiene una cache breve,
+  // quindi il caricamento al montaggio non pesa sulla venue.
+  const [aster, setAster] = useState<AsterWalletView | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchAsterWallet()
+      .then((data) => { if (alive) setAster(data); })
+      .catch(() => { if (alive) setAster(null); });
+    return () => { alive = false; };
+  }, []);
+
   return (
     <div className="space-y-4">
 
@@ -1107,6 +1150,52 @@ const WalletPane: FC<{
         <Stat label="Perp" value={String(perp?.open_positions.length ?? 0)} />
         <Stat label="PnL aperto" value={fmtUsd(totalPnl)} tone={totalPnl >= 0 ? 'good' : 'bad'} />
       </div>
+
+      {/* ── ASTER · venue Perp ── */}
+      {aster?.configured && (
+        <section className="space-y-2">
+          <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">
+            Aster · venue Perp{aster.subaccount_name ? ` · ${aster.subaccount_name}` : ''}
+          </h3>
+          <div className="rounded-xl bg-dark-800 px-4 py-3 space-y-2">
+            {/* Indirizzo per intero: e' qui che vanno versati i fondi. */}
+            <button
+              onClick={() => aster.subaccount_address && copyAddress(aster.subaccount_address)}
+              className="w-full text-left rounded-lg bg-dark-900 px-3 py-2"
+            >
+              <p className="text-[11px] text-gray-500">Sub-account · qui vanno versati i fondi</p>
+              <p className="font-mono text-xs text-gray-300 break-all leading-relaxed">{aster.subaccount_address}</p>
+              <p className="mt-0.5 text-[11px] text-accent-blue">
+                {copied === aster.subaccount_address ? '✓ Copiato' : 'Tocca per copiare'}
+              </p>
+            </button>
+
+            <div className="flex items-center justify-between rounded-lg bg-dark-900 px-3 py-2">
+              <div>
+                <p className="text-sm font-semibold text-white">Saldo su Aster</p>
+                <p className="text-[11px] text-gray-500">
+                  wallet API {aster.api_wallet_address_short} · solo firma
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold text-white">
+                  {aster.reachable ? `${aster.total_balance_usdt ?? '0.00'} USDT` : '—'}
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  {aster.open_positions != null ? `${aster.open_positions} posizioni` : ''}
+                </p>
+              </div>
+            </div>
+
+            {aster.reachable && aster.balances.length === 0 && (
+              <p className="text-[11px] text-gray-500 px-1">
+                Nessun asset: il sub-account non è ancora finanziato.
+              </p>
+            )}
+            {aster.error && <p className="text-[11px] text-accent-red px-1">{aster.error}</p>}
+          </div>
+        </section>
+      )}
 
       {/* ── WALLET ATTIVO ── */}
       <section className="space-y-2">

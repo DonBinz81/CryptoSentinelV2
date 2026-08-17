@@ -9,10 +9,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.app.api.dependencies import AdminAccessDep, SettingsDep
+from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SettingsDep
 from backend.app.execution.venues.aster.diagnostics import run_connection_test
+from backend.app.execution.venues.aster.wallet import get_wallet_view
 
 router = APIRouter(prefix="/api/v1/aster", tags=["aster"])
+
+
+@router.get("/wallet")
+async def aster_wallet(settings: SettingsDep, _: ReadAccessDep) -> dict:
+    """Aster addresses and balance for the Wallet screen — read-only.
+
+    The sub-account address is returned in full (funds are sent there); the API
+    wallet is abbreviated. The signing key is never included.
+    """
+    view = await get_wallet_view(settings)
+    return view.to_dict()
 
 
 @router.post("/connection-test")
