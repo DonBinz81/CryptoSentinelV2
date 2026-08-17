@@ -3,6 +3,10 @@
 # Divergence from upstream (149): added BTC, BNB, SOL, NEAR for volatility and liquidity
 # optimization of the VP mean-reversion strategy; removed XAUt and XAUM (illiquid on perp);
 # ATOM and INJ restored on 2026-08-17 to mirror the V1 perp watchlist for A/B comparison.
+# TON renamed to GRAM on 2026-08-17: Toncoin was rebranded, and the TON ticker now
+# belongs to Tokamak Network (rank ~840, a different coin). Under the old symbol the
+# perp looked unlisted on Aster and Binance klines were stale; as GRAM the market is
+# live (GRAMUSDT) and the coin ranks ~25. Count stays at 150: one symbol replaced.
 
 eligible_tokens:
   - BTC
@@ -18,7 +22,7 @@ eligible_tokens:
   - LINK
   - BCH
   - DAI
-  - TON
+  - GRAM
   - USD1
   - USDe
   - M
