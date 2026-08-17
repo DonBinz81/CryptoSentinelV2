@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 from uuid import UUID
 
 import pytest
@@ -116,6 +117,8 @@ def settings(**overrides):
         spot_market_regime_ema_period=50,
         spot_market_regime_low_lookback=12,
         market_reversal_filter_enabled=False,
+        spot_market_reversal_filter_enabled=False,
+        perp_market_reversal_filter_enabled=False,
         market_reversal_symbol="BTCUSDT",
         market_reversal_interval="15m",
         market_reversal_ema_period=10,
@@ -707,6 +710,105 @@ def test_perp_smart_sl_detail_preserves_original_entry() -> None:
     assert detail["original_entry_price"] == "100.00"
     assert detail["current_position_entry_price"] == "97.00"
     assert detail["current_or_exit_price"] == "94.00"
+
+
+def test_market_reversal_filter_is_independent_per_market() -> None:
+    """Spot and Perp must be able to run the reversal filter independently."""
+    spot_only = settings(
+        spot_market_reversal_filter_enabled=True,
+        perp_market_reversal_filter_enabled=False,
+    )
+    perp_only = settings(
+        spot_market_reversal_filter_enabled=False,
+        perp_market_reversal_filter_enabled=True,
+    )
+    assert spot_only.spot_market_reversal_filter_enabled is True
+    assert spot_only.perp_market_reversal_filter_enabled is False
+    assert perp_only.spot_market_reversal_filter_enabled is False
+    assert perp_only.perp_market_reversal_filter_enabled is True
+
+
+async def test_market_reversal_filter_skipped_when_both_markets_disabled() -> None:
+    """With both flags off the filter short-circuits and never fetches klines."""
+    service = AgentService(
+        settings(
+            spot_market_reversal_filter_enabled=False,
+            perp_market_reversal_filter_enabled=False,
+        ),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    result = await service._market_reversal_filter()
+    assert result == {"enabled": False, "risk_on": False}
+
+
+async def test_engine_health_alert_fires_on_storage_error() -> None:
+    """A storage failure must raise a critical notification, not fail silently."""
+    service = AgentService(settings(), spot_registry=SimpleNamespace(), perp_registry=SimpleNamespace())
+    sent: list[dict] = []
+
+    class _Notifier:
+        async def notify_agent_critical(self, **kwargs):
+            sent.append(kwargs)
+            return True
+
+    now = datetime(2026, 8, 17, tzinfo=UTC)
+    with patch("backend.app.agent.service.get_agent_notifier", return_value=_Notifier()):
+        # One malformed-database error is enough: it poisons the whole cycle.
+        await service._maybe_alert_engine_health(
+            37, ["(sqlite3.DatabaseError) database disk image is malformed"], now
+        )
+        assert len(sent) == 1
+        assert sent[0]["event"] == "storage_error"
+
+        # Throttled: a second failure inside the window must not notify again.
+        await service._maybe_alert_engine_health(
+            37, ["(sqlite3.DatabaseError) database disk image is malformed"], now
+        )
+        assert len(sent) == 1
+
+        # Past the throttle window it notifies again.
+        await service._maybe_alert_engine_health(
+            37,
+            ["(sqlite3.DatabaseError) database disk image is malformed"],
+            now + timedelta(minutes=31),
+        )
+        assert len(sent) == 2
+
+
+async def test_engine_health_alert_ignores_isolated_asset_errors() -> None:
+    """A single missing-klines asset is normal: it must not raise an alarm."""
+    service = AgentService(settings(), spot_registry=SimpleNamespace(), perp_registry=SimpleNamespace())
+    sent: list[dict] = []
+
+    class _Notifier:
+        async def notify_agent_critical(self, **kwargs):
+            sent.append(kwargs)
+            return True
+
+    with patch("backend.app.agent.service.get_agent_notifier", return_value=_Notifier()):
+        await service._maybe_alert_engine_health(
+            37, ["no_klines_any_cex_BONKUSDT"], datetime(2026, 8, 17, tzinfo=UTC)
+        )
+    assert sent == []
+
+
+async def test_engine_health_alert_fires_when_most_assets_fail() -> None:
+    """Half the watchlist failing means the cycle is broken, whatever the cause."""
+    service = AgentService(settings(), spot_registry=SimpleNamespace(), perp_registry=SimpleNamespace())
+    sent: list[dict] = []
+
+    class _Notifier:
+        async def notify_agent_critical(self, **kwargs):
+            sent.append(kwargs)
+            return True
+
+    with patch("backend.app.agent.service.get_agent_notifier", return_value=_Notifier()):
+        await service._maybe_alert_engine_health(
+            10, ["boom"] * 6, datetime(2026, 8, 17, tzinfo=UTC)
+        )
+    assert len(sent) == 1
+    assert sent[0]["event"] == "scan_failures"
 
 
 def test_perp_smart_sl_rebuy_tp_adjustment_uses_actual_tp1_close_pct() -> None:
@@ -1934,6 +2036,8 @@ async def test_market_reversal_filter_does_not_unblock_spot_risk_off(db) -> None
         spot_market_regime_ema_period=10,
         spot_market_regime_low_lookback=5,
         market_reversal_filter_enabled=True,
+        spot_market_reversal_filter_enabled=True,
+        perp_market_reversal_filter_enabled=True,
     )
     service = AgentService(
         cfg,
@@ -1971,7 +2075,8 @@ async def test_market_reversal_filter_waits_for_two_green_btc_candles_on_spot(db
         async def fetch(self, **kwargs):
             return _btc_candles([100, 100.2, 100.1, 100.3, 100.2, 100.4, 100.3, 100.5, 100.4, 100.6, 100.5, 100.4, 100.3])
 
-    cfg = settings(spot_market_regime_filter_enabled=False, market_reversal_filter_enabled=True)
+    cfg = settings(spot_market_regime_filter_enabled=False, market_reversal_filter_enabled=True,
+                   spot_market_reversal_filter_enabled=True, perp_market_reversal_filter_enabled=True)
     service = AgentService(
         cfg,
         spot_signal=FakeSignal(),
@@ -2011,7 +2116,8 @@ async def test_market_reversal_filter_blocks_perp_short_on_btc_recovery(db) -> N
         async def fetch(self, **kwargs):
             return _btc_green_candles([100 + i for i in range(20)])
 
-    cfg = settings(market_reversal_filter_enabled=True)
+    cfg = settings(market_reversal_filter_enabled=True,
+                   spot_market_reversal_filter_enabled=True, perp_market_reversal_filter_enabled=True)
     service = AgentService(
         cfg,
         perp_signal=FakeSignal(),
@@ -2037,7 +2143,8 @@ async def test_market_reversal_filter_stays_on_until_two_red_below_ema(db) -> No
         async def fetch(self, **kwargs):
             return self.candles
 
-    cfg = settings(market_reversal_filter_enabled=True)
+    cfg = settings(market_reversal_filter_enabled=True,
+                   spot_market_reversal_filter_enabled=True, perp_market_reversal_filter_enabled=True)
     service = AgentService(
         cfg,
         spot_registry=SimpleNamespace(),
@@ -2089,7 +2196,8 @@ async def test_market_reversal_filter_blocks_perp_long_on_btc_selloff(db) -> Non
         async def fetch(self, **kwargs):
             return _btc_candles_with_red_tail([100 + i for i in range(18)] + [105, 104], red_tail=2)
 
-    cfg = settings(market_reversal_filter_enabled=True)
+    cfg = settings(market_reversal_filter_enabled=True,
+                   spot_market_reversal_filter_enabled=True, perp_market_reversal_filter_enabled=True)
     service = AgentService(
         cfg,
         perp_signal=FakeSignal(),

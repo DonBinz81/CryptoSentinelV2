@@ -216,7 +216,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "market_regime_interval": "spot_market_regime_interval",
         "market_regime_ema_period": "spot_market_regime_ema_period",
         "market_regime_low_lookback": "spot_market_regime_low_lookback",
-        "market_reversal_filter_enabled": "market_reversal_filter_enabled",
+        "market_reversal_filter_enabled": "spot_market_reversal_filter_enabled",
         "market_reversal_symbol": "market_reversal_symbol",
         "market_reversal_interval": "market_reversal_interval",
         "market_reversal_ema_period": "market_reversal_ema_period",
@@ -262,6 +262,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "leverage_atr_baseline_hours": "perp_leverage_atr_baseline_hours",
         "volume_profile_window_hours": "perp_volume_profile_window_hours",
         "volume_profile_candle_minutes": "perp_volume_profile_candle_minutes",
+        "market_reversal_filter_enabled": "perp_market_reversal_filter_enabled",
         "trend_shock_enabled": "perp_trend_shock_enabled",
         "trend_shock_adx_threshold": "perp_trend_shock_adx_threshold",
         "trend_shock_natr_percentile": "perp_trend_shock_natr_percentile",
@@ -597,7 +598,13 @@ class Settings(BaseSettings):
     # Filtro inversione mercato: conferma risk-on BTC prima di nuove entrate e blocca
     # short perp contro una risalita confermata. Non sblocca mai lo spot se altri
     # guardrail/regimi lo stanno gia' bloccando.
+    # Market reversal filter, split per market: it is a trend-following gate, which
+    # fits Spot momentum but works against Perp mean-reversion (it blocks longs
+    # exactly when price drops into the value area). The legacy global flag is kept
+    # only for backward compatibility with existing .env files.
     market_reversal_filter_enabled: bool = Field(default=True, alias="MARKET_REVERSAL_FILTER_ENABLED")
+    spot_market_reversal_filter_enabled: bool = Field(default=True, alias="SPOT_MARKET_REVERSAL_FILTER_ENABLED")
+    perp_market_reversal_filter_enabled: bool = Field(default=False, alias="PERP_MARKET_REVERSAL_FILTER_ENABLED")
     market_reversal_symbol: str = Field(default="BTCUSDT", alias="MARKET_REVERSAL_SYMBOL")
     market_reversal_interval: str = Field(default="15m", alias="MARKET_REVERSAL_INTERVAL")
     market_reversal_ema_period: int = Field(default=10, alias="MARKET_REVERSAL_EMA_PERIOD")
@@ -629,6 +636,14 @@ class Settings(BaseSettings):
     # FCM quando ne esce una nuova (arriva anche ad app chiusa) ──────────────────
     update_push_enabled: bool = Field(default=True, alias="UPDATE_PUSH_ENABLED")
     update_push_check_minutes: int = Field(default=15, alias="UPDATE_PUSH_CHECK_MINUTES")
+
+    # ── Engine health watchdog: push FCM when the scanner is failing ─────────────
+    # A broken DB session makes every asset of a scan cycle fail after the first
+    # error, so the agent silently stops opening. These thresholds turn that into
+    # a critical notification instead of a silent outage.
+    agent_health_alert_enabled: bool = Field(default=True, alias="AGENT_HEALTH_ALERT_ENABLED")
+    agent_health_alert_error_ratio: float = Field(default=0.5, alias="AGENT_HEALTH_ALERT_ERROR_RATIO")
+    agent_health_alert_throttle_minutes: int = Field(default=30, alias="AGENT_HEALTH_ALERT_THROTTLE_MINUTES")
 
     # ── Protezione posizione perp (breakeven + trailing dinamico sulla leva) ──────
     # Breakeven: a +N×ATR dall'entry lo SL sale a entry (+costi), niente più perdita.

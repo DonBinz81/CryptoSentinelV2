@@ -65,7 +65,11 @@ Operational rules for AI agents working on CryptoSentinelHackathon.
 - Portfolio value floor must stay above 1 USD.
 - Minimum trade frequency must be at least 1 trade per day.
 - Drawdown cap default is the prudent plan value, `-15%`, until official clarification.
-- The eligible-token universe must contain exactly 149 competition entries.
+- The eligible-token universe must contain exactly 150 entries in this fork.
+  Fork divergence, decided by the repository owner on 2026-08-17: upstream requires 149.
+  Added BTC, BNB, SOL, NEAR; removed XAUt, XAUM; ATOM and INJ restored to mirror the V1
+  perp watchlist for comparison. Keep the count and the rationale in
+  `configs/eligible_tokens.yaml` in sync with this rule.
 - Trades outside the eligible-token universe must not be allowed.
 - Telegram/open organizer questions are not blockers; use prudent defaults from the plan and update later if official answers arrive.
 

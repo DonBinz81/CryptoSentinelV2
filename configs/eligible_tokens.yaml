@@ -1,5 +1,8 @@
 # Competition eligible-token universe.
-# This list contains 148 unique entries (added BTC, BNB, SOL, NEAR; removed XAUt, XAUM, ATOM, INJ — volatility and liquidity optimization for VP mean-reversion).
+# This list contains 150 unique entries.
+# Divergence from upstream (149): added BTC, BNB, SOL, NEAR for volatility and liquidity
+# optimization of the VP mean-reversion strategy; removed XAUt and XAUM (illiquid on perp);
+# ATOM and INJ restored on 2026-08-17 to mirror the V1 perp watchlist for A/B comparison.
 
 eligible_tokens:
   - BTC
@@ -31,6 +34,8 @@ eligible_tokens:
   - USDD
   - ETC
   - AAVE
+  - ATOM
+  - INJ
   - SOL
   - NEAR
   - U

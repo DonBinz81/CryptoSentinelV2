@@ -47,6 +47,7 @@ spot:
   # 15m con 2 candele verdi consecutive sopra EMA10; resta bullish finche'
   # BTC non fa 2 candele rosse consecutive sotto EMA10. Sul Perp e' simmetrico:
   # bullish blocca short, bearish blocca long. Non sblocca blocchi risk-off.
+  # Vale SOLO per lo spot: il perp ha il suo interruttore in strategy_perp.yaml.
   market_reversal_filter_enabled: true
   market_reversal_symbol: BTCUSDT
   market_reversal_interval: 15m

@@ -53,6 +53,11 @@ perp:
   volume_profile_candle_minutes: 5
   # Filtro shock BTC perp: blocca nuove aperture quando BTC mostra trend forte
   # + volatilita' o volume anomali (score >= 2 su 3). Indipendente dal reversal filter.
+  # Filtro inversione di mercato sul PERP, indipendente da quello spot.
+  # Default OFF: e' un filtro trend-following e sul perp lavora contro la strategia
+  # mean-reversion (blocca i long proprio quando il prezzo rientra nel value area).
+  # Misurato su 10 giorni di BTC 15m: blocca una direzione o l'altra il 99,7% del tempo.
+  market_reversal_filter_enabled: false
   trend_shock_enabled: true
   trend_shock_adx_threshold: 25       # ADX >= soglia -> +1 allo score
   trend_shock_natr_percentile: 90     # NATR percentile >= soglia -> +1

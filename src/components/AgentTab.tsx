@@ -115,6 +115,8 @@ const defaultSettings: AgentMobileSettings = {
   drawdown_cap_pct: -15,
   min_pool_liquidity_usd: 50000,
   market_reversal_filter_enabled: true,
+  spot_market_reversal_filter_enabled: true,
+  perp_market_reversal_filter_enabled: false,
   spot_breakeven_enabled: true,
   perp_breakeven_enabled: true,
   spot_trailing_enabled: true,
@@ -1654,10 +1656,16 @@ const SetupPane: FC<{
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri globali</h3>
         <ToggleInput
-          label="Filtro inversione mercato"
-          help="Blocca le nuove entrate quando il mercato sta girando contro la direzione del segnale. Meno operazioni, ma evita di entrare proprio mentre il trend si ribalta."
-          checked={settings.market_reversal_filter_enabled}
-          onChange={(market_reversal_filter_enabled) => patch({ market_reversal_filter_enabled })}
+          label="Filtro inversione mercato — Spot"
+          help="Blocca le nuove entrate spot quando il mercato sta girando contro la direzione del segnale. Sullo spot ha senso: la strategia segue il trend, e questo evita di comprare proprio mentre si ribalta."
+          checked={settings.spot_market_reversal_filter_enabled}
+          onChange={(spot_market_reversal_filter_enabled) => patch({ spot_market_reversal_filter_enabled })}
+        />
+        <ToggleInput
+          label="Filtro inversione mercato — Perp"
+          help="Stesso filtro sul perp, dove però lavora al contrario: la strategia perp compra i rientri, e questo blocca i long proprio quando il prezzo scende. Misurato su BTC: tiene bloccata una direzione o l'altra il 99,7% del tempo. Default spento."
+          checked={settings.perp_market_reversal_filter_enabled}
+          onChange={(perp_market_reversal_filter_enabled) => patch({ perp_market_reversal_filter_enabled })}
         />
       </section>
 

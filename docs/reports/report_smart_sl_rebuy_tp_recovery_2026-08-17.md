@@ -71,6 +71,9 @@
 
 ## STATO DELIVERABLE
 
-- Deliverable completato in locale: codice allineato all'upstream, test di regressione
-  presente e verde, suite unit senza regressioni. Deploy sulla VPS non eseguito, in attesa
-  di approvazione.
+- Deliverable completato: codice allineato all'upstream, test di regressione presente e
+  verde, suite unit senza regressioni.
+- Deploy eseguito sulla VPS il 17/08/2026 alle 01:13:54 UTC, con backup del database a
+  servizio fermo (`~/backups/pre_smartsl_20260817_011354.db`, `integrity_check` = ok) e
+  del codice sostituito. Servizio `active`, loop dell'agente avviati, nessun errore nei
+  log successivi al riavvio. Impostazioni live non modificate.
