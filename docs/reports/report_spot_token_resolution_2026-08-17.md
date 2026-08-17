@@ -58,17 +58,47 @@ Deploy verificato per hash prima e dopo, backup in
 Nessuno. Il lavoro era stato descritto e approvato in questi termini; la verifica su
 `symbol()` ha confermato la scelta di rimuovere invece di validare.
 
+## SEGUITO — i quattro indirizzi mancanti, risolti
+
+Delle cinque coin senza indirizzo ne sono state risolte **quattro**, tutte verificate
+on-chain; `LDO` no, e non è stata inventata. Mappa in produzione: **da 49 a 53 indirizzi**.
+
+| simbolo | indirizzo | identità dal contratto | pool via WBNB |
+|---|---|---|---|
+| TRX | `0x85EAC5…4D5B` | `TRON` / `TRX` / 18 dec | 250 BNB |
+| TON | `0x76A797…220f` | `Wrapped TON Coin` / `TONCOIN` / 9 dec | 1,09 BNB |
+| 1INCH | `0x111111…C302` | `1INCH Token` / `1INCH` / 18 dec | 1,31 BNB |
+| ETC | `0x3d6545…3c25E` | `Ethereum Classic` / `ETC` / 18 dec | 0,067 BNB |
+
+**Il caso TRX** merita di essere registrato: nella tokenlist della venue esistono **due**
+contratti che dichiarano entrambi `name = "TRON"` e `symbol = "TRX"`, con **decimali
+diversi** (18 e 6). Nessun controllo di identità li distingue. Il criterio è stato quale
+pool userebbe il router: `build_path` passa sempre da WBNB e mai per la coppia diretta,
+quindi conta la profondità contro WBNB — 250 BNB contro 0,09. Sbagliare contratto qui
+avrebbe significato anche sbagliare la size di un fattore un milione.
+
+**Metodo**: risoluzione per **slug** e mai per ticker, poi verifica on-chain di `name()`,
+`symbol()`, `decimals()` e profondità delle pool. La liquidità è ciò che separa la moneta
+vera da un omonimo: il simbolo si copia, la profondità di un mercato no.
+
+Simulazione su mainnet con le Settings reali di produzione: la watchlist spot passa da
+**27 disponibili su 33** a **31 su 32**.
+
 ## QUESTIONI APERTE
 
-1. **Coin non mappate non eseguibili sullo spot in live**: `TRX`, `ETC`, `LDO`, `TON`,
-   `1INCH`. Vanno risolte a mano e verificate on-chain, mai per ticker. È il prezzo
-   consapevole di questa scelta: aggiungere una coin allo spot ora richiede un indirizzo
-   curato.
-2. La mappa in produzione contiene **49 indirizzi**, tutti verificati on-chain per
+1. **`LDO` resta senza indirizzo**: nessuna fonte curata lo elenca su BSC e il contratto
+   candidato non risponde (`name()`, `symbol()`, `decimals()` vuoti, nessuna pool). In live
+   non sarà eseguibile sullo spot.
+2. **`ETC` e `1INCH` risultano `available` ma con pool irrisorie** (0,067 e 1,31 BNB sulla
+   coppia usata dal router). Lo stato è formalmente corretto — la pool esiste — ma a
+   fermarli sarebbe il `liquidity_guard` (soglia 50.000 $). È il caso più chiaro a favore
+   della **soglia di liquidità nella disponibilità**, finora rimandata.
+3. La mappa in produzione contiene **53 indirizzi**, tutti verificati on-chain per
    `symbol()`, `decimals()` e presenza di pool.
-3. Lo stesso principio non è ancora applicato al **perp**, che non usa indirizzi on-chain:
+4. Lo stesso principio non è ancora applicato al **perp**, che non usa indirizzi on-chain:
    lì l'identificazione passa dal simbolo di mercato Aster, che è univoco per venue.
 
 ## STATO DELIVERABLE
 
-Completo, deployato e verificato. Commit `1d58803`. Non pushato.
+Completo, deployato e verificato. Commit `1d58803` (pushato). La mappa a 53 indirizzi e'
+applicata in produzione: e' configurazione, non codice, quindi non compare nei commit.
