@@ -588,6 +588,29 @@ const HelpTip: FC<{ text: string }> = ({ text }) => {
   );
 };
 
+// Blocco richiudibile per le sezioni lunghe e di uso raro (Smart SL, shock BTC):
+// partono chiuse, così la scheda Perp resta leggibile senza scorrere decine di
+// campi che si toccano una volta ogni tanto.
+const Collapsible: FC<{ title: string; count: number; children: React.ReactNode }> = ({ title, count, children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-dark-700">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-white">{title}</span>
+        <span className="flex items-center gap-2">
+          <span className="rounded-full bg-dark-700 px-2 py-0.5 text-xs text-gray-400">{count}</span>
+          <span className={`text-xs text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        </span>
+      </button>
+      {open && <div className="space-y-3 border-t border-dark-700 px-3 py-3">{children}</div>}
+    </div>
+  );
+};
+
 const NumberInput: FC<{
   label: string;
   value: number;
@@ -1865,12 +1888,14 @@ const SetupPane: FC<{
           onChange={(perp_trend_shock_enabled) => patch({ perp_trend_shock_enabled })}
         />
         {settings.perp_trend_shock_enabled && (
+          <Collapsible title="Soglie del filtro shock BTC" count={4}>
           <div className="grid grid-cols-2 gap-3">
             <NumberInput label="ADX threshold" help={'Quanto deve essere forte il trend di Bitcoin perché conti come segnale d\'allarme. Sopra questa soglia vale un punto su tre.'} value={settings.perp_trend_shock_adx_threshold} onChange={(perp_trend_shock_adx_threshold) => patch({ perp_trend_shock_adx_threshold })} />
             <NumberInput label="NATR percentile" help={'Quanto in alto deve stare la volatilità di Bitcoin rispetto al suo passato. A 90 significa: più alta del 90% delle volte. Vale un punto.'} value={settings.perp_trend_shock_natr_percentile} onChange={(perp_trend_shock_natr_percentile) => patch({ perp_trend_shock_natr_percentile })} />
             <NumberInput label="Volume threshold" help={'Quante volte il volume di Bitcoin deve superare la sua media per contare come allarme. Vale un punto.'} value={settings.perp_trend_shock_volume_threshold} onChange={(perp_trend_shock_volume_threshold) => patch({ perp_trend_shock_volume_threshold })} />
             <NumberInput label="Recovery checks" help={'Quanti controlli consecutivi tranquilli servono prima di tornare a operare. Più alto, più prudente nel rientrare.'} value={settings.perp_trend_shock_recovery_confirmations} onChange={(perp_trend_shock_recovery_confirmations) => patch({ perp_trend_shock_recovery_confirmations })} />
           </div>
+          </Collapsible>
         )}
         <ToggleInput
           label="Smart Stop Loss Perp"
@@ -1878,7 +1903,7 @@ const SetupPane: FC<{
           onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
         />
         {settings.perp_smart_sl_enabled && (
-          <>
+          <Collapsible title="Parametri Smart Stop Loss" count={20}>
             {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
             <div className="grid grid-cols-2 gap-3">
               <NumberInput label="L1 frac" help={'Dove sta il primo livello di vendita, come frazione della strada fra ingresso e stop. A 0.35 scatta al 35% del percorso verso lo stop.'} value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
@@ -1931,7 +1956,7 @@ const SetupPane: FC<{
                 )}
               </div>
             )}
-          </>
+          </Collapsible>
         )}
       </section>
         </>
