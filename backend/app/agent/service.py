@@ -2643,7 +2643,7 @@ class AgentService:
             perp_position_id = f"pos_{uuid4().hex}"
             # Entry goes through the venue as well: the venue chosen here is the one
             # the position will keep for its whole life (reduce, protect, close).
-            entry_venue = get_perp_venue_router().resolve_entry_venue(
+            entry_venue = await get_perp_venue_router().resolve_entry_venue(
                 "perp", str(signal.get("asset")), execution_mode=self._ms.execution_mode
             )
             if entry_venue is None:

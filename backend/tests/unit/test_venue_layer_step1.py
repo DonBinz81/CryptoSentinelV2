@@ -94,17 +94,19 @@ async def test_dry_run_venue_records_every_purpose(db) -> None:
     assert all(o.status == "confirmed" for o in stored)
 
 
-def test_router_resolves_dry_run_for_new_positions() -> None:
+@pytest.mark.asyncio
+async def test_router_resolves_dry_run_for_new_positions() -> None:
     router = PerpVenueRouter()
-    venue = router.resolve_entry_venue("perp", "BTC", execution_mode="dry_run")
+    venue = await router.resolve_entry_venue("perp", "BTC", execution_mode="dry_run")
     assert venue is not None
     assert venue.name == DRY_RUN_VENUE
 
 
-def test_router_refuses_to_open_live_without_a_venue() -> None:
+@pytest.mark.asyncio
+async def test_router_refuses_to_open_live_without_a_venue() -> None:
     """No live perp venue exists yet: it must fail, not silently simulate."""
     router = PerpVenueRouter()
-    assert router.resolve_entry_venue("perp", "BTC", execution_mode="live") is None
+    assert await router.resolve_entry_venue("perp", "BTC", execution_mode="live") is None
     assert VENUE_UNAVAILABLE == "venue_unavailable"
 
 
@@ -136,3 +138,57 @@ def test_execution_result_defaults_are_conservative() -> None:
     assert result.venue_execution_id is None
     assert result.tx_hash is None
     assert result.status == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_router_refuses_a_pair_the_venue_does_not_list(monkeypatch) -> None:
+    """A pair the venue does not list must not open, dry-run included.
+
+    A simulation that opens positions the live venue would refuse is not a
+    rehearsal of anything.
+    """
+
+    import backend.app.execution.venue_router as module
+
+    async def _availability(symbols):
+        return {"COMP": {"perp": {"venue": "aster", "status": "unavailable"}}}
+
+    monkeypatch.setattr(
+        module, "get_venue_availability_service", lambda: SimpleNamespace(availability=_availability)
+    )
+    router = PerpVenueRouter()
+    assert await router.resolve_entry_venue("perp", "COMP", execution_mode="dry_run") is None
+
+
+@pytest.mark.asyncio
+async def test_router_still_opens_when_availability_is_unknown(monkeypatch) -> None:
+    """`unknown` is our own blind spot, not a missing market: it must not block."""
+
+    import backend.app.execution.venue_router as module
+
+    async def _availability(symbols):
+        return {"BTC": {"perp": {"venue": "aster", "status": "unknown"}}}
+
+    monkeypatch.setattr(
+        module, "get_venue_availability_service", lambda: SimpleNamespace(availability=_availability)
+    )
+    router = PerpVenueRouter()
+    venue = await router.resolve_entry_venue("perp", "BTC", execution_mode="dry_run")
+    assert venue is not None
+
+
+@pytest.mark.asyncio
+async def test_router_opens_when_the_availability_check_itself_fails(monkeypatch) -> None:
+    """A broken check must not become a trading halt."""
+
+    import backend.app.execution.venue_router as module
+
+    async def _availability(symbols):
+        raise RuntimeError("aster unreachable")
+
+    monkeypatch.setattr(
+        module, "get_venue_availability_service", lambda: SimpleNamespace(availability=_availability)
+    )
+    router = PerpVenueRouter()
+    venue = await router.resolve_entry_venue("perp", "BTC", execution_mode="dry_run")
+    assert venue is not None

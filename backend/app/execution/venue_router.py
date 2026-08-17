@@ -16,6 +16,7 @@ arrives with the second venue, not before.
 from __future__ import annotations
 
 from backend.app.core.logging import get_logger
+from backend.app.execution.venue_availability import UNAVAILABLE, get_venue_availability_service
 from backend.app.execution.venues.base import PerpVenue
 from backend.app.execution.venues.dry_run import DRY_RUN_VENUE, DryRunPerpVenue
 
@@ -34,8 +35,37 @@ class PerpVenueRouter:
     def get(self, name: str | None) -> PerpVenue | None:
         return self._venues.get(name) if name else None
 
-    def resolve_entry_venue(self, market: str, symbol: str, *, execution_mode: str) -> PerpVenue | None:
-        """Pick the venue for a NEW position. Only dry-run exists today."""
+    async def _pair_is_unavailable(self, market: str, symbol: str) -> bool:
+        """True only when the venue itself says it does not list the pair.
+
+        ``unknown`` never blocks: it means *we* could not check — a rate limit,
+        an RPC outage, a network we cannot probe — and a limit of ours must not
+        stop trading a pair the venue may well support. Only a definite "not
+        listed" is worth refusing an entry over.
+        """
+        try:
+            table = await get_venue_availability_service().availability([symbol])
+        except Exception as exc:
+            logger.warning("availability_check_failed", symbol=symbol, error_type=type(exc).__name__)
+            return False
+        return table.get(symbol.upper(), {}).get(market, {}).get("status") == UNAVAILABLE
+
+    async def resolve_entry_venue(self, market: str, symbol: str, *, execution_mode: str) -> PerpVenue | None:
+        """Pick the venue for a NEW position. Only dry-run exists today.
+
+        The availability check runs in dry-run too, on purpose: a simulation that
+        opens positions the live venue would refuse produces results that cannot
+        be trusted as a rehearsal.
+        """
+        if await self._pair_is_unavailable(market, symbol):
+            logger.info(
+                "venue_unavailable",
+                market=market,
+                symbol=symbol,
+                execution_mode=execution_mode,
+                reason="pair not listed on the configured venue",
+            )
+            return None
         if execution_mode == "dry_run":
             return self._venues.get(DRY_RUN_VENUE)
         # No live perp venue is implemented yet: fail loudly instead of silently
