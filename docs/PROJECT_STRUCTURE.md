@@ -83,6 +83,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |       `-- wallet_custody.py - provider keystore Web3 cifrato con policy typed-data fail-closed.
 |   |   |-- data/ - integrazioni dati mercato.
 |   |   |   |-- market_data/ - astrazione multi-provider Step 3.
+|   |   |   |-- market_data/ranking.py - posizione globale per capitalizzazione, esposta al setup (`#1` = BTC), aggiornata una volta al giorno. **Sola visualizzazione**: le watchlist salvate non vengono mai riordinate, perche' il motore le scansiona in sequenza e la prima coin valutata si prende lo slot. La classifica si legge dall'alto fino alla posizione 1000, mai chiedendo simbolo per simbolo: `asset_ids` accetta identificativi del provider e non ticker, e interrogarlo con "UNI" restituiva un token estraneo. Se il provider non risponde si serve l'ultima classifica buona, cosi' la lista non si rimescola per un disservizio.
 |   |   |   |   |-- base.py - interfaccia MarketDataProvider, identità asset e modelli normalizzati.
 |   |   |   |   |-- aliases.py - mapping ID storico app/CoinGecko verso slug CMC.
 |   |   |   |   |-- registry.py - selettore globale UI/market, factory dedicata per alert su provider configurato separatamente, riconciliazione ID storici resiliente, cache in memoria delle identità risolte e popolamento dalle liste ranked per ridurre refresh lenti.
