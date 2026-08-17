@@ -166,6 +166,27 @@ async def test_spot_unknown_when_no_quote_token_is_configured():
 
 
 @pytest.mark.asyncio
+async def test_runtime_network_override_wins_over_configuration(monkeypatch):
+    """The engine can switch chain at runtime; the setup screen must follow.
+
+    Settings say mainnet, an admin moved execution to testnet: reading the raw
+    configuration here would make the UI describe a chain the engine is not on.
+    """
+
+    import backend.app.execution.venue_availability as module
+
+    monkeypatch.setattr(
+        module,
+        "effective_execution_settings",
+        lambda s: SimpleNamespace(**{**vars(s), "bsc_network": "testnet"}),
+    )
+    service = _service(settings=_settings(bsc_network="mainnet"), spot=_FakeSpot(POOL))
+    result = await service.availability(["BTC"])
+    assert result["BTC"]["spot"]["status"] == UNKNOWN
+    assert "test" in result["BTC"]["spot"]["reason"]
+
+
+@pytest.mark.asyncio
 async def test_perp_markets_are_fetched_once_and_cached():
     aster = _FakeAster(_exchange_info("BTC", "ETH"))
     service = _service(aster=aster)

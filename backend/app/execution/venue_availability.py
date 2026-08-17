@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger
 from backend.app.data.market_data.cache import TTLCache
+from backend.app.execution.network_selection import effective_execution_settings
 from backend.app.execution.providers import PancakeSwapProvider
 from backend.app.execution.venues.aster import AsterClient
 
@@ -89,6 +90,22 @@ class VenueAvailabilityService:
         self._cache = cache if cache is not None else TTLCache(DEFAULT_TTL_SECONDS)
         self._aster_client = aster_client
         self._spot_provider = spot_provider
+        self._spot_provider_injected = spot_provider is not None
+        self._spot_provider_network: str | None = None
+
+    def _execution_settings(self) -> Settings:
+        """Settings as the execution layer sees them, runtime override included.
+
+        The BSC network can be switched at runtime by an admin, not only through
+        the environment. Reading the raw Settings here would let the setup screen
+        claim one network while the engine trades on another — the second source
+        of truth this module exists to avoid.
+        """
+        try:
+            return effective_execution_settings(self._settings)
+        except Exception as exc:  # runtime state unavailable: fall back to config
+            logger.warning("effective_settings_unavailable", error_type=type(exc).__name__)
+            return self._settings
 
     # ── Venue clients ─────────────────────────────────────────────────────────
 
@@ -104,9 +121,14 @@ class VenueAvailabilityService:
             )
         return self._aster_client
 
-    def _spot(self) -> PancakeSwapProvider:
-        if self._spot_provider is None:
-            self._spot_provider = PancakeSwapProvider(self._settings)
+    def _spot(self, settings: Settings) -> PancakeSwapProvider:
+        if self._spot_provider_injected:
+            return self._spot_provider  # type: ignore[return-value]
+        # Rebuilt when the network changes: router, factory and WBNB differ, and
+        # a stale provider would probe the wrong chain.
+        if self._spot_provider is None or self._spot_provider_network != settings.bsc_network:
+            self._spot_provider = PancakeSwapProvider(settings)
+            self._spot_provider_network = settings.bsc_network
         return self._spot_provider
 
     # ── Perp (Aster) ──────────────────────────────────────────────────────────
@@ -148,8 +170,10 @@ class VenueAvailabilityService:
         address, _, _decimals = entry.partition(":")
         return address or None
 
-    async def _spot_status(self, symbol: str) -> MarketAvailability:
-        cache_key = f"pancakeswap:spot:{symbol.upper()}"
+    async def _spot_status(self, symbol: str, settings: Settings) -> MarketAvailability:
+        # The network is part of the key: switching chain must not serve answers
+        # computed against the other one.
+        cache_key = f"pancakeswap:spot:{settings.bsc_network}:{symbol.upper()}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
@@ -160,16 +184,16 @@ class VenueAvailabilityService:
             return MarketAvailability(
                 SPOT_VENUE, UNKNOWN, "indirizzo BSC non verificato per questo simbolo"
             )
-        quote = self._settings.spot_quote_token_address
+        quote = settings.spot_quote_token_address
         if not quote:
             return MarketAvailability(SPOT_VENUE, UNKNOWN, "token di quotazione spot non configurato")
-        if self._settings.bsc_network == "testnet":
+        if settings.bsc_network == "testnet":
             # Curated addresses are mainnet ones: probing the testnet factory
             # would report "no pool" for coins that trade perfectly well on
             # mainnet, and that answer would block them in the setup screen.
             return MarketAvailability(SPOT_VENUE, UNKNOWN, "rete BSC di test: verifica spot non significativa")
 
-        provider = self._spot()
+        provider = self._spot(settings)
         try:
             # Same path the engine would swap through, so the answer matches
             # what execution would really attempt: every hop needs its pool.
@@ -197,6 +221,7 @@ class VenueAvailabilityService:
     async def availability(self, symbols: list[str]) -> dict[str, dict[str, dict[str, str]]]:
         """Availability of every given symbol on both markets, keyed by symbol."""
 
+        settings = self._execution_settings()
         perp_markets = await self._perp_markets()
         result: dict[str, dict[str, dict[str, str]]] = {}
         for symbol in symbols:
@@ -207,7 +232,7 @@ class VenueAvailabilityService:
                 perp = MarketAvailability(PERP_VENUE, AVAILABLE)
             else:
                 perp = MarketAvailability(PERP_VENUE, UNAVAILABLE, "non quotata su Aster")
-            spot = await self._spot_status(key)
+            spot = await self._spot_status(key, settings)
             result[key] = {"spot": spot.as_dict(), "perp": perp.as_dict()}
         return result
 
