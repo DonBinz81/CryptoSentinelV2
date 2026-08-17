@@ -18,6 +18,7 @@ import {
   riskCloseAll,
   adjustEquity,
   validateOnboarding,
+  fetchAgentWatchlist,
   fetchSpotWatchlist,
   updateSpotWatchlist,
   fetchPerpWatchlist,
@@ -25,6 +26,7 @@ import {
   type AgentDecisionResponse,
   type AgentMarketWatchlistResponse,
   type VenueAvailability,
+  type WatchlistRanking,
   type AgentMobileSettings,
   type AgentStatus,
   type AssetBreakdownResponse,
@@ -517,7 +519,8 @@ const TokenToggle: FC<{
   disabled: boolean;
   onToggle: (symbol: string) => void;
   availability?: VenueAvailability;
-}> = ({ symbol, selected, disabled, onToggle, availability }) => {
+  rank?: number | null;
+}> = ({ symbol, selected, disabled, onToggle, availability, rank }) => {
   const status = availability?.status;
   const blocked = status === 'unavailable' && !selected;
   const tone = selected
@@ -533,8 +536,12 @@ const TokenToggle: FC<{
       title={availability?.reason}
       className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-45 ${tone}`}
     >
-      <span className="flex items-center justify-between gap-3">
-        <span className={`min-w-0 truncate text-sm font-semibold ${status === 'unavailable' ? 'line-through' : ''}`}>{symbol}</span>
+      <span className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          {/* Posizione globale per capitalizzazione (CoinMarketCap): BTC = 1. */}
+          {rank != null && <span className="flex-shrink-0 text-[10px] text-gray-500">#{rank}</span>}
+          <span className={`min-w-0 truncate text-sm font-semibold ${status === 'unavailable' ? 'line-through' : ''}`}>{symbol}</span>
+        </span>
         <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${selected ? 'bg-accent-yellow' : 'bg-gray-600'}`} />
       </span>
       {availability && (
@@ -1359,15 +1366,32 @@ const CoinsPane: FC<{
   const [perpData, setPerpData] = useState<AgentMarketWatchlistResponse | null>(null);
   const [marketSaving, setMarketSaving] = useState(false);
   const [marketError, setMarketError] = useState('');
+  const [ranking, setRanking] = useState<WatchlistRanking>({});
 
   useEffect(() => {
     void fetchSpotWatchlist().then(setSpotData).catch(() => undefined);
     void fetchPerpWatchlist().then(setPerpData).catch(() => undefined);
+    // La GET master copre tutto l'universo eligible, quindi una sola chiamata
+    // serve il ranking a tutte e tre le schede.
+    void fetchAgentWatchlist().then((d) => setRanking(d.ranking ?? {})).catch(() => undefined);
   }, []);
 
   const normalizedQuery = query.trim().toUpperCase();
-  const masterTokens = eligibleTokens.filter((s) => selectedAiSymbols.has(s.toUpperCase()));
-  const filteredEligible = eligibleTokens.filter((s) => s.toUpperCase().includes(normalizedQuery));
+  const rankOf = (symbol: string): number | null => ranking[symbol.toUpperCase()]?.rank ?? null;
+  // Ordine per capitalizzazione: chi non ha un rank finisce in fondo, in ordine
+  // alfabetico, invece di mescolarsi alle prime posizioni.
+  const byMarketCap = (symbols: string[]): string[] =>
+    [...symbols].sort((a, b) => {
+      const ra = rankOf(a);
+      const rb = rankOf(b);
+      if (ra != null && rb != null) return ra - rb;
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return a.localeCompare(b);
+    });
+
+  const masterTokens = byMarketCap(eligibleTokens.filter((s) => selectedAiSymbols.has(s.toUpperCase())));
+  const filteredEligible = byMarketCap(eligibleTokens.filter((s) => s.toUpperCase().includes(normalizedQuery)));
 
   const spotSelected = useMemo(() => new Set((spotData?.selected_tokens ?? []).map((s) => s.toUpperCase())), [spotData]);
   const perpSelected = useMemo(() => new Set((perpData?.selected_tokens ?? []).map((s) => s.toUpperCase())), [perpData]);
@@ -1442,7 +1466,7 @@ const CoinsPane: FC<{
             {masterTokens.length > 0 ? (
               <div className="grid grid-cols-2 gap-2">
                 {masterTokens.map((symbol) => (
-                  <TokenToggle key={`sel-${symbol}`} symbol={symbol} selected disabled={disabled} onToggle={onToggle} />
+                  <TokenToggle key={`sel-${symbol}`} symbol={symbol} selected disabled={disabled} onToggle={onToggle} rank={rankOf(symbol)} />
                 ))}
               </div>
             ) : (
@@ -1462,7 +1486,7 @@ const CoinsPane: FC<{
             />
             <div className="grid grid-cols-2 gap-2">
               {filteredEligible.map((symbol) => (
-                <TokenToggle key={symbol} symbol={symbol} selected={selectedAiSymbols.has(symbol.toUpperCase())} disabled={disabled} onToggle={onToggle} />
+                <TokenToggle key={symbol} symbol={symbol} selected={selectedAiSymbols.has(symbol.toUpperCase())} disabled={disabled} onToggle={onToggle} rank={rankOf(symbol)} />
               ))}
             </div>
             {filteredEligible.length === 0 && <EmptyState title="Nessun token trovato" detail="La ricerca filtra solo l'universo eligible." />}
@@ -1473,7 +1497,7 @@ const CoinsPane: FC<{
       {(subTab === 'spot' || subTab === 'perp') && (() => {
         const isSpot = subTab === 'spot';
         const selected = isSpot ? spotSelected : perpSelected;
-        const activeMasterTokens = masterTokens.filter((s) => s.toUpperCase().includes(normalizedQuery));
+        const activeMasterTokens = masterTokens.filter((s) => s.toUpperCase().includes(normalizedQuery));  // masterTokens e' gia' ordinata per capitalizzazione
         // Disponibilità: sempre dal backend. Se il campo manca (venue non
         // raggiungibile) si ricade su "unknown", che avvisa senza bloccare.
         const availabilityMap = (isSpot ? spotData : perpData)?.availability;
@@ -1515,6 +1539,7 @@ const CoinsPane: FC<{
                     disabled={marketDisabled}
                     onToggle={(s) => void handleMarketToggle(s, subTab)}
                     availability={availabilityFor(symbol)}
+                    rank={rankOf(symbol)}
                   />
                 ))}
               </div>

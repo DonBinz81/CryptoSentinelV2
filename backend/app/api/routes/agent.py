@@ -26,6 +26,7 @@ from backend.app.schemas.views import ClaudeUsageView
 from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SessionDep
 from backend.app.core.config import get_settings
 from backend.app.core.logging import get_logger
+from backend.app.data.market_data.ranking import get_market_ranking_service
 from backend.app.execution.venue_availability import get_venue_availability_service
 
 logger = get_logger("api.agent")
@@ -92,6 +93,8 @@ async def agent_watchlist(_: ReadAccessDep) -> dict:
         "eligible_tokens": service.settings.eligible_tokens,
         "selected_count": len(selected),
         "selected_tokens": selected,
+        # Covers the whole eligible universe: this screen lists it in full.
+        "ranking": await _watchlist_ranking(service.settings.eligible_tokens),
     }
 
 
@@ -164,6 +167,20 @@ async def set_agent_watchlist(request: AgentWatchlistRequest, _: AdminAccessDep)
     }
 
 
+async def _watchlist_ranking(symbols: list[str]) -> dict:
+    """Global market-cap rank per symbol, or an empty map if unavailable.
+
+    Display only: the stored watchlists keep their order, because the engine
+    scans them sequentially and the first symbol evaluated takes the open slot.
+    Never raises, for the same reason as the availability helper.
+    """
+    try:
+        return await get_market_ranking_service().ranking(symbols)
+    except Exception as exc:
+        logger.warning("watchlist_ranking_failed", error_type=type(exc).__name__)
+        return {}
+
+
 async def _watchlist_availability(symbols: list[str]) -> dict:
     """Per-symbol venue availability, or an empty map if it cannot be computed.
 
@@ -188,6 +205,7 @@ async def get_spot_watchlist(_: ReadAccessDep) -> dict:
         "selected_tokens": selected,
         "selected_count": len(selected),
         "availability": await _watchlist_availability(master),
+        "ranking": await _watchlist_ranking(master),
     }
 
 
@@ -211,6 +229,7 @@ async def get_perp_watchlist(_: ReadAccessDep) -> dict:
         "selected_tokens": selected,
         "selected_count": len(selected),
         "availability": await _watchlist_availability(master),
+        "ranking": await _watchlist_ranking(master),
     }
 
 

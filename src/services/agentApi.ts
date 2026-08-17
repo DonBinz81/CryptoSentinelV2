@@ -21,7 +21,17 @@ export interface AgentWatchlistResponse {
   eligible_tokens: string[];
   selected_count: number;
   selected_tokens: string[];
+  ranking?: WatchlistRanking;
 }
+
+export interface SymbolRanking {
+  /** Global CoinMarketCap rank (BTC is 1). Null when the provider has no figure. */
+  rank: number | null;
+  market_cap: number | null;
+}
+
+/** Ranking per symbol, keyed by symbol. Display only: it never reorders the stored watchlist. */
+export type WatchlistRanking = Record<string, SymbolRanking>;
 
 export type VenueAvailabilityStatus = 'available' | 'unavailable' | 'unknown';
 
@@ -39,6 +49,7 @@ export interface AgentMarketWatchlistResponse {
   selected_tokens: string[];
   selected_count: number;
   availability?: WatchlistAvailability;
+  ranking?: WatchlistRanking;
 }
 
 export interface SpotPositionView {
