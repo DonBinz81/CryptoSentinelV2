@@ -522,17 +522,108 @@ const TokenToggle: FC<{
   </button>
 );
 
+// Punto interrogativo con spiegazione breve. Un solo riquadro aperto per volta:
+// aprirne uno chiude gli altri (evento globale), e si chiude anche toccando
+// altrove o scorrendo. Sta dentro <label>, quindi il click va fermato o
+// attiverebbe il campo associato (sui toggle invertirebbe la spunta).
+const HelpTip: FC<{ text: string }> = ({ text }) => {
+  // `pos` nullo = chiuso. Il riquadro è `fixed` e centrato sullo schermo, non
+  // ancorato al "?": ancorandolo, i campi della colonna destra lo facevano
+  // uscire dal bordo. Verticalmente sta sotto il "?", oppure sopra se in fondo
+  // allo schermo non ci sta.
+  const [pos, setPos] = useState<{ top: number; above: boolean } | null>(null);
+  const idRef = useRef(`ht${Math.random().toString(36).slice(2, 9)}`);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!pos) return;
+    const onOther = (e: Event) => { if ((e as CustomEvent).detail !== idRef.current) setPos(null); };
+    const onAway = () => setPos(null);
+    document.addEventListener('helptip:open', onOther as EventListener);
+    document.addEventListener('click', onAway);
+    window.addEventListener('scroll', onAway, true);
+    window.addEventListener('resize', onAway);
+    return () => {
+      document.removeEventListener('helptip:open', onOther as EventListener);
+      document.removeEventListener('click', onAway);
+      window.removeEventListener('scroll', onAway, true);
+      window.removeEventListener('resize', onAway);
+    };
+  }, [pos]);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Spiegazione"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (pos) { setPos(null); return; }
+          const r = btnRef.current?.getBoundingClientRect();
+          if (!r) return;
+          const STIMA = 170; // altezza tipica del riquadro
+          const above = r.bottom + STIMA > window.innerHeight;
+          setPos({ top: above ? r.top - 8 : r.bottom + 8, above });
+          document.dispatchEvent(new CustomEvent('helptip:open', { detail: idRef.current }));
+        }}
+        className={`ml-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition-colors ${
+          pos ? 'border-accent-blue bg-accent-blue text-white' : 'border-dark-600 text-gray-500'
+        }`}
+      >
+        ?
+      </button>
+      {pos && (
+        <span
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            top: pos.above ? undefined : pos.top,
+            bottom: pos.above ? window.innerHeight - pos.top : undefined,
+          }}
+          className="fixed left-1/2 z-50 block w-max max-w-[min(19rem,calc(100vw-2.5rem))] -translate-x-1/2 whitespace-pre-line rounded-xl border border-dark-600 bg-dark-900 px-4 py-3 text-[13px] font-normal leading-relaxed text-gray-200 shadow-2xl"
+        >
+          {text}
+        </span>
+      )}
+    </>
+  );
+};
+
+// Blocco richiudibile per le sezioni lunghe e di uso raro (Smart SL, shock BTC):
+// partono chiuse, così la scheda Perp resta leggibile senza scorrere decine di
+// campi che si toccano una volta ogni tanto.
+const Collapsible: FC<{ title: string; count: number; children: React.ReactNode }> = ({ title, count, children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-dark-700">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+      >
+        <span className="text-sm font-semibold text-white">{title}</span>
+        <span className="flex items-center gap-2">
+          <span className="rounded-full bg-dark-700 px-2 py-0.5 text-xs text-gray-400">{count}</span>
+          <span className={`text-xs text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        </span>
+      </button>
+      {open && <div className="space-y-3 border-t border-dark-700 px-3 py-3">{children}</div>}
+    </div>
+  );
+};
+
 const NumberInput: FC<{
   label: string;
   value: number;
   step?: number;
+  help?: string;
   onChange: (value: number) => void;
-}> = ({ label, value, step = 1, onChange }) => {
+}> = ({ label, value, step = 1, help, onChange }) => {
   const [raw, setRaw] = useState(String(value));
   useEffect(() => { setRaw(String(value)); }, [value]);
   return (
     <label className="block">
       <span className="text-xs text-gray-500">{label}</span>
+      {help && <HelpTip text={help} />}
       <input
         type="number"
         step={step}
@@ -554,10 +645,12 @@ const SelectInput: FC<{
   label: string;
   value: string;
   options: Array<{ value: string; label: string }>;
+  help?: string;
   onChange: (value: string) => void;
-}> = ({ label, value, options, onChange }) => (
+}> = ({ label, value, options, help, onChange }) => (
   <label className="block">
     <span className="text-xs text-gray-500">{label}</span>
+    {help && <HelpTip text={help} />}
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
@@ -571,10 +664,14 @@ const SelectInput: FC<{
 const ToggleInput: FC<{
   label: string;
   checked: boolean;
+  help?: string;
   onChange: (checked: boolean) => void;
-}> = ({ label, checked, onChange }) => (
+}> = ({ label, checked, help, onChange }) => (
   <label className="flex items-center justify-between gap-3 rounded-lg border border-dark-700 bg-dark-800 px-3 py-2">
-    <span className="min-w-0 text-sm font-semibold text-white">{label}</span>
+    <span className="min-w-0 text-sm font-semibold text-white">
+      {label}
+      {help && <HelpTip text={help} />}
+    </span>
     <input
       type="checkbox"
       checked={checked}
@@ -1313,6 +1410,15 @@ const CoinsPane: FC<{
   );
 };
 
+type SetupTab = 'generale' | 'spot' | 'perp' | 'sistema';
+
+const SETUP_TABS: Array<{ id: SetupTab; label: string }> = [
+  { id: 'generale', label: 'Generale' },
+  { id: 'spot', label: 'Spot' },
+  { id: 'perp', label: 'Perp' },
+  { id: 'sistema', label: 'Sistema' },
+];
+
 const SetupPane: FC<{
   settings: AgentMobileSettings;
   onSettings: (settings: AgentMobileSettings) => void;
@@ -1345,6 +1451,9 @@ const SetupPane: FC<{
   onAdjustEquity,
 }) => {
   const patch = (partial: Partial<AgentMobileSettings>) => onSettings({ ...settings, ...partial });
+  // Sotto-schede del setup: separano i parametri per mercato (stesso schema di CoinsPane).
+  // I settings restano un unico oggetto: cambiare scheda non tocca né i valori né il dirty.
+  const [setupTab, setSetupTab] = useState<SetupTab>('generale');
   const [equityInput, setEquityInput] = useState('');
   const equityValue = Number(equityInput);
   const equityValid = equityInput.trim() !== '' && Number.isFinite(equityValue) && equityValue !== 0;
@@ -1369,6 +1478,45 @@ const SetupPane: FC<{
 
   return (
     <div className="space-y-4">
+      {/* Fuori dalle schede: deve restare a portata da qualunque punto del setup. */}
+      <section className="rounded-xl border border-accent-red/30 bg-dark-800 px-4 py-4 space-y-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-white">Risk · Chiusura di emergenza</h3>
+          <p className="mt-0.5 text-xs text-gray-500">Chiude tutte le posizioni spot e perp al prezzo di mercato e mette l'agente in pausa (hard stop). Riprende solo quando premi Riprendi.</p>
+        </div>
+        <button
+          onClick={onCloseAll}
+          disabled={!adminToken || saving}
+          className="w-full rounded-lg bg-accent-red px-3 py-3 text-sm font-bold text-white disabled:opacity-40"
+        >
+          {saving ? 'Esecuzione...' : '⛔ Chiudi tutto & metti in pausa'}
+        </button>
+        <button
+          onClick={() => onKill('running')}
+          disabled={!adminToken || saving || agentStatus?.kill_switch === 'running'}
+          className="w-full rounded-lg bg-accent-green/20 px-3 py-2.5 text-sm font-semibold text-accent-green disabled:opacity-40"
+        >
+          ▶ Riprendi agente
+        </button>
+        {!adminToken && <p className="text-xs text-gray-600">Richiede admin token salvato.</p>}
+      </section>
+
+      <div className="grid grid-cols-4 gap-1">
+        {SETUP_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSetupTab(t.id)}
+            className={`rounded-lg py-1.5 text-xs font-semibold transition-colors ${
+              setupTab === t.id ? 'bg-accent-blue text-white' : 'bg-dark-700 text-gray-400 hover:text-white'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {setupTab === 'sistema' && (
+        <>
       <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-3">
         <h3 className="text-sm font-semibold text-white">Admin session</h3>
         <input
@@ -1422,28 +1570,6 @@ const SetupPane: FC<{
         {!adminToken && <p className="text-xs text-gray-600">Richiede admin token salvato.</p>}
       </section>
 
-      <section className="rounded-xl border border-accent-red/30 bg-dark-800 px-4 py-4 space-y-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-white">Risk · Chiusura di emergenza</h3>
-          <p className="mt-0.5 text-xs text-gray-500">Chiude tutte le posizioni spot e perp al prezzo di mercato e mette l'agente in pausa (hard stop). Riprende solo quando premi Riprendi.</p>
-        </div>
-        <button
-          onClick={onCloseAll}
-          disabled={!adminToken || saving}
-          className="w-full rounded-lg bg-accent-red px-3 py-3 text-sm font-bold text-white disabled:opacity-40"
-        >
-          {saving ? 'Esecuzione...' : '⛔ Chiudi tutto & metti in pausa'}
-        </button>
-        <button
-          onClick={() => onKill('running')}
-          disabled={!adminToken || saving || agentStatus?.kill_switch === 'running'}
-          className="w-full rounded-lg bg-accent-green/20 px-3 py-2.5 text-sm font-semibold text-accent-green disabled:opacity-40"
-        >
-          ▶ Riprendi agente
-        </button>
-        {!adminToken && <p className="text-xs text-gray-600">Richiede admin token salvato.</p>}
-      </section>
-
       <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-white">Liquidità · Versamento / Prelievo</h3>
@@ -1489,222 +1615,89 @@ const SetupPane: FC<{
       <section className="rounded-xl bg-dark-800 px-4 py-3">
         <p className="text-xs text-gray-500">Per indirizzi e posizioni aperte usa il tab <span className="text-accent-blue font-semibold">Wallet</span>.</p>
       </section>
+        </>
+      )}
 
+      {setupTab === 'generale' && (
+        <>
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">General</h3>
         <div className="grid grid-cols-2 gap-3">
-          <SelectInput label="Mode" value={settings.mode} onChange={(mode) => patch({ mode })} options={[
+          <SelectInput label="Mode" help={'Quanta libertà ha l\'agente:\n\nConservative — solo i segnali migliori\nSemi-auto — più operazioni, filtri più larghi\nFull auto — massima autonomia'} value={settings.mode} onChange={(mode) => patch({ mode })} options={[
             { value: 'conservative', label: 'Conservative' },
             { value: 'semi_autonomous', label: 'Semi-auto' },
             { value: 'full_autonomous', label: 'Full auto' },
           ]} />
-          <SelectInput label="Market" value={settings.markets_enabled} onChange={(markets_enabled) => patch({ markets_enabled })} options={[
+          <SelectInput label="Market" help={'Su quali mercati opera:\n\nSpot — compra la moneta vera, niente leva\nPerp — contratti con leva, guadagna anche al ribasso\nBoth — entrambi i mercati'} value={settings.markets_enabled} onChange={(markets_enabled) => patch({ markets_enabled })} options={[
             { value: 'spot', label: 'Spot' },
             { value: 'perp', label: 'Perp' },
             { value: 'both', label: 'Both' },
           ]} />
-          <SelectInput label="Execution" value={settings.execution_mode} onChange={(execution_mode) => patch({ execution_mode })} options={[
+          <SelectInput label="Execution" help={'Se le operazioni sono reali o simulate:\n\nDry run — simulate, nessun soldo vero in gioco\nLive — ordini veri sull\'exchange'} value={settings.execution_mode} onChange={(execution_mode) => patch({ execution_mode })} options={[
             { value: 'dry_run', label: 'Dry-run' },
             { value: 'live', label: 'Live' },
           ]} />
-          <NumberInput label="Test scaling %" value={settings.test_scaling_pct} onChange={(test_scaling_pct) => patch({ test_scaling_pct })} />
+          <NumberInput label="Test scaling %" help={'Riduce la dimensione di ogni operazione a questa percentuale. Serve per provare la strategia con importi ridotti: a 10% ogni trade vale un decimo del normale.'} value={settings.test_scaling_pct} onChange={(test_scaling_pct) => patch({ test_scaling_pct })} />
         </div>
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri mercato</h3>
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri globali</h3>
         <ToggleInput
           label="Filtro inversione mercato"
+          help="Blocca le nuove entrate quando il mercato sta girando contro la direzione del segnale. Meno operazioni, ma evita di entrare proprio mentre il trend si ribalta."
           checked={settings.market_reversal_filter_enabled}
           onChange={(market_reversal_filter_enabled) => patch({ market_reversal_filter_enabled })}
         />
-        <ToggleInput
-          label="Breakeven Spot"
-          checked={settings.spot_breakeven_enabled}
-          onChange={(spot_breakeven_enabled) => patch({ spot_breakeven_enabled })}
-        />
-        <SelectInput
-          label="Modalità breakeven Spot"
-          value={settings.spot_breakeven_mode}
-          onChange={(v) => patch({ spot_breakeven_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'tp1', label: 'Solo dopo TP1' },
-          ]}
-        />
-        <ToggleInput
-          label="Breakeven Perp"
-          checked={settings.perp_breakeven_enabled}
-          onChange={(perp_breakeven_enabled) => patch({ perp_breakeven_enabled })}
-        />
-        <SelectInput
-          label="Modalità breakeven Perp"
-          value={settings.perp_breakeven_mode}
-          onChange={(v) => patch({ perp_breakeven_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'tp1', label: 'Solo dopo TP1' },
-          ]}
-        />
-        {settings.perp_breakeven_enabled && (
-          <NumberInput
-            label="BE profitto min $ (0=solo costi)"
-            value={settings.perp_breakeven_min_profit_usd}
-            step={0.05}
-            onChange={(perp_breakeven_min_profit_usd) => patch({ perp_breakeven_min_profit_usd: Math.max(0, perp_breakeven_min_profit_usd) })}
-          />
-        )}
-        <SelectInput
-          label="Stop Loss Spot"
-          value={settings.spot_sl_mode}
-          onChange={(v) => patch({ spot_sl_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'lowest', label: 'Minimo 20 candele' },
-          ]}
-        />
-        <SelectInput
-          label="Stop Loss Perp"
-          value={settings.perp_sl_mode}
-          onChange={(v) => patch({ perp_sl_mode: v })}
-          options={[
-            { value: 'atr', label: 'ATR (attuale)' },
-            { value: 'lowest', label: 'Min/Max 20 candele' },
-          ]}
-        />
-        <ToggleInput
-          label="Trailing Stop Spot"
-          checked={settings.spot_trailing_enabled}
-          onChange={(spot_trailing_enabled) => patch({ spot_trailing_enabled })}
-        />
-        <ToggleInput
-          label="Time Stop Spot"
-          checked={settings.spot_time_stop_enabled}
-          onChange={(spot_time_stop_enabled) => patch({ spot_time_stop_enabled })}
-        />
-        <ToggleInput
-          label="Time Stop Perp"
-          checked={settings.perp_time_stop_enabled}
-          onChange={(perp_time_stop_enabled) => patch({ perp_time_stop_enabled })}
-        />
-        <ToggleInput
-          label="Filtro shock BTC perp"
-          checked={settings.perp_trend_shock_enabled}
-          onChange={(perp_trend_shock_enabled) => patch({ perp_trend_shock_enabled })}
-        />
-        {settings.perp_trend_shock_enabled && (
-          <div className="grid grid-cols-2 gap-3">
-            <NumberInput label="ADX threshold" value={settings.perp_trend_shock_adx_threshold} onChange={(perp_trend_shock_adx_threshold) => patch({ perp_trend_shock_adx_threshold })} />
-            <NumberInput label="NATR percentile" value={settings.perp_trend_shock_natr_percentile} onChange={(perp_trend_shock_natr_percentile) => patch({ perp_trend_shock_natr_percentile })} />
-            <NumberInput label="Volume threshold" value={settings.perp_trend_shock_volume_threshold} onChange={(perp_trend_shock_volume_threshold) => patch({ perp_trend_shock_volume_threshold })} />
-            <NumberInput label="Recovery checks" value={settings.perp_trend_shock_recovery_confirmations} onChange={(perp_trend_shock_recovery_confirmations) => patch({ perp_trend_shock_recovery_confirmations })} />
-          </div>
-        )}
-        <ToggleInput
-          label="Smart Stop Loss Perp"
-          checked={settings.perp_smart_sl_enabled}
-          onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
-        />
-        {settings.perp_smart_sl_enabled && (
-          <>
-            {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
-            <div className="grid grid-cols-2 gap-3">
-              <NumberInput label="L1 frac" value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
-              <NumberInput label="L2 frac" value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
-              <NumberInput label="Split L1 %" value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
-              <NumberInput label="Split L2 %" value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
-              <NumberInput label="Split L3 %" value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
-              <NumberInput label="Candele conferma SSL" value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
-            </div>
-
-            {/* Rebuy: rientri dopo la vendita. max_reentries=0 = spenti (default consigliato). */}
-            <ToggleInput
-              label="Disattiva rebuy (consigliato)"
-              checked={settings.perp_smart_sl_max_reentries === 0}
-              onChange={(disattiva) => patch({ perp_smart_sl_max_reentries: disattiva ? 0 : 1 })}
-            />
-            {settings.perp_smart_sl_max_reentries === 0 ? (
-              <p className="text-xs text-gray-500 px-1">
-                Rebuy spenti: dopo le vendite a scaglioni la posizione non rientra.
-                Sui 301 trade V1 i rebuy hanno pesato −70&nbsp;USD su 6 sole posizioni.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                <SelectInput label="Rebuy mode" value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
-                  perp_smart_sl_rebuy_mode: v,
-                  ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2 } : { perp_smart_sl_confirmation_candles: 3 }),
-                })} options={[
-                  { value: 'above_entry', label: 'Sopra entry' },
-                  { value: 'delta', label: 'Delta per livello' },
-                ]} />
-                <NumberInput label="Max reentries" value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.max(1, Math.round(perp_smart_sl_max_reentries)) })} />
-                {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
-                  <>
-                    <NumberInput label="Rebuy % venduto" value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
-                    <NumberInput label="R2 Split L1 %" value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
-                    <NumberInput label="R2 Split L2 %" value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
-                    <NumberInput label="R2 Split L3 %" value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
-                  </>
-                )}
-                {settings.perp_smart_sl_rebuy_mode === 'delta' && (
-                  <>
-                    <NumberInput label="Delta L1" value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
-                    <NumberInput label="Delta L2" value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
-                  </>
-                )}
-                <ToggleInput label="Adegua TP dopo rebuy" checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
-                {settings.perp_smart_sl_tp_adjust_after_rebuy && (
-                  <NumberInput label="Delta recovery TP %" value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
-                )}
-              </div>
-            )}
-          </>
-        )}
       </section>
 
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Risk globale</h3>
         <ToggleInput
           label="Allarme drawdown"
-          checked={settings.drawdown_alert_enabled}
+          help={'Manda una notifica quando la perdita dal massimo raggiunto supera la soglia. Non ferma nulla: avvisa e basta.'} checked={settings.drawdown_alert_enabled}
           onChange={(drawdown_alert_enabled) => patch({ drawdown_alert_enabled })}
         />
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Daily loss %" value={settings.daily_loss_limit_pct} onChange={(daily_loss_limit_pct) => patch({ daily_loss_limit_pct })} />
-          <NumberInput label="Drawdown cap %" value={settings.drawdown_cap_pct} onChange={(drawdown_cap_pct) => patch({ drawdown_cap_pct })} />
+          <NumberInput label="Daily loss %" help="Perdita massima in una giornata, in percentuale sul capitale. Raggiunta la soglia l'agente smette di aprire nuove posizioni fino al giorno dopo. Si scrive negativa: −8 significa −8%." value={settings.daily_loss_limit_pct} onChange={(daily_loss_limit_pct) => patch({ daily_loss_limit_pct })} />
+          <NumberInput label="Drawdown cap %" help={'Perdita massima tollerata dal picco di capitale. Superata, l\'agente si ferma del tutto e non riapre finché non lo riavvii tu. Si scrive negativa: −15 significa −15%.'} value={settings.drawdown_cap_pct} onChange={(drawdown_cap_pct) => patch({ drawdown_cap_pct })} />
         </div>
       </section>
 
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Grafico trade</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Candele post-chiusura (0=off)" value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde.'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
         </div>
       </section>
+        </>
+      )}
 
+      {setupTab === 'spot' && (
+        <>
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — risk</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Size %" value={settings.spot_capital_per_trade_pct} onChange={(spot_capital_per_trade_pct) => patch({ spot_capital_per_trade_pct })} />
-          <NumberInput label="Rischio %" value={settings.spot_per_trade_pct} step={0.1} onChange={(spot_per_trade_pct) => patch({ spot_per_trade_pct })} />
-          <NumberInput label="Max posizioni" value={settings.spot_max_open_positions} onChange={(spot_max_open_positions) => patch({ spot_max_open_positions })} />
-          <NumberInput label="Exposure %" value={settings.spot_max_exposure_pct} onChange={(spot_max_exposure_pct) => patch({ spot_max_exposure_pct })} />
-          <NumberInput label="Slippage %" value={settings.spot_max_slippage_pct} step={0.1} onChange={(spot_max_slippage_pct) => patch({ spot_max_slippage_pct })} />
-          <NumberInput label="Cooldown min" value={settings.spot_cooldown_minutes} onChange={(spot_cooldown_minutes) => patch({ spot_cooldown_minutes })} />
+          <NumberInput label="Size %" help={'Quanta parte del capitale impegnare in ogni singola operazione spot. Al 4% con 1000$ investi 40$ per trade.'} value={settings.spot_capital_per_trade_pct} onChange={(spot_capital_per_trade_pct) => patch({ spot_capital_per_trade_pct })} />
+          <NumberInput label="Rischio %" help={'Quanto sei disposto a perdere su una singola operazione, in percentuale sul capitale. Da qui viene calcolata la dimensione della posizione: rischio più basso, posizione più piccola.'} value={settings.spot_per_trade_pct} step={0.1} onChange={(spot_per_trade_pct) => patch({ spot_per_trade_pct })} />
+          <NumberInput label="Max posizioni" help={'Quante posizioni spot possono restare aperte insieme. Più alto significa più diversificazione ma anche più capitale immobilizzato.'} value={settings.spot_max_open_positions} onChange={(spot_max_open_positions) => patch({ spot_max_open_positions })} />
+          <NumberInput label="Exposure %" help={'Tetto al capitale investito in tutte le posizioni spot sommate. Impedisce di ritrovarsi con tutto il capitale sul mercato nello stesso momento.'} value={settings.spot_max_exposure_pct} onChange={(spot_max_exposure_pct) => patch({ spot_max_exposure_pct })} />
+          <NumberInput label="Slippage %" help={'Scarto massimo accettato fra il prezzo previsto e quello di esecuzione. Oltre questa soglia l\'ordine viene annullato invece di essere eseguito a un prezzo peggiore.'} value={settings.spot_max_slippage_pct} step={0.1} onChange={(spot_max_slippage_pct) => patch({ spot_max_slippage_pct })} />
+          <NumberInput label="Cooldown min" help={'Minuti di attesa prima di riaprire sullo stesso asset dopo una chiusura. Evita di rientrare subito sullo stesso movimento.'} value={settings.spot_cooldown_minutes} onChange={(spot_cooldown_minutes) => patch({ spot_cooldown_minutes })} />
         </div>
       </section>
 
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — strategia</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Confidence" value={settings.spot_confidence_threshold} step={0.01} onChange={(spot_confidence_threshold) => patch({ spot_confidence_threshold })} />
-          <NumberInput label="Vol trigger %" value={settings.spot_volatility_trigger_pct} onChange={(spot_volatility_trigger_pct) => patch({ spot_volatility_trigger_pct })} />
-          <NumberInput label="Rel volume" value={settings.spot_relative_volume_threshold} step={0.1} onChange={(spot_relative_volume_threshold) => patch({ spot_relative_volume_threshold })} />
-          <NumberInput label="ATR stop" value={settings.spot_atr_stop_multiplier} step={0.1} onChange={(spot_atr_stop_multiplier) => patch({ spot_atr_stop_multiplier })} />
-          <NumberInput label="Buffer Min20 %" value={settings.spot_structural_stop_buffer_pct} step={0.1} onChange={(spot_structural_stop_buffer_pct) => patch({ spot_structural_stop_buffer_pct })} />
-          <NumberInput label="Chiudi a TP1 %" value={settings.spot_tp1_close_pct} step={5} onChange={(spot_tp1_close_pct) => patch({ spot_tp1_close_pct })} />
-          <NumberInput label="Time Stop ore" value={settings.spot_time_stop_hours} step={1} onChange={(spot_time_stop_hours) => patch({ spot_time_stop_hours: Math.round(spot_time_stop_hours) })} />
-          <SelectInput label="Fee mode (dry-run)" value={settings.spot_fee_mode} onChange={(v) => patch({ spot_fee_mode: v as 'all' | 'none' })} options={[
+          <NumberInput label="Confidence" help={'Quanto deve essere forte un segnale per essere accettato. Alzarlo riduce le operazioni ma tiene solo le più convincenti.'} value={settings.spot_confidence_threshold} step={0.01} onChange={(spot_confidence_threshold) => patch({ spot_confidence_threshold })} />
+          <NumberInput label="Vol trigger %" help={'Movimento minimo di prezzo perché una situazione venga considerata un\'occasione. Sotto questa soglia il mercato è troppo fermo per operare.'} value={settings.spot_volatility_trigger_pct} onChange={(spot_volatility_trigger_pct) => patch({ spot_volatility_trigger_pct })} />
+          <NumberInput label="Rel volume" help={'Quante volte il volume deve superare la sua media per confermare il segnale. A 1.5 serve volume una volta e mezza il normale: filtra i movimenti senza partecipazione.'} value={settings.spot_relative_volume_threshold} step={0.1} onChange={(spot_relative_volume_threshold) => patch({ spot_relative_volume_threshold })} />
+          <NumberInput label="ATR stop" help={'Distanza dello stop loss dall\'ingresso, misurata in ATR (la volatilità media). Più alto significa stop più largo: meno stop presi per caso, ma perdite più grandi quando scatta.'} value={settings.spot_atr_stop_multiplier} step={0.1} onChange={(spot_atr_stop_multiplier) => patch({ spot_atr_stop_multiplier })} />
+          <NumberInput label="Buffer Min20 %" help={'Cuscinetto sotto il minimo delle ultime candele, quando lo stop è di tipo strutturale. Serve a non farsi prendere lo stop per un soffio.'} value={settings.spot_structural_stop_buffer_pct} step={0.1} onChange={(spot_structural_stop_buffer_pct) => patch({ spot_structural_stop_buffer_pct })} />
+          <NumberInput label="Chiudi a TP1 %" help={'Quanta parte della posizione chiudere al primo obiettivo. Al 50% incassi metà e lasci correre il resto.'} value={settings.spot_tp1_close_pct} step={5} onChange={(spot_tp1_close_pct) => patch({ spot_tp1_close_pct })} />
+          <NumberInput label="Time Stop ore" help={'Dopo quante ore chiudere una posizione che non è andata né a target né a stop. Libera capitale bloccato in operazioni che non si muovono.'} value={settings.spot_time_stop_hours} step={1} onChange={(spot_time_stop_hours) => patch({ spot_time_stop_hours: Math.round(spot_time_stop_hours) })} />
+          <SelectInput label="Fee mode (dry-run)" help={'Quali costi simulare nel dry run:\n\nSwap fee + Slippage — realistico, 0.15%\nNessuna — strategia lorda, senza costi'} value={settings.spot_fee_mode} onChange={(v) => patch({ spot_fee_mode: v as 'all' | 'none' })} options={[
             { value: 'all', label: 'Swap fee + Slippage — 0.15%' },
             { value: 'none', label: 'Nessuna (strategia lorda)' },
           ]} />
@@ -1712,52 +1705,93 @@ const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — protezioni</h3>
+        <ToggleInput
+          label="Breakeven Spot"
+          help={'Sposta lo stop al prezzo d\'ingresso quando il trade è in guadagno, così l\'operazione non può più chiudere in perdita.'} checked={settings.spot_breakeven_enabled}
+          onChange={(spot_breakeven_enabled) => patch({ spot_breakeven_enabled })}
+        />
+        <SelectInput
+          label="Modalità breakeven Spot"
+          help={'Quando spostare lo stop a pareggio:\n\nATR — appena il guadagno raggiunge la soglia di volatilità\nSolo dopo TP1 — solo dopo aver incassato il primo obiettivo'} value={settings.spot_breakeven_mode}
+          onChange={(v) => patch({ spot_breakeven_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'tp1', label: 'Solo dopo TP1' },
+          ]}
+        />
+        <SelectInput
+          label="Stop Loss Spot"
+          help={'Come calcolare lo stop loss:\n\nATR — distanza fissa basata sulla volatilità\nMinimo 20 candele — sotto il minimo recente, stop più largo e più aderente al grafico'} value={settings.spot_sl_mode}
+          onChange={(v) => patch({ spot_sl_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'lowest', label: 'Minimo 20 candele' },
+          ]}
+        />
+        <ToggleInput
+          label="Trailing Stop Spot"
+          help={'Fa salire lo stop dietro al prezzo mentre il trade guadagna, per proteggere il profitto già maturato. Lo stop non scende mai.'} checked={settings.spot_trailing_enabled}
+          onChange={(spot_trailing_enabled) => patch({ spot_trailing_enabled })}
+        />
+        <ToggleInput
+          label="Time Stop Spot"
+          help={'Attiva la chiusura per tempo scaduto. Le ore si impostano nella sezione strategia.'} checked={settings.spot_time_stop_enabled}
+          onChange={(spot_time_stop_enabled) => patch({ spot_time_stop_enabled })}
+        />
+      </section>
+        </>
+      )}
+
+      {setupTab === 'perp' && (
+        <>
+      <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — risk</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Size % (margine)" value={settings.perp_capital_per_trade_pct} onChange={(perp_capital_per_trade_pct) => patch({ perp_capital_per_trade_pct })} />
-          <NumberInput label="Rischio %" value={settings.perp_per_trade_pct} step={0.1} onChange={(perp_per_trade_pct) => patch({ perp_per_trade_pct })} />
-          <NumberInput label="Max posizioni" value={settings.perp_max_open_positions} onChange={(perp_max_open_positions) => patch({ perp_max_open_positions })} />
-          <NumberInput label="Exposure %" value={settings.perp_max_exposure_pct} onChange={(perp_max_exposure_pct) => patch({ perp_max_exposure_pct })} />
-          <NumberInput label="Slippage %" value={settings.perp_max_slippage_pct} step={0.1} onChange={(perp_max_slippage_pct) => patch({ perp_max_slippage_pct })} />
-          <NumberInput label="Cooldown min" value={settings.perp_cooldown_minutes} onChange={(perp_cooldown_minutes) => patch({ perp_cooldown_minutes })} />
-          <ToggleInput label="Margine fisso Perp" checked={settings.perp_fixed_margin_enabled} onChange={(perp_fixed_margin_enabled) => patch({ perp_fixed_margin_enabled })} />
-          <NumberInput label="Margine fisso $" value={settings.perp_fixed_margin_usd} onChange={(perp_fixed_margin_usd) => patch({ perp_fixed_margin_usd })} />
+          <NumberInput label="Size % (margine)" help={'Quanto margine impegnare in ogni operazione, in percentuale sul capitale. Con la leva il valore controllato sul mercato è molto più grande del margine.'} value={settings.perp_capital_per_trade_pct} onChange={(perp_capital_per_trade_pct) => patch({ perp_capital_per_trade_pct })} />
+          <NumberInput label="Rischio %" help={'Quanto sei disposto a perdere su un singolo trade. Da qui si calcola la dimensione: la perdita allo stop resta questa cifra, qualunque sia la leva.'} value={settings.perp_per_trade_pct} step={0.1} onChange={(perp_per_trade_pct) => patch({ perp_per_trade_pct })} />
+          <NumberInput label="Max posizioni" help={'Quante posizioni perp possono restare aperte insieme.'} value={settings.perp_max_open_positions} onChange={(perp_max_open_positions) => patch({ perp_max_open_positions })} />
+          <NumberInput label="Exposure %" help={'Tetto al margine impegnato in tutte le posizioni perp sommate.'} value={settings.perp_max_exposure_pct} onChange={(perp_max_exposure_pct) => patch({ perp_max_exposure_pct })} />
+          <NumberInput label="Slippage %" help={'Scarto massimo accettato fra prezzo previsto ed effettivo. Oltre, l\'ordine viene annullato.'} value={settings.perp_max_slippage_pct} step={0.1} onChange={(perp_max_slippage_pct) => patch({ perp_max_slippage_pct })} />
+          <NumberInput label="Cooldown min" help={'Minuti di attesa prima di riaprire sullo stesso asset dopo una chiusura.'} value={settings.perp_cooldown_minutes} onChange={(perp_cooldown_minutes) => patch({ perp_cooldown_minutes })} />
+          <ToggleInput label="Margine fisso Perp" help={'Usa sempre lo stesso margine in dollari per ogni trade, invece di calcolarlo in percentuale sul capitale.'} checked={settings.perp_fixed_margin_enabled} onChange={(perp_fixed_margin_enabled) => patch({ perp_fixed_margin_enabled })} />
+          <NumberInput label="Margine fisso $" help={'Il margine fisso in dollari per ogni operazione, quando l\'opzione qui sopra è accesa.'} value={settings.perp_fixed_margin_usd} onChange={(perp_fixed_margin_usd) => patch({ perp_fixed_margin_usd })} />
         </div>
       </section>
 
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — strategia</h3>
         <div className="grid grid-cols-2 gap-3">
-          <SelectInput label="Direction" value={settings.perp_direction_mode} onChange={(perp_direction_mode) => patch({ perp_direction_mode })} options={[
+          <SelectInput label="Direction" help={'In che direzione può operare:\n\nLong e short — sfrutta salite e discese\nSolo long — apre solo al rialzo\nSolo short — apre solo al ribasso'} value={settings.perp_direction_mode} onChange={(perp_direction_mode) => patch({ perp_direction_mode })} options={[
             { value: 'long_only', label: 'Long' },
             { value: 'short_only', label: 'Short' },
             { value: 'long_short', label: 'Both' },
           ]} />
-          <NumberInput label="Leva min (alta vol.)" value={settings.perp_min_leverage} onChange={(perp_min_leverage) => patch({ perp_min_leverage })} />
-          <NumberInput label="Leva max (bassa vol.)" value={settings.perp_max_leverage} onChange={(perp_max_leverage) => patch({ perp_max_leverage })} />
-          <NumberInput label="Value area %" value={settings.perp_value_area_pct} onChange={(perp_value_area_pct) => patch({ perp_value_area_pct })} />
-          <NumberInput label="ATR stop" value={settings.perp_atr_stop_multiplier} step={0.1} onChange={(perp_atr_stop_multiplier) => patch({ perp_atr_stop_multiplier })} />
-          <NumberInput label="Buffer Min/Max20 %" value={settings.perp_structural_stop_buffer_pct} step={0.1} onChange={(perp_structural_stop_buffer_pct) => patch({ perp_structural_stop_buffer_pct })} />
-          <NumberInput label="Filtro R:R min (0=off)" value={settings.perp_min_rr} step={0.1} onChange={(perp_min_rr) => patch({ perp_min_rr })} />
-          <NumberInput label="TP1 (× ATR)" value={settings.perp_tp1_atr_multiplier} step={0.1} onChange={(perp_tp1_atr_multiplier) => patch({ perp_tp1_atr_multiplier })} />
-          <NumberInput label="TP2 (× ATR)" value={settings.perp_tp2_atr_multiplier} step={0.1} onChange={(perp_tp2_atr_multiplier) => patch({ perp_tp2_atr_multiplier })} />
-          <SelectInput label="Protezione profitto (post-TP1)" value={settings.perp_protection_mode} onChange={(v) => patch({ perp_protection_mode: v as 'off' | 'trailing' | 'profit_lock' })} options={[
+          <NumberInput label="Leva min (alta vol.)" help={'Leva usata quando la volatilità è alta. Mercato agitato, leva bassa: si rischia meno su movimenti ampi.'} value={settings.perp_min_leverage} onChange={(perp_min_leverage) => patch({ perp_min_leverage })} />
+          <NumberInput label="Leva max (bassa vol.)" help={'Leva usata quando la volatilità è bassa. Mercato calmo, leva alta: serve più leva per un guadagno sensato.'} value={settings.perp_max_leverage} onChange={(perp_max_leverage) => patch({ perp_max_leverage })} />
+          <NumberInput label="Value area %" help={'Quanta parte del volume definisce la zona di prezzo dove il mercato ha scambiato di più. Il segnale nasce ai bordi di questa zona.'} value={settings.perp_value_area_pct} onChange={(perp_value_area_pct) => patch({ perp_value_area_pct })} />
+          <NumberInput label="ATR stop" help={'Distanza dello stop dall\'ingresso in ATR, quando lo stop è di tipo ATR. Più alto, stop più largo.'} value={settings.perp_atr_stop_multiplier} step={0.1} onChange={(perp_atr_stop_multiplier) => patch({ perp_atr_stop_multiplier })} />
+          <NumberInput label="Buffer Min/Max20 %" help={'Cuscinetto oltre il minimo (o massimo) recente, quando lo stop è strutturale. Evita di farsi prendere lo stop per un soffio.'} value={settings.perp_structural_stop_buffer_pct} step={0.1} onChange={(perp_structural_stop_buffer_pct) => patch({ perp_structural_stop_buffer_pct })} />
+          <NumberInput label="Filtro R:R min (0=off)" help={'Rapporto minimo fra guadagno atteso al primo obiettivo e perdita allo stop. A 1.2 servono almeno 1.2 di guadagno per 1 di rischio, altrimenti il segnale viene scartato. Zero disattiva il filtro.'} value={settings.perp_min_rr} step={0.1} onChange={(perp_min_rr) => patch({ perp_min_rr })} />
+          <NumberInput label="TP1 (× ATR)" help={'Distanza del primo obiettivo dall\'ingresso, in ATR. Più basso significa incassare prima ma meno.'} value={settings.perp_tp1_atr_multiplier} step={0.1} onChange={(perp_tp1_atr_multiplier) => patch({ perp_tp1_atr_multiplier })} />
+          <NumberInput label="TP2 (× ATR)" help={'Distanza del secondo obiettivo, in ATR. È il traguardo del residuo dopo il primo incasso.'} value={settings.perp_tp2_atr_multiplier} step={0.1} onChange={(perp_tp2_atr_multiplier) => patch({ perp_tp2_atr_multiplier })} />
+          <SelectInput label="Protezione profitto (post-TP1)" help={'Come proteggere il profitto dopo il primo incasso:\n\nOff — nessuna protezione\nTrailing ATR — lo stop insegue il prezzo\nProfit Lock — uscite parziali a scalini fra i due obiettivi'} value={settings.perp_protection_mode} onChange={(v) => patch({ perp_protection_mode: v as 'off' | 'trailing' | 'profit_lock' })} options={[
             { value: 'off', label: 'Off — solo breakeven' },
             { value: 'trailing', label: 'Trailing ATR' },
             { value: 'profit_lock', label: 'Profit Lock (ratchet)' },
           ]} />
           {settings.perp_protection_mode === 'trailing' && (
-            <SelectInput label="Trailing ATR (adatta alla leva)" value={settings.perp_trailing_mode} onChange={(v) => patch({ perp_trailing_mode: v as 'largo' | 'stretto' })} options={[
+            <SelectInput label="Trailing ATR (adatta alla leva)" help={'Quanto stretto insegue il trailing:\n\nLargo — lascia respirare, esce più tardi\nStretto — protegge prima, ma esce sui rimbalzi'} value={settings.perp_trailing_mode} onChange={(v) => patch({ perp_trailing_mode: v as 'largo' | 'stretto' })} options={[
               { value: 'largo', label: 'Largo — lascia correre' },
               { value: 'stretto', label: 'Stretto — blocca prima' },
             ]} />
           )}
           {settings.perp_protection_mode === 'trailing' && (
-            <NumberInput label="Trailing dist. % (0=solo ATR)" value={settings.perp_trailing_pnl_pct} step={0.1} onChange={(perp_trailing_pnl_pct) => patch({ perp_trailing_pnl_pct })} />
+            <NumberInput label="Trailing dist. % (0=solo ATR)" help={'Distanza fissa del trailing in percentuale. A zero il trailing usa solo l\'ATR.'} value={settings.perp_trailing_pnl_pct} step={0.1} onChange={(perp_trailing_pnl_pct) => patch({ perp_trailing_pnl_pct })} />
           )}
-          <NumberInput label="Chiudi a TP1 %" value={settings.perp_tp1_close_pct} step={5} onChange={(perp_tp1_close_pct) => patch({ perp_tp1_close_pct })} />
-          <NumberInput label="Time Stop ore" value={settings.perp_time_stop_hours} step={1} onChange={(perp_time_stop_hours) => patch({ perp_time_stop_hours: Math.round(perp_time_stop_hours) })} />
-          <SelectInput label="Fee mode (dry-run)" value={settings.perp_fee_mode} onChange={(v) => patch({ perp_fee_mode: v as 'taker' | 'maker' | 'none' })} options={[
+          <NumberInput label="Chiudi a TP1 %" help={'Quanta parte della posizione chiudere al primo obiettivo. Il resto prosegue verso il secondo, gestito dalla protezione scelta qui sotto.'} value={settings.perp_tp1_close_pct} step={5} onChange={(perp_tp1_close_pct) => patch({ perp_tp1_close_pct })} />
+          <NumberInput label="Time Stop ore" help={'Dopo quante ore chiudere una posizione ferma, che non ha raggiunto né obiettivo né stop.'} value={settings.perp_time_stop_hours} step={1} onChange={(perp_time_stop_hours) => patch({ perp_time_stop_hours: Math.round(perp_time_stop_hours) })} />
+          <SelectInput label="Fee mode (dry-run)" help={'Quali costi simulare nel dry run:\n\nTaker — ordini a mercato, 0.06%\nMaker — ordini limite, 0.02%\nNessuna — strategia lorda'} value={settings.perp_fee_mode} onChange={(v) => patch({ perp_fee_mode: v as 'taker' | 'maker' | 'none' })} options={[
             { value: 'taker', label: 'Taker (market) — 0.06%' },
             { value: 'maker', label: 'Maker (limit) — 0.02%' },
             { value: 'none', label: 'Nessuna (strategia lorda)' },
@@ -1768,11 +1802,11 @@ const SetupPane: FC<{
             <p className="text-xs font-semibold text-gray-400">Scalini ratchet — punto del tratto TP1→TP2 → quota del residuo da chiudere</p>
             {settings.perp_profit_lock_steps.map((stepPair, i) => (
               <div key={i} className="grid grid-cols-2 gap-3">
-                <NumberInput label={`Livello ${i + 1} (%)`} value={Math.round(stepPair[0] * 100)} step={5} onChange={(v) => {
+                <NumberInput label={`Livello ${i + 1} (%)`} help={'A che punto del tratto fra primo e secondo obiettivo scatta questo scalino.\n\nAl 50% è a metà strada, al 95% quasi al traguardo.'} value={Math.round(stepPair[0] * 100)} step={5} onChange={(v) => {
                   const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [Math.max(0, Math.min(100, v)) / 100, s[1]] : s)) as Array<[number, number]>;
                   patch({ perp_profit_lock_steps: next });
                 }} />
-                <NumberInput label={`Chiudi ${i + 1} (%)`} value={Math.round(stepPair[1] * 100)} step={5} onChange={(v) => {
+                <NumberInput label={`Chiudi ${i + 1} (%)`} help={'Quanta parte del residuo risulta chiusa in totale a questo scalino.\n\nLe quote sono cumulative: 25 poi 50 vuol dire chiudere un quarto e poi arrivare a metà, non un quarto e poi un altro mezzo.'} value={Math.round(stepPair[1] * 100)} step={5} onChange={(v) => {
                   const next = settings.perp_profit_lock_steps.map((s, j) => (j === i ? [s[0], Math.max(0, Math.min(100, v)) / 100] : s)) as Array<[number, number]>;
                   patch({ perp_profit_lock_steps: next });
                 }} />
@@ -1783,18 +1817,18 @@ const SetupPane: FC<{
               50→25 / 70→50 / 95→80 significa che al 95% del tratto si è chiuso l'80% in tutto, e il 20% corre verso il TP2.
             </p>
             <div className="grid grid-cols-2 gap-3 border-t border-gray-700 pt-3">
-              <NumberInput label="Breakeven ratchet (% del tratto)" value={settings.perp_ratchet_breakeven_pct} step={5}
+              <NumberInput label="Breakeven ratchet (% del tratto)" help={'Dove si ferma tutto se il prezzo torna indietro, in percentuale del tratto fra primo e secondo obiettivo. Al 50% chiude a metà strada.'} value={settings.perp_ratchet_breakeven_pct} step={5}
                 onChange={(v) => patch({ perp_ratchet_breakeven_pct: Math.max(0, Math.min(100, v)) })} />
-              <NumberInput label="Si arma dallo scalino n." value={settings.perp_ratchet_breakeven_after_step} step={1}
+              <NumberInput label="Si arma dallo scalino n." help={'Da quale scalino in poi si arma quella protezione. Prima di quello scalino restano attivi solo stop loss e breakeven normale.'} value={settings.perp_ratchet_breakeven_after_step} step={1}
                 onChange={(v) => patch({ perp_ratchet_breakeven_after_step: Math.max(1, Math.min(settings.perp_profit_lock_steps.length, Math.round(v))) })} />
             </div>
             <p className="text-xs text-gray-500">Raggiunto quello scalino, un rientro chiude tutto a quel punto del tratto TP1→TP2.</p>
             <div className="border-t border-gray-700 pt-3">
-              <ToggleInput label="Lascia correre oltre il TP2" checked={settings.perp_ratchet_run_beyond_tp2}
+              <ToggleInput label="Lascia correre oltre il TP2" help={'Se il prezzo supera il secondo obiettivo di slancio non chiude: lascia correre il residuo con un trailing. Se invece lo tocca esatto, chiude come sempre.'} checked={settings.perp_ratchet_run_beyond_tp2}
                 onChange={(v) => patch({ perp_ratchet_run_beyond_tp2: v })} />
               {settings.perp_ratchet_run_beyond_tp2 && (
                 <div className="mt-2">
-                  <NumberInput label="Trailing oltre TP2 (% dal massimo)" value={settings.perp_ratchet_trailing_pct} step={0.5}
+                  <NumberInput label="Trailing oltre TP2 (% dal massimo)" help={'Quanto sta lontano il trailing dal massimo raggiunto, oltre il secondo obiettivo. All\'1% chiude appena il prezzo rientra dell\'1% dal picco.'} value={settings.perp_ratchet_trailing_pct} step={0.5}
                     onChange={(v) => patch({ perp_ratchet_trailing_pct: Math.max(0.1, Math.min(20, v)) })} />
                 </div>
               )}
@@ -1809,6 +1843,124 @@ const SetupPane: FC<{
           Leva modulata sulla volatilità ATR(72) in apertura: bassa volatilità → leva max, alta volatilità → leva min. Volatilità anomala (oltre il massimo storico) → leva forzata al minimo. Range 1–50.
         </p>
       </section>
+
+      <section className="space-y-3">
+        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — protezioni</h3>
+        <ToggleInput
+          label="Breakeven Perp"
+          help={'Sposta lo stop al prezzo d\'ingresso quando il trade è in guadagno: da lì in poi l\'operazione non può più chiudere in perdita.'} checked={settings.perp_breakeven_enabled}
+          onChange={(perp_breakeven_enabled) => patch({ perp_breakeven_enabled })}
+        />
+        <SelectInput
+          label="Modalità breakeven Perp"
+          help={'Quando spostare lo stop a pareggio:\n\nATR — appena il guadagno raggiunge la soglia di volatilità\nSolo dopo TP1 — solo dopo il primo incasso'} value={settings.perp_breakeven_mode}
+          onChange={(v) => patch({ perp_breakeven_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'tp1', label: 'Solo dopo TP1' },
+          ]}
+        />
+        {settings.perp_breakeven_enabled && (
+          <NumberInput
+            label="BE profitto min $ (0=solo costi)"
+            help={'Guadagno minimo da lasciare sul tavolo quando lo stop va a pareggio. A zero copre solo i costi; alzandolo, il pareggio diventa un piccolo utile garantito.'} value={settings.perp_breakeven_min_profit_usd}
+            step={0.05}
+            onChange={(perp_breakeven_min_profit_usd) => patch({ perp_breakeven_min_profit_usd: Math.max(0, perp_breakeven_min_profit_usd) })}
+          />
+        )}
+        <SelectInput
+          label="Stop Loss Perp"
+          help={'Come calcolare lo stop loss:\n\nATR — distanza fissa sulla volatilità\nMin/Max 20 candele — sotto il minimo (o sopra il massimo) recente: più largo e più aderente al grafico'} value={settings.perp_sl_mode}
+          onChange={(v) => patch({ perp_sl_mode: v })}
+          options={[
+            { value: 'atr', label: 'ATR (attuale)' },
+            { value: 'lowest', label: 'Min/Max 20 candele' },
+          ]}
+        />
+        <ToggleInput
+          label="Time Stop Perp"
+          help={'Attiva la chiusura per tempo scaduto. Le ore si impostano nella sezione strategia.'} checked={settings.perp_time_stop_enabled}
+          onChange={(perp_time_stop_enabled) => patch({ perp_time_stop_enabled })}
+        />
+        <ToggleInput
+          label="Filtro shock BTC perp"
+          help={'Blocca le nuove aperture quando Bitcoin è in una fase anomala, perché in quei momenti tutto il mercato si muove insieme e i segnali sui singoli asset valgono meno. Serve almeno il verificarsi di due delle tre condizioni qui sotto.'} checked={settings.perp_trend_shock_enabled}
+          onChange={(perp_trend_shock_enabled) => patch({ perp_trend_shock_enabled })}
+        />
+        {settings.perp_trend_shock_enabled && (
+          <Collapsible title="Soglie del filtro shock BTC" count={4}>
+          <div className="grid grid-cols-2 gap-3">
+            <NumberInput label="ADX threshold" help={'Quanto deve essere forte il trend di Bitcoin perché conti come segnale d\'allarme. Sopra questa soglia vale un punto su tre.'} value={settings.perp_trend_shock_adx_threshold} onChange={(perp_trend_shock_adx_threshold) => patch({ perp_trend_shock_adx_threshold })} />
+            <NumberInput label="NATR percentile" help={'Quanto in alto deve stare la volatilità di Bitcoin rispetto al suo passato. A 90 significa: più alta del 90% delle volte. Vale un punto.'} value={settings.perp_trend_shock_natr_percentile} onChange={(perp_trend_shock_natr_percentile) => patch({ perp_trend_shock_natr_percentile })} />
+            <NumberInput label="Volume threshold" help={'Quante volte il volume di Bitcoin deve superare la sua media per contare come allarme. Vale un punto.'} value={settings.perp_trend_shock_volume_threshold} onChange={(perp_trend_shock_volume_threshold) => patch({ perp_trend_shock_volume_threshold })} />
+            <NumberInput label="Recovery checks" help={'Quanti controlli consecutivi tranquilli servono prima di tornare a operare. Più alto, più prudente nel rientrare.'} value={settings.perp_trend_shock_recovery_confirmations} onChange={(perp_trend_shock_recovery_confirmations) => patch({ perp_trend_shock_recovery_confirmations })} />
+          </div>
+          </Collapsible>
+        )}
+        <ToggleInput
+          label="Smart Stop Loss Perp"
+          help={'Invece di subire lo stop in un colpo solo, vende a pezzi mentre il prezzo scende verso lo stop, per ridurre la perdita. Può poi ricomprare se il prezzo rimbalza.'} checked={settings.perp_smart_sl_enabled}
+          onChange={(perp_smart_sl_enabled) => patch({ perp_smart_sl_enabled })}
+        />
+        {settings.perp_smart_sl_enabled && (
+          <Collapsible title="Parametri Smart Stop Loss" count={20}>
+            {/* Vendite a scaglioni: riducono la perdita, sempre attive con lo Smart SL */}
+            <div className="grid grid-cols-2 gap-3">
+              <NumberInput label="L1 frac" help={'Dove sta il primo livello di vendita, come frazione della strada fra ingresso e stop. A 0.35 scatta al 35% del percorso verso lo stop.'} value={settings.perp_smart_sl_l1_frac} step={0.01} onChange={(perp_smart_sl_l1_frac) => patch({ perp_smart_sl_l1_frac })} />
+              <NumberInput label="L2 frac" help={'Dove sta il secondo livello di vendita, sempre come frazione della strada verso lo stop.'} value={settings.perp_smart_sl_l2_frac} step={0.01} onChange={(perp_smart_sl_l2_frac) => patch({ perp_smart_sl_l2_frac })} />
+              <NumberInput label="Split L1 %" help={'Quanta parte della posizione vendere al primo livello.'} value={settings.perp_smart_sl_split_l1} step={0.01} onChange={(perp_smart_sl_split_l1) => patch({ perp_smart_sl_split_l1 })} />
+              <NumberInput label="Split L2 %" help={'Quanta parte vendere al secondo livello.'} value={settings.perp_smart_sl_split_l2} step={0.01} onChange={(perp_smart_sl_split_l2) => patch({ perp_smart_sl_split_l2 })} />
+              <NumberInput label="Split L3 %" help={'Quanta parte lasciare in piedi fino allo stop vero e proprio. Le tre quote devono sommare a 1.'} value={settings.perp_smart_sl_split_l3} step={0.01} onChange={(perp_smart_sl_split_l3) => patch({ perp_smart_sl_split_l3 })} />
+              <NumberInput label="Candele conferma SSL" help={'Quante candele da 5 minuti devono confermare prima di vendere o ricomprare. Più alto significa meno reazioni ai falsi movimenti, ma reazione più lenta.'} value={settings.perp_smart_sl_confirmation_candles} step={1} onChange={(perp_smart_sl_confirmation_candles) => patch({ perp_smart_sl_confirmation_candles: Math.round(perp_smart_sl_confirmation_candles) })} />
+            </div>
+
+            {/* Rebuy: rientri dopo la vendita. max_reentries=0 = spenti (default consigliato). */}
+            <ToggleInput
+              label="Disattiva rebuy (consigliato)"
+              help={'Spegne il riacquisto dopo le vendite dello Smart SL: quello che è stato venduto resta venduto.\n\nÈ la scelta prudente, perché il rebuy può far rientrare in un mercato che continua a scendere.'}
+              checked={settings.perp_smart_sl_max_reentries === 0}
+              onChange={(disattiva) => patch({ perp_smart_sl_max_reentries: disattiva ? 0 : 1 })}
+            />
+            {settings.perp_smart_sl_max_reentries === 0 ? (
+              <p className="text-xs text-gray-500 px-1">
+                Rebuy spenti: dopo le vendite a scaglioni la posizione non rientra.
+                Sui 301 trade V1 i rebuy hanno pesato −70&nbsp;USD su 6 sole posizioni.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <SelectInput label="Rebuy mode" help={'Come ricomprare dopo aver venduto:\n\nSopra l\'ingresso — ricompra tutto quando il prezzo torna sopra il prezzo d\'entrata\nA livelli — ricompra a scaglioni sui rimbalzi'} value={settings.perp_smart_sl_rebuy_mode} onChange={(v) => patch({
+                  perp_smart_sl_rebuy_mode: v,
+                  ...(v === 'above_entry' ? { perp_smart_sl_confirmation_candles: 2 } : { perp_smart_sl_confirmation_candles: 3 }),
+                })} options={[
+                  { value: 'above_entry', label: 'Sopra entry' },
+                  { value: 'delta', label: 'Delta per livello' },
+                ]} />
+                <NumberInput label="Max reentries" help={'Quanti cicli vendi-e-ricompra sono ammessi sulla stessa posizione. A zero il rebuy è spento e la vendita è definitiva.'} value={settings.perp_smart_sl_max_reentries} step={1} onChange={(perp_smart_sl_max_reentries) => patch({ perp_smart_sl_max_reentries: Math.max(1, Math.round(perp_smart_sl_max_reentries)) })} />
+                {settings.perp_smart_sl_rebuy_mode === 'above_entry' && (
+                  <>
+                    <NumberInput label="Rebuy % venduto" help={'Quanta parte di ciò che è stato venduto viene ricomprata, quando il prezzo risale sopra il prezzo d\'ingresso.\n\nA 100 rientra tutto in una volta; sotto 100 rientra solo in parte e il resto resta liquidato.'}value={settings.perp_smart_sl_rebuy_above_entry_pct} step={1} onChange={(perp_smart_sl_rebuy_above_entry_pct) => patch({ perp_smart_sl_rebuy_above_entry_pct })} />
+                    <NumberInput label="R2 Split L1 %" help={'Se un livello è già stato venduto e poi ricomprato, e il prezzo ci torna sopra, si vende una seconda volta con questa quota invece di quella normale.\n\nÈ calcolata sulla posizione di partenza, non su quanto resta.'}value={settings.perp_smart_sl_split_l1_r2} step={0.01} onChange={(perp_smart_sl_split_l1_r2) => patch({ perp_smart_sl_split_l1_r2 })} />
+                    <NumberInput label="R2 Split L2 %" help={'Quota del secondo giro per il secondo livello, quando è già stato venduto e ricomprato una volta.\n\nAnche questa è calcolata sulla posizione di partenza.'}value={settings.perp_smart_sl_split_l2_r2} step={0.01} onChange={(perp_smart_sl_split_l2_r2) => patch({ perp_smart_sl_split_l2_r2 })} />
+                    <NumberInput label="R2 Split L3 %" help={'Quanta parte lasciare in piedi fino allo stop, nel secondo giro di vendite. Con quote 75 e 20 sopra, qui resta il 5%.'}value={settings.perp_smart_sl_split_l3_r2} step={0.01} onChange={(perp_smart_sl_split_l3_r2) => patch({ perp_smart_sl_split_l3_r2 })} />
+                  </>
+                )}
+                {settings.perp_smart_sl_rebuy_mode === 'delta' && (
+                  <>
+                    <NumberInput label="Delta L1" help={'Quanto deve rimbalzare il prezzo per ricomprare il primo scaglione.\n\nSi misura dal prezzo a cui hai venduto, come frazione della distanza fra ingresso e stop: a 0.08 basta un rimbalzo dell\'8% di quella distanza.'}value={settings.perp_smart_sl_delta_l1} step={0.01} onChange={(perp_smart_sl_delta_l1) => patch({ perp_smart_sl_delta_l1 })} />
+                    <NumberInput label="Delta L2" help={'Quanto deve rimbalzare il prezzo per ricomprare il secondo scaglione.\n\nStessa misura del primo: frazione della distanza fra ingresso e stop, contata dal prezzo di vendita.'}value={settings.perp_smart_sl_delta_l2} step={0.01} onChange={(perp_smart_sl_delta_l2) => patch({ perp_smart_sl_delta_l2 })} />
+                  </>
+                )}
+                <ToggleInput label="Adegua TP dopo rebuy" help={'Dopo un rebuy sposta gli obiettivi più in là, in modo che le uscite rimaste recuperino anche le perdite già incassate durante le vendite.'} checked={settings.perp_smart_sl_tp_adjust_after_rebuy} onChange={(perp_smart_sl_tp_adjust_after_rebuy) => patch({ perp_smart_sl_tp_adjust_after_rebuy })} />
+                {settings.perp_smart_sl_tp_adjust_after_rebuy && (
+                  <NumberInput label="Delta recovery TP %" help={'Quanto guadagno extra pretendere oltre il semplice recupero delle perdite, quando gli obiettivi vengono spostati.'} value={settings.perp_smart_sl_tp_recovery_delta_pct} step={1} onChange={(perp_smart_sl_tp_recovery_delta_pct) => patch({ perp_smart_sl_tp_recovery_delta_pct })} />
+                )}
+              </div>
+            )}
+          </Collapsible>
+        )}
+      </section>
+        </>
+      )}
 
       {dirty && !saving && (
         <p className="rounded-lg border border-accent-yellow/30 bg-accent-yellow/10 px-3 py-2 text-xs text-accent-yellow">
