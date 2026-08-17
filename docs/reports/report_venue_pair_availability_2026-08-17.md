@@ -96,6 +96,26 @@ nomi espliciti.
 
 **TypeScript**: `npx tsc --noEmit` pulito. Nessuna build frontend eseguita in locale.
 
+## CORREZIONE POST-DEPLOY — rete di test (stesso giorno)
+
+Provando in produzione una `SPOT_TOKEN_MAP` popolata con 49 indirizzi verificati, **tutti**
+risultavano `unavailable`, BTC e CAKE compresi, che hanno pool accertate a mano.
+
+Causa: la produzione ha `bsc_network=testnet`, quindi la sonda interrogava la Factory di
+testnet (`0x6725F30…7a17`), dove i token mainnet non esistono. Non è una risposta neutra:
+`unavailable` **blocca la selezione in UI**, quindi popolare la mappa avrebbe sbarrato 49
+coin perfettamente operabili.
+
+Corretto: quando la rete configurata è di test, lo spot risponde `unknown` con motivo
+esplicito — mai `unavailable`. Gli indirizzi curati sono di mainnet e confrontarli con una
+factory di testnet non produce un'informazione valida. Aggiunto
+`test_spot_on_testnet_is_unknown_not_unavailable`.
+
+Suite dopo la correzione: **276 passed, 2 failed preesistenti, 2 skipped**.
+
+È lo stesso principio già applicato altrove nel modulo: un limite di configurazione nostro
+non deve mai assomigliare a un mercato assente sulla venue.
+
 ## SCOSTAMENTI DAL PIANO
 
 1. **Sonda spot cambiata**: previsto `getAmountsOut`, usato `getPair` sulla Factory. Motivo

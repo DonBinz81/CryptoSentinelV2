@@ -163,6 +163,11 @@ class VenueAvailabilityService:
         quote = self._settings.spot_quote_token_address
         if not quote:
             return MarketAvailability(SPOT_VENUE, UNKNOWN, "token di quotazione spot non configurato")
+        if self._settings.bsc_network == "testnet":
+            # Curated addresses are mainnet ones: probing the testnet factory
+            # would report "no pool" for coins that trade perfectly well on
+            # mainnet, and that answer would block them in the setup screen.
+            return MarketAvailability(SPOT_VENUE, UNKNOWN, "rete BSC di test: verifica spot non significativa")
 
         provider = self._spot()
         try:

@@ -24,6 +24,7 @@ BTCB = "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c"
 def _settings(**overrides):
     base = dict(
         aster_base_url="https://fapi.asterdex.com",
+        bsc_network="mainnet",
         spot_quote_token_address=USDT,
         spot_token_map={"BTC": BTCB},
     )
@@ -142,6 +143,19 @@ async def test_spot_symbol_without_a_curated_address_is_unknown():
 
     result = await _service().availability(["DOGE"])
     assert result["DOGE"]["spot"]["status"] == UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_spot_on_testnet_is_unknown_not_unavailable():
+    """Mainnet addresses probed against the testnet factory find no pool.
+
+    Reporting that as `unavailable` would block, in the setup screen, coins that
+    trade perfectly well on mainnet.
+    """
+
+    service = _service(settings=_settings(bsc_network="testnet"), spot=_FakeSpot(ZERO))
+    result = await service.availability(["BTC"])
+    assert result["BTC"]["spot"]["status"] == UNKNOWN
 
 
 @pytest.mark.asyncio
