@@ -2245,7 +2245,9 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
             />
             <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
               <span>⚪ Entry</span>
-              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.chart.live ? 'Ora' : 'Exit'}</span>
+              {/* Il marker segna il prezzo del trade: su una chiusura è l'uscita, non
+                  il prezzo corrente, anche quando le candele continuano a scorrere. */}
+              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
               <span style={{ color: '#fca5a5' }}>- - SL</span>
               {detail.smart_sl_levels && <span style={{ color: '#fb923c' }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
               {detail.chart.stop_reference && <span className="text-purple-300">- - SL ref</span>}
@@ -2270,7 +2272,12 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
             <Stat label="PnL" value={`${detail.pnl_usd} / ${detail.pnl_pct}%`} tone={Number(detail.pnl_usd) >= 0 ? 'good' : 'bad'} />
             <Stat label="Exposure" value={fmtUsd(detail.exposure_usd)} />
             <Stat label="Entry" value={fmtPriceFull(detail.entry_price)} />
-            <Stat label="Now/Exit" value={fmtPriceFull(detail.current_or_exit_price)} />
+            {/* Su un trade di chiusura il backend riporta il prezzo di USCITA, non
+                quello corrente: chiamarlo "Now/Exit" faceva sembrare fermo il prezzo. */}
+            <Stat
+              label={detail.close_reason ? 'Uscita' : 'Prezzo ora'}
+              value={fmtPriceFull(detail.current_or_exit_price)}
+            />
             <Stat label="Size" value={detail.size} />
             <Stat label="Leverage" value={detail.leverage ? `${detail.leverage.toFixed(2)}x` : '-'} />
           </div>
