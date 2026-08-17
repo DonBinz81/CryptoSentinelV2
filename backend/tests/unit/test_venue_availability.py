@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -202,3 +203,63 @@ async def test_no_pair_list_is_hard_coded():
     service = _service(aster=_FakeAster(_exchange_info("COMP")))
     result = await service.availability(["COMP"])
     assert result["COMP"]["perp"]["status"] == AVAILABLE
+
+
+class _DepthProvider(_FakeSpot):
+    """Fake router+pool: routes through WBNB, like the real one, and has reserves."""
+
+    def __init__(self, pair: str, token0: str, reserve0: int, reserve1: int, wbnb: str) -> None:
+        super().__init__(pair)
+        self._token0 = token0
+        self._r0 = reserve0
+        self._r1 = reserve1
+        self.wbnb_address = wbnb
+
+    def build_path(self, from_asset: str, to_asset: str) -> list[str]:
+        return [from_asset, self.wbnb_address, to_asset]
+
+    async def pair_reserves(self, pair: str):
+        return self._token0, self._r0, self._r1
+
+
+WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+
+
+@pytest.mark.asyncio
+async def test_pool_depth_is_measured_on_the_hop_the_router_would_use():
+    """A deep direct pair the router never touches is not usable liquidity."""
+
+    # Pool WBNB/token: 2 WBNB a side, and the quote/WBNB pool prices BNB at 600.
+    provider = _DepthProvider(POOL, WBNB, 2 * 10**18, 10**18, WBNB)
+    service = VenueAvailabilityService(
+        _settings(), cache=TTLCache(60.0), aster_client=_FakeAster(_exchange_info("BTC")),
+        spot_provider=provider,
+    )
+    service._cache.set("pancakeswap:bnb_price_usd", Decimal("600"))
+    depth = await service.spot_pool_liquidity_usd("BTC")
+    assert depth == Decimal("1200")
+
+
+@pytest.mark.asyncio
+async def test_pool_depth_is_none_on_testnet():
+    """Mainnet addresses against a testnet factory measure nothing real."""
+
+    service = VenueAvailabilityService(
+        _settings(bsc_network="testnet"), cache=TTLCache(60.0),
+        aster_client=_FakeAster(_exchange_info("BTC")), spot_provider=_FakeSpot(POOL),
+    )
+    assert await service.spot_pool_liquidity_usd("BTC") is None
+
+
+@pytest.mark.asyncio
+async def test_pool_depth_is_none_for_unmapped_symbols():
+    service = _service()
+    assert await service.spot_pool_liquidity_usd("DOGE") is None
+
+
+@pytest.mark.asyncio
+async def test_pool_depth_is_none_when_the_reading_fails():
+    """A failed reading must stay unknown: zero would block every trade."""
+
+    service = _service(spot=_FakeSpot(error=RuntimeError("rpc down")))
+    assert await service.spot_pool_liquidity_usd("BTC") is None

@@ -27,6 +27,7 @@ the wrong contract would be worse than admitting we do not know.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger
@@ -53,6 +54,7 @@ DEFAULT_TTL_SECONDS = 3600.0
 FAILURE_TTL_SECONDS = 60.0
 
 _PERP_MARKETS_KEY = "aster:perp_markets"
+_BNB_PRICE_KEY = "pancakeswap:bnb_price_usd"
 _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
@@ -215,6 +217,84 @@ class VenueAvailabilityService:
         result = MarketAvailability(SPOT_VENUE, AVAILABLE)
         self._cache.set(cache_key, result)
         return result
+
+    # ── Spot pool depth ───────────────────────────────────────────────────────
+
+    async def _bnb_price_usd(self, settings: Settings, provider) -> Decimal | None:
+        """BNB price read from the quote/WBNB pool itself, no external feed."""
+
+        cached = self._cache.get(_BNB_PRICE_KEY)
+        if cached is not None:
+            return cached
+        quote = settings.spot_quote_token_address
+        if not quote:
+            return None
+        try:
+            pair = await provider.pair_address(quote, provider.wbnb_address)
+            if pair == _ZERO_ADDRESS:
+                return None
+            token0, reserve0, reserve1 = await provider.pair_reserves(pair)
+            quote_reserve, wbnb_reserve = (
+                (reserve0, reserve1) if token0.lower() == quote.lower() else (reserve1, reserve0)
+            )
+            if wbnb_reserve == 0:
+                return None
+            price = Decimal(quote_reserve) / Decimal(wbnb_reserve)
+        except Exception as exc:
+            logger.warning("bnb_price_unavailable", error_type=type(exc).__name__)
+            return None
+        self._cache.set(_BNB_PRICE_KEY, price, FAILURE_TTL_SECONDS * 5)
+        return price
+
+    async def spot_pool_liquidity_usd(self, symbol: str) -> Decimal | None:
+        """Depth, in USD, of the pool the router would actually swap through.
+
+        The last hop is what matters: ``build_path`` always routes through WBNB,
+        so a deep direct pair the router would never touch is not liquidity we
+        can use. ``None`` means "not measurable" — an unmapped symbol, a test
+        network, an RPC failure — and the caller must treat it as unknown rather
+        than as zero, or a lookup failure would silently block every trade.
+        """
+
+        settings = self._execution_settings()
+        if settings.bsc_network == "testnet":
+            return None
+        token = self._mapped_address(symbol)
+        quote = settings.spot_quote_token_address
+        if not token or not quote:
+            return None
+
+        cache_key = f"pancakeswap:depth:{settings.bsc_network}:{symbol.upper()}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        provider = self._spot(settings)
+        try:
+            path = provider.build_path(quote, token)
+            counterpart, target = path[-2], path[-1]
+            pair = await provider.pair_address(counterpart, target)
+            if pair == _ZERO_ADDRESS:
+                depth = Decimal(0)
+            else:
+                token0, reserve0, reserve1 = await provider.pair_reserves(pair)
+                side = (
+                    reserve0 if token0.lower() == counterpart.lower() else reserve1
+                )
+                units = Decimal(side) / Decimal(10**18)
+                if counterpart.lower() == provider.wbnb_address.lower():
+                    price = await self._bnb_price_usd(settings, provider)
+                    if price is None:
+                        return None
+                    depth = units * price
+                else:
+                    depth = units
+        except Exception as exc:
+            logger.warning("pool_depth_unavailable", symbol=symbol, error_type=type(exc).__name__)
+            return None
+
+        self._cache.set(cache_key, depth)
+        return depth
 
     # ── Public API ────────────────────────────────────────────────────────────
 

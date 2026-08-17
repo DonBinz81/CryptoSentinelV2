@@ -24,6 +24,7 @@ from backend.app.execution.models import ExecutionStatus
 from backend.app.execution.perp_base import PerpOrder
 from backend.app.execution.perp_registry import PerpExecutionRegistry, get_perp_execution_registry
 from backend.app.execution.registry import ExecutionProviderRegistry, get_execution_provider_registry
+from backend.app.execution.venue_availability import get_venue_availability_service
 from backend.app.execution.venue_router import VENUE_UNAVAILABLE, get_perp_venue_router
 from backend.app.notifications.agent_notifier import get_agent_notifier
 from backend.app.persistence.database import get_session_factory
@@ -2429,6 +2430,20 @@ class AgentService:
             portfolio = await _initialise_dry_run_portfolio(session, self.settings)
         spot_positions = await SpotPositionRepository(session).open_for_user(user_id)
         perp_positions = await PerpPositionRepository(session).open_for_user(user_id)
+        # Pool depth for the spot guard. Nothing produced `liquidity_usd` before,
+        # so `liquidity_guard` could never fire: the 50k threshold in the setup
+        # was inert. `None` still means "not measurable" and leaves the guard
+        # silent — a failed reading must not block every trade.
+        if signal.get("market") == "spot" and signal.get("liquidity_usd") is None:
+            try:
+                depth = await get_venue_availability_service().spot_pool_liquidity_usd(
+                    str(signal.get("asset") or "")
+                )
+            except Exception as exc:
+                logger.warning("spot_liquidity_unavailable", error_type=type(exc).__name__)
+                depth = None
+            if depth is not None:
+                signal["liquidity_usd"] = depth
         intent = _intent_from_signal(signal, portfolio_total=Decimal(str(getattr(portfolio, "total_equity_usd", 0) or 0)))
         risk_decision = self.risk.evaluate(
             intent,

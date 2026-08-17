@@ -52,6 +52,8 @@ def _selector(signature: str) -> bytes:
 # 4-byte selectors (computed, never hard-coded blindly).
 SEL_GET_AMOUNTS_OUT = _selector("getAmountsOut(uint256,address[])")
 SEL_GET_PAIR = _selector("getPair(address,address)")
+SEL_GET_RESERVES = _selector("getReserves()")
+SEL_TOKEN0 = _selector("token0()")
 SEL_ALLOWANCE = _selector("allowance(address,address)")
 SEL_APPROVE = _selector("approve(address,uint256)")
 SEL_SWAP_EXACT_TOKENS = _selector(
@@ -139,6 +141,23 @@ class PancakeSwapProvider(ExecutionProvider):
         return Web3.to_checksum_address(address)
 
     # ── Read-only market introspection ────────────────────────────────────────
+
+    async def pair_reserves(self, pair: str) -> tuple[str, int, int]:
+        """``(token0, reserve0, reserve1)`` of a pool, straight from the pair.
+
+        Reserves are the honest measure of how much a swap would move the price:
+        a namesake token can copy a symbol, not the depth of a market.
+        """
+        token0_hex = await self._rpc_client().call(
+            "eth_call", [{"to": Web3.to_checksum_address(pair), "data": "0x" + SEL_TOKEN0.hex()}, "latest"]
+        )
+        reserves_hex = await self._rpc_client().call(
+            "eth_call", [{"to": Web3.to_checksum_address(pair), "data": "0x" + SEL_GET_RESERVES.hex()}, "latest"]
+        )
+        raw = bytes.fromhex(reserves_hex.removeprefix("0x"))
+        reserve0 = int.from_bytes(raw[0:32], "big")
+        reserve1 = int.from_bytes(raw[32:64], "big")
+        return self.decode_address(token0_hex), reserve0, reserve1
 
     async def pair_address(self, token_a: str, token_b: str) -> str:
         """Factory address of the liquidity pool, or the zero address if none.
