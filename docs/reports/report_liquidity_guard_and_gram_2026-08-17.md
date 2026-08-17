@@ -66,20 +66,50 @@ rilascio.
 2. `ETC` e `1INCH` sono state rimosse dalla watchlist spot prima di questo lavoro: pool da
    41 $ e 791 $ le rendono non tradabili.
 
+## SEGUITO — i quattro indirizzi mancanti
+
+Risolti con lo stesso metodo: identificazione **per slug**, mai per ticker, poi verifica
+on-chain di `name()`, `symbol()`, `decimals()` e profondità della pool sul percorso del router.
+
+| simbolo | indirizzo BSC | pool (percorso router) | perp Aster |
+|---|---|---|---|
+| `U` | `0xcE2443…6666` → *United Stables* | 75.738 $ | non quotato |
+| `WLFI` | `0x474747…DEEa` → *World Liberty Financial* | ~0 | **quotato** |
+| `LDO` | **nessuno su BSC** | — | **quotato** |
+| `LUNC` | **nessuno su BSC** | — | non quotato |
+
+**Il caso `U`** merita di essere registrato: il ticker copre due progetti diversi nella
+tokenlist della venue — *Union* (nessuna pool) e *United Stables* (75.738 $). La liquidità
+indicava il secondo, ma la conferma decisiva è venuta da un riscontro **indipendente**: su
+Binance `UUSDT` quota **1,0004**, cioè uno stablecoin, coerente con «United Stables» e non
+con «Union». Due segnali convergenti invece di un indizio solo.
+
+`LDO` e `LUNC` **non hanno un contratto su BSC** in nessuna fonte curata: sullo spot non
+sono eseguibili, e non è una questione di configurazione.
+
+Decisioni prese: `U` e `WLFI` aggiunti alla mappa (**55 indirizzi**); `U` tolto dallo spot
+perché è uno stablecoin fisso a 1,00; `LDO` e `WLFI` spostati sul perp, dove Aster li quota.
+
+Stato finale verificato: **perp 29** (nessuna bloccata dal router), **spot 31** (solo `LUNC`
+senza indirizzo).
+
 ## QUESTIONI APERTE
 
 1. **Il guard non produce effetti finché si resta su testnet**: la misura è `None` e il
    guard resta silente esattamente come prima. Si attiva col passaggio a mainnet.
-2. **Quattro coin in watchlist spot non hanno indirizzo in mappa** — `LDO`, `WLFI`, `U`,
-   `LUNC` — quindi in live verrebbero saltate con `spot_token_not_mapped`.
+2. **`LUNC` resta senza indirizzo** ed è l'unica coin in watchlist spot che in live verrebbe
+   saltata con `spot_token_not_mapped`.
 3. **`GRAM` sullo spot resta poco liquida** (659 $ sul percorso del router): è in watchlist
    perp, non spot.
 4. La disponibilità mostrata nel setup **non tiene ancora conto della soglia**: una coin con
    pool da 41 $ appare `available`. Ora che la misura esiste, agganciarla alla disponibilità
-   è un passo breve.
+   è un passo breve — **è il punto aperto principale**.
 
 ## STATO DELIVERABLE
 
-Rinomina: completa, deployata e verificata (commit `7db3bea`).
-Guard di liquidità: **committato (`a9ca68d`) ma non ancora deployato**, in attesa di
-approvazione esplicita perché tocca il percorso che porta all'apertura di una posizione.
+Tutto completo, deployato, verificato e pushato: rinomina `7db3bea`, guard di liquidità
+`a9ca68d`, documentazione `875eb25`. Hash allineati fra repo e produzione, servizio `active`,
+zero errori, nessun blocco da `liquidity_guard` (atteso su testnet).
+
+La mappa a 55 indirizzi e le watchlist sono configurazione e stato applicativo: vivono in
+produzione, non nei commit.
