@@ -35,6 +35,8 @@ from backend.app.data.market_data.cache import TTLCache
 from backend.app.execution.network_selection import effective_execution_settings
 from backend.app.execution.providers import PancakeSwapProvider
 from backend.app.execution.venues.aster import AsterClient
+from backend.app.persistence.runtime_state import get_runtime_value
+from backend.app.schemas.mobile_agent import AgentMobileSettings
 
 logger = get_logger("execution.venue_availability")
 
@@ -56,6 +58,11 @@ FAILURE_TTL_SECONDS = 60.0
 _PERP_MARKETS_KEY = "aster:perp_markets"
 _BNB_PRICE_KEY = "pancakeswap:bnb_price_usd"
 _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+def _eur(value: Decimal) -> str:
+    """Thousands separator as an Italian reader expects: 50.000, not 50,000."""
+    return f"{value:,.0f}".replace(",", ".")
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +179,21 @@ class VenueAvailabilityService:
         address, _, _decimals = entry.partition(":")
         return address or None
 
+    def _liquidity_floor(self, settings: Settings) -> Decimal:
+        """The very threshold the Risk Manager applies, read from the same place.
+
+        Reading only the configured default would let the setup screen call a
+        coin tradable while the engine refuses it — the user can change this
+        value from the app, and both sides must obey the same number.
+        """
+        try:
+            raw = get_runtime_value(str(settings.default_user_id), "mobile_agent_settings")
+            if raw:
+                return Decimal(str(AgentMobileSettings.model_validate_json(raw).min_pool_liquidity_usd))
+        except Exception as exc:
+            logger.warning("liquidity_floor_fallback", error_type=type(exc).__name__)
+        return Decimal(str(settings.risk_min_pool_liquidity_usd))
+
     async def _spot_status(self, symbol: str, settings: Settings) -> MarketAvailability:
         # The network is part of the key: switching chain must not serve answers
         # computed against the other one.
@@ -212,6 +234,20 @@ class VenueAvailabilityService:
             logger.warning("spot_status_unavailable", symbol=symbol, error_type=type(exc).__name__)
             result = MarketAvailability(SPOT_VENUE, UNKNOWN, "verifica on-chain non riuscita")
             self._cache.set(cache_key, result, FAILURE_TTL_SECONDS)
+            return result
+
+        # A pool that exists but is too thin is not a market: the Risk Manager
+        # would refuse the trade anyway, so offering the coin as selectable
+        # would promise something the engine cannot deliver.
+        depth = await self.spot_pool_liquidity_usd(symbol)
+        floor = self._liquidity_floor(settings)
+        if depth is not None and depth < floor:
+            result = MarketAvailability(
+                SPOT_VENUE,
+                UNAVAILABLE,
+                f"liquidità insufficiente: {_eur(depth)} $ sotto la soglia di {_eur(floor)} $",
+            )
+            self._cache.set(cache_key, result)
             return result
 
         result = MarketAvailability(SPOT_VENUE, AVAILABLE)
