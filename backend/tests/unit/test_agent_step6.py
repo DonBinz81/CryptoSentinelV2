@@ -709,6 +709,59 @@ def test_perp_smart_sl_detail_preserves_original_entry() -> None:
     assert detail["current_or_exit_price"] == "94.00"
 
 
+def test_perp_smart_sl_rebuy_tp_adjustment_uses_actual_tp1_close_pct() -> None:
+    service = AgentService(settings(), spot_registry=SimpleNamespace(), perp_registry=SimpleNamespace())
+    ms = AgentMobileSettings(
+        perp_tp1_close_pct=70.0,
+        perp_smart_sl_tp_adjust_after_rebuy=True,
+        perp_smart_sl_tp_recovery_delta_pct=7.0,
+    )
+    position = PerpPosition(
+        position_id="pos_dot_rebuy_recovery",
+        user_id=str(USER_ID),
+        asset="DOT",
+        side="long",
+        size=Decimal("1640.635253970337316787"),
+        entry_price=Decimal("0.7621499999996998"),
+        current_price=Decimal("0.762900"),
+        leverage=25,
+        pnl_unrealized=Decimal("0"),
+        opening_fee_usd=Decimal("0.75000000"),
+        slippage_usd=Decimal("0"),
+        funding_accrued_usd=Decimal("0.05665298490488541343922602065"),
+        status="open",
+        opened_at=datetime(2026, 8, 14, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 14, tzinfo=UTC),
+    )
+    realized_loss = Decimal("-1.813972005565617162091728961")
+    state = {
+        "original_size": "1640.635253970337316787",
+        "original_entry": "0.761900000000000022",
+        "levels": [
+            {"status": "rebought", "realized_loss": str(realized_loss)},
+            {"status": "idle"},
+        ],
+    }
+
+    adjusted = service._adjust_smart_sl_recovery_take_profits(position, state, ms, True)
+
+    assert adjusted is True
+    assert position.take_profit_1 is not None
+    assert position.take_profit_2 is not None
+    assert position.entry_price < position.take_profit_1 < position.take_profit_2
+
+    tp1_fraction = Decimal("0.70")
+    tp1_size = (position.size * tp1_fraction).quantize(Decimal("0.000001"))
+    tp2_size = position.size - tp1_size
+    fee_only = position.opening_fee_usd - position.slippage_usd
+    funding = position.funding_accrued_usd
+    expected_recovery = abs(realized_loss) * Decimal("1.07")
+    pnl_tp1 = (position.take_profit_1 - position.entry_price) * tp1_size - fee_only * tp1_fraction + funding * tp1_fraction
+    pnl_tp2 = (position.take_profit_2 - position.entry_price) * tp2_size - fee_only * (Decimal("1") - tp1_fraction) + funding * (Decimal("1") - tp1_fraction)
+
+    assert pnl_tp1 + pnl_tp2 >= expected_recovery
+
+
 def test_spot_trade_detail_preserves_micro_token_prices() -> None:
     now = datetime(2026, 8, 1, tzinfo=UTC)
     entry = Decimal("0.000000001234")

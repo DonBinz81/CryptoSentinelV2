@@ -1497,6 +1497,7 @@ class AgentService:
                     lv["sell_price"] = None
                     lv["rebuy_confirm_since"] = None
                     lv["rebuy_fill_price"] = str(price)
+                    self._adjust_smart_sl_recovery_take_profits(pos, state, ms, is_long)
                     state["protection_suspended"] = True
                     pos.trailing_stop = None
                     changed = True
@@ -1580,31 +1581,7 @@ class AgentService:
                                 lv["rebuy_confirm_since"] = None
                                 lv["rebuy_fill_price"] = str(price)
 
-                            # Ricalcolo TP per coprire perdite SSL + delta
-                            if ms.perp_smart_sl_tp_adjust_after_rebuy and pos.size > 0:
-                                ssl_losses = Decimal("0")
-                                for lv_st in state["levels"]:
-                                    ssl_losses += Decimal(lv_st.get("realized_loss", "0"))
-                                if ssl_losses < 0:
-                                    if "original_tp1" not in state:
-                                        state["original_tp1"] = str(pos.take_profit_1) if pos.take_profit_1 else None
-                                        state["original_tp2"] = str(pos.take_profit_2) if pos.take_profit_2 else None
-                                    loss_abs = abs(ssl_losses)
-                                    delta_mult = Decimal("1") + Decimal(str(ms.perp_smart_sl_tp_recovery_delta_pct)) / Decimal("100")
-                                    target = loss_abs * delta_mult
-                                    tp1_share = target * Decimal("0.4")
-                                    tp2_share = target * Decimal("0.6")
-                                    half_size = pos.size / Decimal("2")
-                                    if half_size > 0:
-                                        tp1_dist = tp1_share / half_size
-                                        tp2_dist = tp2_share / half_size
-                                        if is_long:
-                                            pos.take_profit_1 = pos.entry_price + tp1_dist
-                                            pos.take_profit_2 = pos.entry_price + tp2_dist
-                                        else:
-                                            pos.take_profit_1 = pos.entry_price - tp1_dist
-                                            pos.take_profit_2 = pos.entry_price - tp2_dist
-                                        logger.info("smart_sl_tp_adjusted", asset=pos.asset, tp1=float(pos.take_profit_1), tp2=float(pos.take_profit_2), ssl_loss=float(ssl_losses), target=float(target))
+                            self._adjust_smart_sl_recovery_take_profits(pos, state, ms, is_long)
 
                             state["global_reentries"] = global_reentries + 1
                             state["rebuy_above_confirm_since"] = None
@@ -1630,6 +1607,68 @@ class AgentService:
             pos.smart_sl_state = json.dumps(state)
             pos.updated_at = now
             session.add(pos)
+
+    def _adjust_smart_sl_recovery_take_profits(
+        self,
+        pos: PerpPosition,
+        state: dict,
+        ms: AgentMobileSettings,
+        is_long: bool,
+    ) -> bool:
+        """Move TPs after a Smart SL rebuy so the remaining exits recover net losses."""
+        if not ms.perp_smart_sl_tp_adjust_after_rebuy or pos.size <= 0:
+            return False
+
+        ssl_losses = Decimal("0")
+        for lv_st in state["levels"]:
+            ssl_losses += Decimal(lv_st.get("realized_loss", "0"))
+        if ssl_losses >= 0:
+            return False
+
+        if "original_tp1" not in state:
+            state["original_tp1"] = str(pos.take_profit_1) if pos.take_profit_1 else None
+            state["original_tp2"] = str(pos.take_profit_2) if pos.take_profit_2 else None
+
+        loss_abs = abs(ssl_losses)
+        delta_mult = Decimal("1") + Decimal(str(ms.perp_smart_sl_tp_recovery_delta_pct)) / Decimal("100")
+        net_target = loss_abs * delta_mult
+
+        fee_only = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
+        funding = pos.funding_accrued_usd or Decimal("0")
+        gross_target = net_target + fee_only - funding
+        if gross_target <= 0:
+            gross_target = net_target
+
+        tp1_fraction = Decimal(str(ms.perp_tp1_close_pct)) / Decimal("100")
+        tp1_size = (pos.size * tp1_fraction).quantize(Decimal("0.000001"))
+        tp2_size = pos.size - tp1_size
+        if tp1_size <= 0 or tp2_size <= 0:
+            return False
+
+        tp1_target_fraction = min(Decimal("0.4"), tp1_fraction * Decimal("0.8"))
+        tp1_gross_target = gross_target * tp1_target_fraction
+        tp2_gross_target = gross_target - tp1_gross_target
+        tp1_dist = tp1_gross_target / tp1_size
+        tp2_dist = tp2_gross_target / tp2_size
+
+        if is_long:
+            pos.take_profit_1 = pos.entry_price + tp1_dist
+            pos.take_profit_2 = pos.entry_price + tp2_dist
+        else:
+            pos.take_profit_1 = pos.entry_price - tp1_dist
+            pos.take_profit_2 = pos.entry_price - tp2_dist
+
+        logger.info(
+            "smart_sl_tp_adjusted",
+            asset=pos.asset,
+            tp1=float(pos.take_profit_1),
+            tp2=float(pos.take_profit_2),
+            ssl_loss=float(ssl_losses),
+            net_target=float(net_target),
+            gross_target=float(gross_target),
+            tp1_close_pct=float(ms.perp_tp1_close_pct),
+        )
+        return True
 
     async def _check_sl_tp(
         self,
