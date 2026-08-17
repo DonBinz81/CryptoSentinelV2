@@ -25,6 +25,7 @@ from backend.app.execution.models import ExecutionStatus
 from backend.app.execution.perp_base import PerpOrder
 from backend.app.execution.perp_registry import PerpExecutionRegistry, get_perp_execution_registry
 from backend.app.execution.registry import ExecutionProviderRegistry, get_execution_provider_registry
+from backend.app.execution.venue_router import VENUE_UNAVAILABLE, get_perp_venue_router
 from backend.app.notifications.agent_notifier import get_agent_notifier
 from backend.app.persistence.database import get_session_factory
 from backend.app.persistence.models.decisions import AgentDecision
@@ -1256,6 +1257,33 @@ class AgentService:
         if partial and residual <= 0:
             partial = False
 
+        # Every perp exit goes through the venue that opened the position: TP1, TP2,
+        # stop, breakeven, ratchet steps and profit lock all land here. The economic
+        # state is updated only after the venue confirms; in dry-run that is instant.
+        requested_qty = (pos.size * f_req).quantize(Decimal("0.000001")) if partial else pos.size
+        venue = get_perp_venue_router().resolve_position_venue(pos)
+        if venue is None:
+            logger.error(
+                "perp_close_venue_unavailable",
+                asset=pos.asset, position_id=pos.position_id, venue=pos.venue, reason=reason,
+            )
+            return Decimal("0")
+        execution = await venue.execute(
+            session,
+            position_id=pos.position_id,
+            user_id=pos.user_id,
+            purpose=_close_purpose(reason),
+            qty=requested_qty,
+            price=exit_price,
+        )
+        if not execution.confirmed:
+            logger.error(
+                "perp_close_not_confirmed",
+                asset=pos.asset, position_id=pos.position_id, reason=reason,
+                venue=execution.venue, detail=execution.reason,
+            )
+            return Decimal("0")
+
         if partial:
             f = f_req
             close_size = (pos.size * f).quantize(Decimal("0.000001"))
@@ -1415,6 +1443,16 @@ class AgentService:
                         state["original_tp1"] = str(pos.take_profit_1) if pos.take_profit_1 else None
                         state["original_tp2"] = str(pos.take_profit_2) if pos.take_profit_2 else None
 
+                    # Smart SL sells go through the venue too.
+                    _ssl_venue = get_perp_venue_router().resolve_position_venue(pos)
+                    if _ssl_venue is None:
+                        continue
+                    _ssl_exec = await _ssl_venue.execute(
+                        session, position_id=pos.position_id, user_id=pos.user_id,
+                        purpose="smart_sl", qty=split_size, price=sell_price,
+                    )
+                    if not _ssl_exec.confirmed:
+                        continue
                     close_trade = PerpTrade(
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                         position_id=pos.position_id,
@@ -1480,6 +1518,15 @@ class AgentService:
                     pos.entry_price = new_entry.quantize(Decimal("0.000000000000000001"))
                     pos.size = pos.size + split_size
 
+                    _rb_venue = get_perp_venue_router().resolve_position_venue(pos)
+                    if _rb_venue is None:
+                        continue
+                    _rb_exec = await _rb_venue.execute(
+                        session, position_id=pos.position_id, user_id=pos.user_id,
+                        purpose="smart_sl", qty=split_size, price=price,
+                    )
+                    if not _rb_exec.confirmed:
+                        continue
                     rebuy_trade = PerpTrade(
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                         position_id=pos.position_id,
@@ -1545,6 +1592,15 @@ class AgentService:
                             pos.entry_price = new_entry.quantize(Decimal("0.000000000000000001"))
                             pos.size = pos.size + total_rebuy_size
 
+                            _rba_venue = get_perp_venue_router().resolve_position_venue(pos)
+                            if _rba_venue is None:
+                                return
+                            _rba_exec = await _rba_venue.execute(
+                                session, position_id=pos.position_id, user_id=pos.user_id,
+                                purpose="smart_sl", qty=total_rebuy_size, price=price,
+                            )
+                            if not _rba_exec.confirmed:
+                                return
                             rebuy_trade = PerpTrade(
                                 trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                                 position_id=pos.position_id,
@@ -2585,6 +2641,23 @@ class AgentService:
             # The opening trade is an execution of this position too: generate the
             # position id first so both rows carry the same explicit link.
             perp_position_id = f"pos_{uuid4().hex}"
+            # Entry goes through the venue as well: the venue chosen here is the one
+            # the position will keep for its whole life (reduce, protect, close).
+            entry_venue = get_perp_venue_router().resolve_entry_venue(
+                "perp", str(signal.get("asset")), execution_mode=self._ms.execution_mode
+            )
+            if entry_venue is None:
+                return {"status": "skipped", "reason": VENUE_UNAVAILABLE}
+            entry_execution = await entry_venue.execute(
+                session,
+                position_id=perp_position_id,
+                user_id=str(self.settings.default_user_id),
+                purpose="entry",
+                qty=leveraged_size,
+                price=effective_price,
+            )
+            if not entry_execution.confirmed:
+                return {"status": "skipped", "reason": entry_execution.reason or "entry_not_confirmed"}
             await PerpTradeRepository(session).save(
                 PerpTrade(
                     trade_id=trade_id,
@@ -2598,7 +2671,7 @@ class AgentService:
                     leverage=leverage,
                     status=ExecutionStatus.PREPARED.value,
                     timestamp_utc=now,
-                    venue="dry_run",
+                    venue=entry_venue.name,
                     signal_id=signal.get("signal_id"),
                     notes="dry_run_step6",
                     fee_mode=fee_mode,
@@ -2640,7 +2713,7 @@ class AgentService:
                     maker_fee_usd=costs["maker_fee_usd"],
                     slippage_usd=costs["slippage_usd"],
                     funding_accrued_usd=Decimal("0"),
-                    venue="dry_run",
+                    venue=entry_venue.name,
                     open_trade_id=trade_id,
                     opened_at=now,
                     updated_at=now,
@@ -3023,6 +3096,20 @@ def _ratchet_level(progress: Decimal, steps) -> tuple[int, Decimal]:
 def _ratchet_breakeven_price(tp1: Decimal, tp2: Decimal, pct: Decimal, is_long: bool) -> Decimal:
     """Prezzo del 'breakeven del ratchet': punto fisso a `pct` del tratto TP1→TP2."""
     return (tp1 + pct * (tp2 - tp1)) if is_long else (tp1 - pct * (tp1 - tp2))
+
+
+def _close_purpose(reason: str) -> str:
+    """Map a close reason to the order purpose persisted on perp_orders."""
+    return {
+        "take_profit_1": "tp1",
+        "take_profit_2": "tp2",
+        "stop_loss": "stop_loss",
+        "breakeven": "stop_loss",
+        "trailing_stop": "stop_loss",
+        "profit_lock": "ratchet",
+        "ratchet_step": "ratchet",
+        "time_stop": "close",
+    }.get(reason, "close")
 
 
 def _level_fill_price(pos, reason: str, market_price: Decimal) -> Decimal:

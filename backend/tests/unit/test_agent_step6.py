@@ -635,6 +635,7 @@ def test_perp_trade_detail_exposure_uses_notional_once() -> None:
         venue="dry_run",
     )
     position = PerpPosition(
+        venue="dry_run",
         position_id="pos_trx_test",
         user_id=str(USER_ID),
         asset="TRX",
@@ -678,6 +679,7 @@ def test_perp_smart_sl_detail_preserves_original_entry() -> None:
         pnl_usd=Decimal("-1.50"),
     )
     position = PerpPosition(
+        venue="dry_run",
         position_id="pos_btc_test",
         user_id=str(USER_ID),
         asset="BTC",
@@ -819,6 +821,7 @@ def test_perp_smart_sl_rebuy_tp_adjustment_uses_actual_tp1_close_pct() -> None:
         perp_smart_sl_tp_recovery_delta_pct=7.0,
     )
     position = PerpPosition(
+        venue="dry_run",
         position_id="pos_dot_rebuy_recovery",
         user_id=str(USER_ID),
         asset="DOT",
@@ -1812,6 +1815,7 @@ def test_perp_trailing_mult_scales_inverse_with_leverage() -> None:
 def _perp_pos(pid: str, current: Decimal, *, stop: Decimal, leverage: int = 4) -> PerpPosition:
     now = datetime.now(UTC)
     return PerpPosition(
+        venue="dry_run",
         position_id=pid,
         user_id=str(USER_ID),
         asset="DOGE",
@@ -2269,6 +2273,7 @@ async def test_perp_breakeven_buffer_not_applied_below_buffer(db) -> None:
     now = datetime.now(UTC)
     # entry 100, ATR 1 -> trigger +1*ATR=101; buffer +2%=102.
     pos = PerpPosition(
+        venue="dry_run",
         position_id="perp-bebuf",
         user_id=str(USER_ID),
         asset="DOGE",
@@ -2384,6 +2389,7 @@ async def test_perp_long_trailing_above_entry_labeled_trailing_stop(db) -> None:
     )
     now = datetime.now(UTC)
     pos = PerpPosition(
+        venue="dry_run",
         position_id="perp-tr-be",
         user_id=str(USER_ID),
         asset="BTC",
@@ -2422,6 +2428,7 @@ async def test_perp_short_trailing_below_entry_labeled_trailing_stop(db) -> None
     )
     now = datetime.now(UTC)
     pos = PerpPosition(
+        venue="dry_run",
         position_id="perp-short-tr",
         user_id=str(USER_ID),
         asset="AVAX",

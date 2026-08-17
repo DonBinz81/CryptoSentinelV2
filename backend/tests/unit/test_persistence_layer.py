@@ -211,6 +211,7 @@ async def test_perp_position_carries_leverage_and_liquidation(db) -> None:
         now = datetime.now(UTC)
         await repo.save(
             PerpPosition(
+                venue="dry_run",
                 position_id="p1",
                 user_id=USER,
                 asset="ETH",
@@ -359,6 +360,7 @@ async def test_global_view_perp_exposure_is_margin_not_notional(db) -> None:
         # entry 100 * size 10 = 1000 nozionale; leva 10 -> margine 100.
         await PerpPositionRepository(session).save(
             PerpPosition(
+                venue="dry_run",
                 position_id="pp-exp", user_id=USER, asset="ETH", side="long",
                 size=Decimal("10"), entry_price=Decimal("100"), current_price=Decimal("100"),
                 leverage=10, opened_at=now, updated_at=now,
@@ -478,6 +480,7 @@ async def test_perp_history_uses_position_entry_for_partial_closes(db) -> None:
     async with factory() as session:
         await PerpPositionRepository(session).save(
             PerpPosition(
+                venue="dry_run",
                 position_id="pos_eth_tp1",
                 open_trade_id="dry_eth_open",
                 user_id=USER,
@@ -635,6 +638,7 @@ async def test_reset_all_data_wipes_everything_and_optionally_backs_up(db) -> No
         )
         await PerpPositionRepository(session).save(
             PerpPosition(
+                venue="dry_run",
                 position_id="pp1", user_id=USER, asset="DOGE", side="long",
                 size=Decimal("1"), entry_price=Decimal("0.07"), current_price=Decimal("0.07"),
                 leverage=10, opened_at=now, updated_at=now,

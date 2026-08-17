@@ -105,6 +105,10 @@ def _position(side: str) -> PerpPosition:
         take_profit_1=TP1_LONG if is_long else Decimal("90"),
         take_profit_2=TP2_LONG if is_long else Decimal("80"),
         entry_atr=Decimal("5"),
+        # Every real position carries the venue it was opened on (verified in
+        # production: 11/11 rows have it). The router refuses to execute without it,
+        # by design — no hidden fallback.
+        venue="dry_run",
         opening_fee_usd=Decimal("0"),
         slippage_usd=Decimal("0"),
         funding_accrued_usd=Decimal("0"),
