@@ -116,6 +116,29 @@ Suite dopo la correzione: **276 passed, 2 failed preesistenti, 2 skipped**.
 È lo stesso principio già applicato altrove nel modulo: un limite di configurazione nostro
 non deve mai assomigliare a un mercato assente sulla venue.
 
+## SEGUITO — il router consulta la disponibilità (stesso giorno, commit `b1d0fce`)
+
+Il punto lasciato aperto è stato chiuso: `resolve_entry_venue` consulta ora il servizio di
+disponibilità e rifiuta i pair che la venue non quota. La disponibilità mostrata nell'app e
+quella applicata a runtime sono finalmente **la stessa cosa**.
+
+Il controllo vale **anche in dry-run**, di proposito: una simulazione che apre posizioni che
+la venue reale rifiuterebbe non è la prova generale di nulla.
+
+Tre garanzie perché non diventi un fermo macchina:
+
+- solo `unavailable` blocca — `unknown` è il nostro punto cieco, non un mercato assente;
+- se il controllo stesso fallisce, l'apertura procede: un check rotto non deve fermare il
+  trading;
+- riguarda solo il perp; lo spot ha un percorso diverso ed è rimasto intatto.
+
+`resolve_entry_venue` è diventato `async` (unico chiamante, già in contesto asincrono).
+
+**Impatto misurato sulla watchlist reale prima del deploy**: 22 coin su 22 continuano ad
+aprire, nessuna bloccata; `COMP`, non quotata su Aster, viene rifiutata con
+`venue_unavailable`. Suite **287 passed**, 2 failed preesistenti, golden test invariato.
+Dopo il deploy: servizio `active`, zero errori, zero `venue_unavailable` inattesi.
+
 ## SCOSTAMENTI DAL PIANO
 
 1. **Sonda spot cambiata**: previsto `getAmountsOut`, usato `getPair` sulla Factory. Motivo
