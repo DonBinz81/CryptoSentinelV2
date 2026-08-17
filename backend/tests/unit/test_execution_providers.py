@@ -178,6 +178,29 @@ async def test_pancake_quote_decodes_get_amounts_out() -> None:
     assert quote.details["path"][0] == Web3.to_checksum_address(WBNB_TESTNET)
 
 
+@pytest.mark.asyncio
+async def test_pancake_pair_address_reads_the_factory() -> None:
+    pool = "0x16b9A82891338f9bA80E2D6970FddA79D1eb0daE"
+    encoded = "0x" + abi_encode(["address"], [pool]).hex()
+    rpc = FakeRpc({"eth_call": encoded})
+    provider = PancakeSwapProvider(_settings(), rpc=rpc)
+
+    assert await provider.pair_address(TOKEN_A, TOKEN_B) == Web3.to_checksum_address(pool)
+    # The lookup must hit the factory, not the router: the router reverts when a
+    # pool is missing, and a revert cannot be told apart from an RPC failure.
+    (_method, params) = rpc.calls[0]
+    assert params[0]["to"] == provider.factory_address
+
+
+@pytest.mark.asyncio
+async def test_pancake_pair_address_returns_zero_when_no_pool_exists() -> None:
+    zero = "0x0000000000000000000000000000000000000000"
+    rpc = FakeRpc({"eth_call": "0x" + abi_encode(["address"], [zero]).hex()})
+    provider = PancakeSwapProvider(_settings(), rpc=rpc)
+
+    assert await provider.pair_address(TOKEN_A, TOKEN_B) == zero
+
+
 # ── PancakeSwap: swap transaction construction (pure) ──────────────────────────
 
 

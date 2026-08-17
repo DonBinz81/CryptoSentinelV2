@@ -25,6 +25,10 @@ from backend.app.persistence.repositories.pnl import PnlRepository
 from backend.app.schemas.views import ClaudeUsageView
 from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SessionDep
 from backend.app.core.config import get_settings
+from backend.app.core.logging import get_logger
+from backend.app.execution.venue_availability import get_venue_availability_service
+
+logger = get_logger("api.agent")
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
@@ -160,12 +164,31 @@ async def set_agent_watchlist(request: AgentWatchlistRequest, _: AdminAccessDep)
     }
 
 
+async def _watchlist_availability(symbols: list[str]) -> dict:
+    """Per-symbol venue availability, or an empty map if it cannot be computed.
+
+    Never raises: the watchlist must stay readable even when a venue is down.
+    An empty map makes the client fall back to "unknown", which warns without
+    blocking, instead of failing the whole setup screen.
+    """
+    try:
+        return await get_venue_availability_service().availability(symbols)
+    except Exception as exc:
+        logger.warning("watchlist_availability_failed", error_type=type(exc).__name__)
+        return {}
+
+
 @router.get("/watchlist/spot")
 async def get_spot_watchlist(_: ReadAccessDep) -> dict:
     service = get_agent_service()
     master = selected_watchlist(service.settings)
     selected = selected_spot_watchlist(service.settings)
-    return {"master_tokens": master, "selected_tokens": selected, "selected_count": len(selected)}
+    return {
+        "master_tokens": master,
+        "selected_tokens": selected,
+        "selected_count": len(selected),
+        "availability": await _watchlist_availability(master),
+    }
 
 
 @router.put("/watchlist/spot")
@@ -183,7 +206,12 @@ async def get_perp_watchlist(_: ReadAccessDep) -> dict:
     service = get_agent_service()
     master = selected_watchlist(service.settings)
     selected = selected_perp_watchlist(service.settings)
-    return {"master_tokens": master, "selected_tokens": selected, "selected_count": len(selected)}
+    return {
+        "master_tokens": master,
+        "selected_tokens": selected,
+        "selected_count": len(selected),
+        "availability": await _watchlist_availability(master),
+    }
 
 
 @router.put("/watchlist/perp")

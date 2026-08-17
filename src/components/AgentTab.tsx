@@ -24,6 +24,7 @@ import {
   updatePerpWatchlist,
   type AgentDecisionResponse,
   type AgentMarketWatchlistResponse,
+  type VenueAvailability,
   type AgentMobileSettings,
   type AgentStatus,
   type AssetBreakdownResponse,
@@ -1376,16 +1377,18 @@ const CoinsPane: FC<{
     setMarketSaving(true);
     setMarketError('');
     try {
+      // La PUT risponde con la sola selezione: la disponibilità va riportata
+      // dallo stato precedente, altrimenti i badge sparirebbero a ogni tocco.
       if (market === 'spot') {
         const current = new Set(spotData?.selected_tokens ?? []);
         if (current.has(symbol)) current.delete(symbol); else current.add(symbol);
         const result = await updateSpotWatchlist([...current], adminToken);
-        setSpotData(result);
+        setSpotData((prev) => ({ ...result, availability: result.availability ?? prev?.availability }));
       } else {
         const current = new Set(perpData?.selected_tokens ?? []);
         if (current.has(symbol)) current.delete(symbol); else current.add(symbol);
         const result = await updatePerpWatchlist([...current], adminToken);
-        setPerpData(result);
+        setPerpData((prev) => ({ ...result, availability: result.availability ?? prev?.availability }));
       }
     } catch (e) {
       // Il messaggio del backend va mostrato: con un catch muto un 400
@@ -1471,11 +1474,28 @@ const CoinsPane: FC<{
         const isSpot = subTab === 'spot';
         const selected = isSpot ? spotSelected : perpSelected;
         const activeMasterTokens = masterTokens.filter((s) => s.toUpperCase().includes(normalizedQuery));
+        // Disponibilità: sempre dal backend. Se il campo manca (venue non
+        // raggiungibile) si ricade su "unknown", che avvisa senza bloccare.
+        const availabilityMap = (isSpot ? spotData : perpData)?.availability;
+        const availabilityFor = (symbol: string): VenueAvailability => {
+          const entry = availabilityMap?.[symbol.toUpperCase()];
+          const value = isSpot ? entry?.spot : entry?.perp;
+          return value ?? { venue: isSpot ? 'pancakeswap' : 'aster', status: 'unknown' };
+        };
+        const blockedCount = activeMasterTokens.filter(
+          (s) => availabilityFor(s).status === 'unavailable' && !selected.has(s.toUpperCase()),
+        ).length;
         return (
           <section className="space-y-2">
             <p className="px-1 text-xs text-gray-500">
               Seleziona le coin dalla master watchlist da assegnare al mercato <span className="font-semibold text-white">{subTab.toUpperCase()}</span>.
+              {' '}Venue: <span className="font-semibold text-white">{isSpot ? 'PancakeSwap' : 'Aster'}</span>.
             </p>
+            {blockedCount > 0 && (
+              <p className="px-1 text-xs text-accent-red">
+                {blockedCount} {blockedCount === 1 ? 'coin non è quotata' : 'coin non sono quotate'} su {isSpot ? 'PancakeSwap' : 'Aster'}: non selezionabili.
+              </p>
+            )}
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -1494,6 +1514,7 @@ const CoinsPane: FC<{
                     selected={selected.has(symbol.toUpperCase())}
                     disabled={marketDisabled}
                     onToggle={(s) => void handleMarketToggle(s, subTab)}
+                    availability={availabilityFor(symbol)}
                   />
                 ))}
               </div>

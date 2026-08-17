@@ -51,6 +51,7 @@ def _selector(signature: str) -> bytes:
 
 # 4-byte selectors (computed, never hard-coded blindly).
 SEL_GET_AMOUNTS_OUT = _selector("getAmountsOut(uint256,address[])")
+SEL_GET_PAIR = _selector("getPair(address,address)")
 SEL_ALLOWANCE = _selector("allowance(address,address)")
 SEL_APPROVE = _selector("approve(address,uint256)")
 SEL_SWAP_EXACT_TOKENS = _selector(
@@ -90,6 +91,12 @@ class PancakeSwapProvider(ExecutionProvider):
             return Web3.to_checksum_address(self._settings.pancakeswap_wbnb_address_testnet)
         return Web3.to_checksum_address(self._settings.pancakeswap_wbnb_address_mainnet)
 
+    @property
+    def factory_address(self) -> str:
+        if self._settings.bsc_network == "testnet":
+            return Web3.to_checksum_address(self._settings.pancakeswap_factory_address_testnet)
+        return Web3.to_checksum_address(self._settings.pancakeswap_factory_address_mainnet)
+
     # ── Pure helpers (no I/O, fully unit-testable) ─────────────────────────────
 
     def build_path(self, from_asset: str, to_asset: str) -> list[str]:
@@ -117,6 +124,36 @@ class PancakeSwapProvider(ExecutionProvider):
     def min_out_atomic(self, amount_out_atomic: int, slippage_pct: Decimal) -> int:
         factor = Decimal(1) - slippage_pct / Decimal(100)
         return int(Decimal(amount_out_atomic) * factor)
+
+    def encode_get_pair(self, token_a: str, token_b: str) -> str:
+        data = SEL_GET_PAIR + abi_encode(
+            ["address", "address"],
+            [Web3.to_checksum_address(token_a), Web3.to_checksum_address(token_b)],
+        )
+        return "0x" + data.hex()
+
+    @staticmethod
+    def decode_address(result_hex: str) -> str:
+        raw = bytes.fromhex(result_hex.removeprefix("0x"))
+        (address,) = abi_decode(["address"], raw)
+        return Web3.to_checksum_address(address)
+
+    # ── Read-only market introspection ────────────────────────────────────────
+
+    async def pair_address(self, token_a: str, token_b: str) -> str:
+        """Factory address of the liquidity pool, or the zero address if none.
+
+        Deliberately ``getPair`` and not ``getAmountsOut``: a missing pool makes
+        the router *revert*, and a revert is indistinguishable from an RPC
+        failure once ``MultiRpcClient`` has aggregated the endpoint errors. The
+        factory answers "no pool" with a plain zero address instead, which keeps
+        "the pair does not exist" separate from "we could not check".
+        """
+        result_hex = await self._rpc_client().call(
+            "eth_call",
+            [{"to": self.factory_address, "data": self.encode_get_pair(token_a, token_b)}, "latest"],
+        )
+        return self.decode_address(result_hex)
 
     def build_swap_transaction(
         self,

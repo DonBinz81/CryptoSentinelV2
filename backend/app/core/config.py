@@ -489,6 +489,16 @@ class Settings(BaseSettings):
         default="0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
         alias="PANCAKESWAP_WBNB_ADDRESS_TESTNET",
     )
+    # V2 factory: read-only pool lookup (getPair) used to tell "no pool" apart
+    # from "cannot check". Same official BscScan deployments as the routers.
+    pancakeswap_factory_address_mainnet: str = Field(
+        default="0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73",
+        alias="PANCAKESWAP_FACTORY_ADDRESS_MAINNET",
+    )
+    pancakeswap_factory_address_testnet: str = Field(
+        default="0x6725F303b657a9451d8BA641348b6761A6CC7a17",
+        alias="PANCAKESWAP_FACTORY_ADDRESS_TESTNET",
+    )
     # Routing token per l'esecuzione spot in LIVE (in dry-run non vengono usati).
     # Indirizzi on-chain reali: NON hardcodati: vanno forniti via .env (vuoti = spot live disabilitato).
     spot_quote_token_address: str | None = Field(default=None, alias="SPOT_QUOTE_TOKEN_ADDRESS")
