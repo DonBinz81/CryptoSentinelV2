@@ -20,7 +20,6 @@ from backend.app.agent.signals.spot.momentum import MIN_SPOT_CANDLES, SpotMoment
 from backend.app.agent.watchlist import selected_watchlist, selected_spot_watchlist, selected_perp_watchlist
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import get_logger
-from backend.app.data.market_data.cmc import CMCProvider
 from backend.app.execution.models import ExecutionStatus
 from backend.app.execution.perp_base import PerpOrder
 from backend.app.execution.perp_registry import PerpExecutionRegistry, get_perp_execution_registry
@@ -65,7 +64,6 @@ BTC_TREND_SHOCK_CACHE_TTL_SECONDS = 90
 BTC_TREND_SHOCK_15M_BARS = 96
 BTC_TREND_SHOCK_5M_VOL_LOOKBACK = 50
 # Sentinel per la lazy-init del resolver token (distingue "non inizializzato" da "None").
-_UNSET = object()
 
 
 def _estimate_liquidation_price(entry: Decimal, leverage: int, side: str) -> Decimal | None:
@@ -104,7 +102,6 @@ class AgentService:
         brain: ClaudeMetaController | None = None,
         spot_registry: ExecutionProviderRegistry | None = None,
         perp_registry: PerpExecutionRegistry | None = None,
-        token_resolver: CMCProvider | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.spot_signal = spot_signal or SpotMomentumSignal(self.settings)
@@ -117,9 +114,6 @@ class AgentService:
         self.price_feed = BinanceKlineFeed(
             timeout_seconds=self.settings.market_data_request_timeout_seconds
         )
-        # Resolver indirizzi token (CMC) per lo spot live; lazy, usato solo se serve.
-        self._token_resolver_override = token_resolver
-        self._token_resolver_cached: CMCProvider | None | object = _UNSET
 
     @property
     def _ms(self) -> AgentMobileSettings:
@@ -2551,30 +2545,25 @@ class AgentService:
             asyncio.create_task(self._notify_trade_opened(signal, risk_decision, execution))
         return execution
 
-    def _token_resolver(self) -> CMCProvider | None:
-        """Resolver CMC per gli indirizzi token (lazy). None se non configurato."""
-        if self._token_resolver_override is not None:
-            return self._token_resolver_override
-        if self._token_resolver_cached is _UNSET:
-            try:
-                self._token_resolver_cached = (
-                    CMCProvider(self.settings) if getattr(self.settings, "cmc_api_key", None) else None
-                )
-            except Exception:
-                self._token_resolver_cached = None
-        return self._token_resolver_cached  # type: ignore[return-value]
-
     async def _resolve_token_address(self, symbol: str) -> str | None:
-        """Indirizzo BSC del token: mappa statica (override) poi risoluzione CMC."""
+        """BSC address of the token, from the curated map only.
+
+        Resolving it from the ticker through the market-data provider used to be
+        the fallback, and it is not safe: one ticker matches many tokens. Asking
+        for "BTC" returns a token literally named "Bitcoin AI" whose `symbol()`
+        is also "BTC", while the real wrapped bitcoin declares "BTCB" — so even
+        an on-chain symbol check would keep the impostor and reject the right
+        coin. In live that meant buying the wrong asset.
+
+        Unmapped symbols therefore resolve to nothing, and the caller skips the
+        trade with `spot_token_not_mapped`. Not trading is recoverable; buying
+        the wrong token is not.
+        """
         entry = self.settings.spot_token_map.get(symbol.upper())
-        if entry:
-            address, _, _decimals = entry.partition(":")
-            if address:
-                return address
-        resolver = self._token_resolver()
-        if resolver is not None:
-            return await resolver.resolve_contract_address(symbol)
-        return None
+        if not entry:
+            return None
+        address, _, _decimals = entry.partition(":")
+        return address or None
 
     async def _build_spot_swap_params(self, signal: dict, size_quote: Decimal) -> dict | None:
         """Costruisce from_asset/to_asset/amount_in_atomic per lo swap spot live.

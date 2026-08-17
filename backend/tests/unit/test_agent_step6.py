@@ -1034,22 +1034,37 @@ async def test_build_spot_swap_params_skips_when_unmapped_and_no_resolver() -> N
 
 
 @pytest.mark.asyncio
-async def test_build_spot_swap_params_resolves_via_cmc() -> None:
-    # Niente mappa statica: indirizzi risolti dal resolver CMC iniettato.
-    class FakeResolver:
-        async def resolve_contract_address(self, symbol: str, **_: object) -> str:
-            return {"ETH": "0xETHCMC", "USDT": "0xUSDTCMC"}[symbol.upper()]
+async def test_build_spot_swap_params_refuses_unmapped_symbols() -> None:
+    """No curated address, no trade: the ticker must never resolve an address.
+
+    Asking a market-data provider for "BTC" returns a token named "Bitcoin AI"
+    that also declares symbol "BTC", while real wrapped bitcoin declares "BTCB".
+    In live that meant buying the wrong asset, so an unmapped symbol now yields
+    nothing and the caller skips with `spot_token_not_mapped`.
+    """
 
     service = AgentService(
         settings(spot_quote_token_address=None, spot_token_map={}),
         spot_registry=SimpleNamespace(),
         perp_registry=SimpleNamespace(),
-        token_resolver=FakeResolver(),
+    )
+    assert await service._build_spot_swap_params({"asset": "ETH"}, Decimal("10")) is None
+
+
+@pytest.mark.asyncio
+async def test_build_spot_swap_params_uses_the_curated_map() -> None:
+    service = AgentService(
+        settings(
+            spot_quote_token_address="0xUSDT",
+            spot_token_map={"ETH": "0xETHMAP", "USDT": "0xUSDT"},
+        ),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
     )
     params = await service._build_spot_swap_params({"asset": "ETH"}, Decimal("10"))
     assert params is not None
-    assert params["from_asset"] == "0xUSDTCMC"
-    assert params["to_asset"] == "0xETHCMC"
+    assert params["from_asset"] == "0xUSDT"
+    assert params["to_asset"] == "0xETHMAP"
     assert params["amount_in_atomic"] == 10 * 10**18
 
 
