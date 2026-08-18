@@ -310,7 +310,7 @@ const EquityChart: FC<{
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase text-gray-500">PnL cumulato</h3>
+        <SectionTitle>PnL cumulato</SectionTitle>
         <div className="flex gap-1">
           {EQUITY_RANGES.map((r) => (
             <button
@@ -1006,8 +1006,8 @@ const GlobalPane: FC<{
         <EmptyState title="Nessuno storico PnL" detail="La curva equity apparira' dopo i prossimi snapshot." />
       )}
       <div className="grid grid-cols-2 gap-2">
-        <AssetRank title="Top asset" items={bestAssets} />
-        <AssetRank title="Worst asset" items={worstAssets} />
+        <AssetRank title="Top asset" items={bestAssets} tone="protezioni" />
+        <AssetRank title="Worst asset" items={worstAssets} tone="rischio" />
       </div>
       <section className="space-y-2">
         <SectionTitle>Ultime decisioni</SectionTitle>
@@ -1024,9 +1024,9 @@ const GlobalPane: FC<{
   );
 };
 
-const AssetRank: FC<{ title: string; items: AssetBreakdownResponse['items'] }> = ({ title, items }) => (
+const AssetRank: FC<{ title: string; items: AssetBreakdownResponse['items']; tone?: SectionTone }> = ({ title, items, tone }) => (
   <section className="rounded-xl bg-dark-800 px-3 py-3">
-    <h3 className="text-xs font-semibold uppercase text-gray-500">{title}</h3>
+    <SectionTitle tone={tone}>{title}</SectionTitle>
     <div className="mt-2 space-y-1.5">
       {items.length > 0 ? items.map((item) => (
         <div key={`${title}-${item.asset}`} className="flex items-center justify-between gap-2 text-xs">
