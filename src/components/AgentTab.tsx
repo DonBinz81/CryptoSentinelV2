@@ -210,6 +210,7 @@ const defaultSettings: AgentMobileSettings = {
   perp_fee_mode: 'taker' as const,
   spot_fee_mode: 'all' as const,
   post_close_candles: 10,
+  chart_pre_open_candles: 20,
 };
 
 const AGENT_REFRESH_MS = 45_000;
@@ -1822,7 +1823,8 @@ const SetupPane: FC<{
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Grafico trade</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde.'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde. Massimo 288 (24 ore a 5 minuti).'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele prima dell'apertura" help={'Quante candele di contesto mostrare prima dell\'ingresso del trade. Massimo 288 (24 ore a 5 minuti). Non tocca il calcolo dello stop, solo il grafico.'} value={settings.chart_pre_open_candles} step={1} onChange={(chart_pre_open_candles) => patch({ chart_pre_open_candles: Math.round(chart_pre_open_candles) })} />
         </div>
       </section>
         </>

@@ -427,6 +427,7 @@ export interface AgentMobileSettings {
   perp_fee_mode: 'taker' | 'maker' | 'none';
   spot_fee_mode: 'all' | 'none';
   post_close_candles: number;
+  chart_pre_open_candles: number;
 }
 
 export interface AgentSettingsResponse {
