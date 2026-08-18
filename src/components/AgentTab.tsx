@@ -538,6 +538,28 @@ const HelpTip: FC<{ text: string; top?: boolean }> = ({ text, top }) => {
   );
 };
 
+// Intestazione di sezione. Il colore segue il SIGNIFICATO, non il mercato: le
+// linguette in alto dicono gia' se sei in Spot o Perp, mentre il colore dice che
+// tipo di parametri stai guardando — rosso il rischio, blu la strategia, verde le
+// protezioni, ambra i filtri, grigio il resto. La barretta a sinistra aggancia lo
+// sguardo mentre si scorre una pagina lunga.
+type SectionTone = 'rischio' | 'strategia' | 'protezioni' | 'filtri' | 'neutro';
+
+const SECTION_TONES: Record<SectionTone, { text: string; bar: string }> = {
+  rischio:    { text: 'text-accent-red',    bar: 'bg-accent-red' },
+  strategia:  { text: 'text-accent-blue',   bar: 'bg-accent-blue' },
+  protezioni: { text: 'text-accent-green',  bar: 'bg-accent-green' },
+  filtri:     { text: 'text-accent-yellow', bar: 'bg-accent-yellow' },
+  neutro:     { text: 'text-gray-300',      bar: 'bg-gray-500' },
+};
+
+const SectionTitle: FC<{ tone?: SectionTone; children: React.ReactNode }> = ({ tone = 'neutro', children }) => (
+  <div className="flex items-center gap-2 px-1">
+    <span className={`h-3.5 w-1 shrink-0 rounded-full ${SECTION_TONES[tone].bar}`} />
+    <h3 className={`text-xs font-bold uppercase tracking-wide ${SECTION_TONES[tone].text}`}>{children}</h3>
+  </div>
+);
+
 // Blocco richiudibile per le sezioni lunghe e di uso raro (Smart SL, shock BTC):
 // partono chiuse, così la scheda Perp resta leggibile senza scorrere decine di
 // campi che si toccano una volta ogni tanto.
@@ -848,7 +870,7 @@ const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) => void }
       )}
       {hasHistory ? (
         <div className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot history</h3>
+          <SectionTitle>Spot history</SectionTitle>
           <TradeHistoryList trades={data!.history} market="spot" onTrade={onTrade} />
         </div>
       ) : hasActivity && (
@@ -922,7 +944,7 @@ const PerpPane: FC<{ data: PerpView | null; onTrade: (tradeId: string) => void }
       )}
       {hasHistory ? (
         <div className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp history</h3>
+          <SectionTitle>Perp history</SectionTitle>
           <TradeHistoryList trades={data!.history} market="perp" onTrade={onTrade} />
         </div>
       ) : hasActivity && (
@@ -988,7 +1010,7 @@ const GlobalPane: FC<{
         <AssetRank title="Worst asset" items={worstAssets} />
       </div>
       <section className="space-y-2">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Ultime decisioni</h3>
+        <SectionTitle>Ultime decisioni</SectionTitle>
         {(decisions?.items.length ?? 0) > 0 ? decisions!.items.slice(0, 3).map((item) => (
           <div key={item.decision_id} className="flex items-center justify-between rounded-lg bg-dark-800 px-3 py-2 text-xs">
             <span className="text-white">{item.action} {item.asset ?? '--'}</span>
@@ -1068,9 +1090,9 @@ const WalletPane: FC<{
       {/* ── ASTER · venue Perp ── */}
       {aster?.configured && (
         <section className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">
+          <SectionTitle>
             Aster · venue Perp{aster.subaccount_name ? ` · ${aster.subaccount_name}` : ''}
-          </h3>
+          </SectionTitle>
           <div className="rounded-xl bg-dark-800 px-4 py-3 space-y-2">
             {/* Indirizzo per intero: e' qui che vanno versati i fondi. */}
             <button
@@ -1113,9 +1135,9 @@ const WalletPane: FC<{
 
       {/* ── WALLET ATTIVO ── */}
       <section className="space-y-2">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">
+        <SectionTitle>
           Wallet attivo · {execWallets?.network ?? '—'} (chain {execWallets?.chain_id ?? '—'})
-        </h3>
+        </SectionTitle>
         {activeWallet ? (
           <div className="rounded-xl bg-dark-800 px-4 py-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -1162,9 +1184,9 @@ const WalletPane: FC<{
 
       {/* ── POSIZIONI SPOT ── */}
       <section className="space-y-2">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">
+        <SectionTitle tone="strategia">
           Posizioni spot aperte {spot?.open_positions.length ? `(${fmtUsd(totalSpotValue)} valore)` : ''}
-        </h3>
+        </SectionTitle>
         {(spot?.open_positions.length ?? 0) === 0
           ? <EmptyState title="Nessuna posizione spot" detail="Le posizioni aperte dall'agente appariranno qui." />
           : (spot?.open_positions ?? []).map((p) => {
@@ -1209,9 +1231,9 @@ const WalletPane: FC<{
 
       {/* ── POSIZIONI PERP ── */}
       <section className="space-y-2">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">
+        <SectionTitle tone="strategia">
           Posizioni perp aperte {perp?.open_positions.length ? `(PnL ${fmtUsd(totalPerpPnl)})` : ''}
-        </h3>
+        </SectionTitle>
         {(perp?.open_positions.length ?? 0) === 0
           ? <EmptyState title="Nessuna posizione perp" detail="Le posizioni long/short appariranno qui." />
           : (perp?.open_positions ?? []).map((p) => {
@@ -1368,7 +1390,7 @@ const CoinsPane: FC<{
       {subTab === 'master' && (
         <>
           <section className="space-y-2">
-            <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Selezionate</h3>
+            <SectionTitle>Selezionate</SectionTitle>
             {masterTokens.length > 0 ? (
               <div className="grid grid-cols-2 gap-2">
                 {masterTokens.map((symbol) => (
@@ -1381,7 +1403,7 @@ const CoinsPane: FC<{
           </section>
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Eligible</h3>
+              <SectionTitle>Eligible</SectionTitle>
               {saving && <span className="text-xs text-accent-yellow">Saving</span>}
             </div>
             <input
@@ -1675,7 +1697,7 @@ export const SetupPane: FC<{
       {setupTab === 'generale' && (
         <>
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">General</h3>
+        <SectionTitle>General</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <SelectInput label="Mode" help={'Quanta libertà ha l\'agente:\n\nConservative — solo i segnali migliori\nSemi-auto — più operazioni, filtri più larghi\nFull auto — massima autonomia'} value={settings.mode} onChange={(mode) => patch({ mode })} options={[
             { value: 'conservative', label: 'Conservative' },
@@ -1696,7 +1718,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri globali</h3>
+        <SectionTitle tone="filtri">Filtri globali</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <NumberInput label="Liquidità minima $" help={'Soglia di liquidità sotto la quale una coin viene scartata: sotto questa cifra il libro degli ordini è troppo sottile e il prezzo scivola quando si entra o si esce.'} value={settings.min_pool_liquidity_usd} step={1000} onChange={(min_pool_liquidity_usd) => patch({ min_pool_liquidity_usd })} />
         </div>
@@ -1715,7 +1737,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Risk globale</h3>
+        <SectionTitle tone="rischio">Risk globale</SectionTitle>
         <ToggleInput
           label="Allarme drawdown"
           help={'Manda una notifica quando la perdita dal massimo raggiunto supera la soglia. Non ferma nulla: avvisa e basta.'} checked={settings.drawdown_alert_enabled}
@@ -1728,7 +1750,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Grafico trade</h3>
+        <SectionTitle>Grafico trade</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde. Massimo 288 (24 ore a 5 minuti).'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
           <NumberInput label="Candele prima dell'apertura" help={'Quante candele di contesto mostrare prima dell\'ingresso del trade. Massimo 288 (24 ore a 5 minuti). Non tocca il calcolo dello stop, solo il grafico.'} value={settings.chart_pre_open_candles} step={1} onChange={(chart_pre_open_candles) => patch({ chart_pre_open_candles: Math.round(chart_pre_open_candles) })} />
@@ -1740,7 +1762,7 @@ export const SetupPane: FC<{
       {setupTab === 'spot' && (
         <>
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — risk</h3>
+        <SectionTitle tone="rischio">Spot — risk</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <NumberInput label="Size %" help={'Quanta parte del capitale impegnare in ogni singola operazione spot. Al 4% con 1000$ investi 40$ per trade.'} value={settings.spot_capital_per_trade_pct} onChange={(spot_capital_per_trade_pct) => patch({ spot_capital_per_trade_pct })} />
           <NumberInput label="Rischio %" help={'Quanto sei disposto a perdere su una singola operazione, in percentuale sul capitale. Da qui viene calcolata la dimensione della posizione: rischio più basso, posizione più piccola.'} value={settings.spot_per_trade_pct} step={0.1} onChange={(spot_per_trade_pct) => patch({ spot_per_trade_pct })} />
@@ -1752,7 +1774,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — strategia</h3>
+        <SectionTitle tone="strategia">Spot — strategia</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <NumberInput label="Confidence" help={'Quanto deve essere forte un segnale per essere accettato. Alzarlo riduce le operazioni ma tiene solo le più convincenti.'} value={settings.spot_confidence_threshold} step={0.01} onChange={(spot_confidence_threshold) => patch({ spot_confidence_threshold })} />
           <NumberInput label="Vol trigger %" help={'Movimento minimo di prezzo perché una situazione venga considerata un\'occasione. Sotto questa soglia il mercato è troppo fermo per operare.'} value={settings.spot_volatility_trigger_pct} onChange={(spot_volatility_trigger_pct) => patch({ spot_volatility_trigger_pct })} />
@@ -1770,7 +1792,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Spot — protezioni</h3>
+        <SectionTitle tone="protezioni">Spot — protezioni</SectionTitle>
         <ToggleInput
           label="Breakeven Spot"
           help={'Sposta lo stop al prezzo d\'ingresso quando il trade è in guadagno, così l\'operazione non può più chiudere in perdita.'} checked={settings.spot_breakeven_enabled}
@@ -1811,7 +1833,7 @@ export const SetupPane: FC<{
       {setupTab === 'perp' && (
         <>
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — risk</h3>
+        <SectionTitle tone="rischio">Perp — risk</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <NumberInput label="Size % (margine)" help={'Quanto margine impegnare in ogni operazione, in percentuale sul capitale. Con la leva il valore controllato sul mercato è molto più grande del margine.'} value={settings.perp_capital_per_trade_pct} onChange={(perp_capital_per_trade_pct) => patch({ perp_capital_per_trade_pct })} />
           <NumberInput label="Rischio %" help={'Quanto sei disposto a perdere su un singolo trade. Da qui si calcola la dimensione: la perdita allo stop resta questa cifra, qualunque sia la leva.'} value={settings.perp_per_trade_pct} step={0.1} onChange={(perp_per_trade_pct) => patch({ perp_per_trade_pct })} />
@@ -1825,7 +1847,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — strategia</h3>
+        <SectionTitle tone="strategia">Perp — strategia</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
           <SelectInput label="Direction" help={'In che direzione può operare:\n\nLong e short — sfrutta salite e discese\nSolo long — apre solo al rialzo\nSolo short — apre solo al ribasso'} value={settings.perp_direction_mode} onChange={(perp_direction_mode) => patch({ perp_direction_mode })} options={[
             { value: 'long_only', label: 'Long' },
@@ -1919,7 +1941,7 @@ export const SetupPane: FC<{
       </section>
 
       <section className="space-y-3">
-        <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Perp — protezioni</h3>
+        <SectionTitle tone="protezioni">Perp — protezioni</SectionTitle>
         <ToggleInput
           label="Breakeven Perp"
           help={'Sposta lo stop al prezzo d\'ingresso quando il trade è in guadagno: da lì in poi l\'operazione non può più chiudere in perdita.'} checked={settings.perp_breakeven_enabled}
