@@ -77,6 +77,9 @@ export const TradeCandleChartLW: FC<{
   // Larghezza dell'asse dei prezzi: le etichette si fermano prima, altrimenti
   // finirebbero sopra i numeri della scala.
   const [priceAxisWidth, setPriceAxisWidth] = useState(0);
+  // Firma dell'ultimo posizionamento: durante il trascinamento il calcolo gira a
+  // ogni fotogramma, ma si ridisegna solo quando qualcosa e' davvero cambiato.
+  const lastPlacementRef = useRef('');
 
   // Il modello va calcolato una volta per dato ricevuto: senza questo verrebbe
   // ricostruito a ogni render, l'effetto sotto ripartirebbe e il ricalcolo delle
@@ -124,9 +127,9 @@ export const TradeCandleChartLW: FC<{
         priceFormatter: formatAxisPrice,
         timeFormatter: (time: number) => localDateTime(time),
       },
-      // Lo zoom e lo scorrimento nel tempo restano liberi; lo spostamento verticale
-      // no, altrimenti le etichette in linea scivolerebbero via dai loro livelli.
-      handleScale: { axisPressedMouseMove: { time: true, price: false } },
+      // Nessun gesto bloccato: pinch sul tempo, trascinamento sulla scala dei
+      // prezzi per allargare o stringere in verticale. Le sigle dei livelli
+      // restano agganciate perche' vengono riposizionate durante il gesto.
     });
     chartRef.current = c;
 
@@ -248,11 +251,49 @@ export const TradeCandleChartLW: FC<{
         label.lane = lane;
         previousTop = label.top;
       }
+      const axisWidth = series.priceScale().width();
+      const signature = `${axisWidth}|${placed
+        .map((l) => `${l.key}:${Math.round(l.top)}:${l.lane}:${l.text}`)
+        .join(',')}`;
+      if (signature === lastPlacementRef.current) return;
+      lastPlacementRef.current = signature;
       setInlineLabels(placed);
-      setPriceAxisWidth(series.priceScale().width());
+      setPriceAxisWidth(axisWidth);
     };
     placeInlineLabels();
     c.timeScale().subscribeVisibleLogicalRangeChange(placeInlineLabels);
+
+    // Trascinando la scala dei prezzi la libreria non emette eventi: senza questo
+    // le sigle resterebbero ferme mentre le linee si spostano. Il ricalcolo gira
+    // solo mentre un dito e' sul grafico, non a vuoto.
+    let interacting = false;
+    let frame = 0;
+    const followGesture = () => {
+      if (!interacting) return;
+      placeInlineLabels();
+      frame = requestAnimationFrame(followGesture);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // Toccando la scala dei prezzi si passa alla scala manuale: senza questo il
+      // range imposto dal modello verrebbe riapplicato a ogni ridisegno e il
+      // trascinamento verticale non avrebbe alcun effetto visibile.
+      const fromRight = container.clientWidth - event.offsetX;
+      if (fromRight <= series.priceScale().width()) {
+        series.priceScale().setAutoScale(false);
+      }
+      if (interacting) return;
+      interacting = true;
+      frame = requestAnimationFrame(followGesture);
+    };
+    const onPointerUp = () => {
+      if (!interacting) return;
+      interacting = false;
+      cancelAnimationFrame(frame);
+      placeInlineLabels();
+    };
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
 
     const onResize = () => {
       c.applyOptions({ width: container.clientWidth });
@@ -261,6 +302,10 @@ export const TradeCandleChartLW: FC<{
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      cancelAnimationFrame(frame);
       c.timeScale().unsubscribeVisibleLogicalRangeChange(placeInlineLabels);
       c.remove();
       chartRef.current = null;
