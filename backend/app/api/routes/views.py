@@ -201,6 +201,7 @@ async def trade_detail(
     user_id = str(settings.default_user_id)
     ms, _, _ = _settings_from_runtime(settings)
     post_close_count = ms.post_close_candles
+    pre_open_count = getattr(ms, "chart_pre_open_candles", None)
     spot = (await session.execute(select(SpotTrade).where(SpotTrade.user_id == user_id).where(SpotTrade.trade_id == trade_id))).scalar_one_or_none()
     perp = (await session.execute(select(PerpTrade).where(PerpTrade.user_id == user_id).where(PerpTrade.trade_id == trade_id))).scalar_one_or_none()
     if spot is None and perp is None:
@@ -214,7 +215,7 @@ async def trade_detail(
         chart_payload = json.loads(snapshot.payload) if snapshot else None
         post_close: list[dict] = []
         if enrich_chart and live is None and snapshot is not None:
-            chart_payload = await _enrich_trade_chart_context(chart_payload, spot.asset, "spot", "spot", "long", settings)
+            chart_payload = await _enrich_trade_chart_context(chart_payload, spot.asset, "spot", "spot", "long", settings, pre_open_count)
             post_close = await _fetch_post_close_candles(chart_payload, spot.asset, "spot", post_close_count)
         return _spot_trade_detail(spot, position, decision, settings, snapshot, live, post_close, chart_payload)
     position = await _find_trade_position(session, PerpPosition, perp)
@@ -225,7 +226,7 @@ async def trade_detail(
     post_close = []
     if enrich_chart and live is None and snapshot is not None:
         side = position.side if position is not None else perp.side
-        chart_payload = await _enrich_trade_chart_context(chart_payload, perp.asset, "futures", "perp", side, settings)
+        chart_payload = await _enrich_trade_chart_context(chart_payload, perp.asset, "futures", "perp", side, settings, pre_open_count)
         post_close = await _fetch_post_close_candles(chart_payload, perp.asset, "futures", post_close_count)
     return _perp_trade_detail(perp, position, decision, settings, snapshot, live, post_close, chart_payload)
 
@@ -289,10 +290,10 @@ TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS = 180
 async def _fetch_post_close_candles(chart: dict, asset: str, feed_market: str, count: int = POST_CLOSE_CANDLES) -> list[dict]:
     """Recupera fino a POST_CLOSE_CANDLES candele successive alla chiusura del trade.
 
-    Strategia: fetch delle ultime (candles_in_trade + POST_CLOSE + buffer) candele e
-    filtra quelle con timestamp > closed_at. Funziona per trade chiusi di recente
-    (entro ~2 giorni con chart 5m, settimane con 1h/4h).
-    Ritorna lista vuota se non ci sono ancora candele post-close disponibili o se count=0.
+    Strategia: fetch a partire dalla chiusura (``start_time``) e filtro su timestamp
+    successivi al confine gia' presente nello snapshot. Il recupero per intervallo fa
+    si' che funzioni anche per trade chiusi giorni prima: non dipende da quanto sono
+    recenti. Ritorna lista vuota se non ci sono ancora candele post-close o se count=0.
     """
     if count <= 0:
         return []
@@ -464,8 +465,17 @@ async def _enrich_trade_chart_context(
     market: str,
     side: str | None,
     settings,
+    pre_open_candles: int | None = None,
 ) -> dict | None:
-    """Add pre-open candles and infer the structural SL reference for old snapshots."""
+    """Add pre-open candles and infer the structural SL reference for old snapshots.
+
+    Two different windows meet here and must not be confused:
+    - ``pre_open_candles`` decides how far back the chart reaches. Display only.
+    - the structural stop lookback decides where the stop reference sits. It is a
+      strategy parameter and keeps its own value, whatever the chart shows.
+    Until 2026-08-18 the chart reused the stop lookback, so widening the view would
+    have moved the stop reference as a side effect.
+    """
 
     if chart is None or chart.get("live"):
         return chart
@@ -476,7 +486,8 @@ async def _enrich_trade_chart_context(
     interval = str(normalized_chart.get("interval", "5m"))
     interval_min = _INTERVAL_MINUTES.get(interval, 5)
     lookback = _structural_stop_lookback(settings, market)
-    target_start = opened_at - timedelta(minutes=interval_min * lookback)
+    pre_open = max(1, int(pre_open_candles if pre_open_candles is not None else lookback))
+    target_start = opened_at - timedelta(minutes=interval_min * pre_open)
     existing = _normalize_chart_candles(normalized_chart.get("candles", []))
     has_enough_context = bool(existing and existing[0][0] <= target_start + timedelta(minutes=interval_min))
     if normalized_chart.get("stop_reference") and has_enough_context:
@@ -486,7 +497,9 @@ async def _enrich_trade_chart_context(
         from backend.app.agent.signals.perp.binance_klines import BinanceKlineFeed
 
         closed_at = _parse_chart_datetime(normalized_chart.get("closed_at"))
-        limit = int(min(260, max(lookback + len(existing) + 5, lookback + 20)))
+        # 620 = 288 pre-open + the candles of a long trade + margin. Binance serves up
+        # to 1000 klines per request, so even the widest window stays a single call.
+        limit = int(min(620, max(pre_open + len(existing) + 5, pre_open + 20)))
         fetched = await asyncio.wait_for(
             BinanceKlineFeed(timeout_seconds=TRADE_DETAIL_FEED_TIMEOUT_SECONDS).fetch(
                 symbol=f"{asset}USDT",

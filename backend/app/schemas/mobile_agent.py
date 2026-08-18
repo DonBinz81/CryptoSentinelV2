@@ -137,7 +137,11 @@ class AgentMobileSettings(BaseModel):
     perp_fee_mode: str = Field(default="taker", pattern="^(taker|maker|none)$")
     spot_fee_mode: str = Field(default="all", pattern="^(all|none)$")
     # Candele successive alla chiusura mostrate nel grafico del trade. 0 = disattivato.
-    post_close_candles: int = Field(default=10, ge=0, le=50)
+    # Il massimo e' 288, cioe' 24h a 5m; il default resta 10 e si alza dal Setup.
+    post_close_candles: int = Field(default=10, ge=0, le=288)
+    # Candele precedenti all'apertura mostrate nel grafico. Governa SOLO la finestra
+    # grafica: il lookback dello stop strutturale resta separato e non va seguito qui.
+    chart_pre_open_candles: int = Field(default=20, ge=1, le=288)
 
     @model_validator(mode="after")
     def _check_leverage_range(self) -> "AgentMobileSettings":
