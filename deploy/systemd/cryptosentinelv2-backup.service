@@ -1,5 +1,8 @@
 [Unit]
 Description=CryptoSentinelV2 SQLite and runtime backup
+# A failed backup must be visible: this covers both a backup that could not be
+# produced and a database copy that does not pass the integrity check.
+OnFailure=cryptosentinelv2-backup-alert.service
 
 [Service]
 Type=oneshot

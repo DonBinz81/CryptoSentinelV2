@@ -220,10 +220,12 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |-- scripts/ - script installazione, backup SQLite/TWAK encrypted state e healthcheck liveness.
 |   |   |-- install_vps.sh - bootstrap Ubuntu/Debian da eseguire da `/opt/cryptosentinelv2/app`, senza segreti nel repo.
 |   |   |-- backup_sqlite.sh - backup DB SQLite, impostazioni runtime esportate (`agent_settings.json`, `runtime_state.tsv`), config versionate non segrete e stato TWAK cifrato. Non apre mai il DB di produzione: lo copia e verifica la copia con `integrity_check`; pubblica l'artefatto solo a successo e scrive sempre l'esito in `last_result.json`.
+|   |   |-- backup_alert.sh - notifica push critica quando il backup fallisce o la copia del DB non passa `integrity_check`. Riceve il token admin da EnvironmentFile e non lo stampa mai.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
 |       |-- cryptosentinelv2-backend.service - backend Uvicorn con restart automatico e hardening base.
-|       |-- cryptosentinelv2-backup.service / cryptosentinelv2-backup.timer - backup periodico ogni 6 ore.
+|       |-- cryptosentinelv2-backup.service / cryptosentinelv2-backup.timer - backup periodico ogni 6 ore, con `OnFailure=` verso l'unit di allarme.
+|       |-- cryptosentinelv2-backup-alert.service - allarme push sul fallimento del backup e sulla corruzione del database.
 |       `-- cryptosentinelv2-healthcheck.service / cryptosentinelv2-healthcheck.timer - liveness periodica ogni 60 secondi.
 |-- docs/ - documentazione progetto e review.
 |   |-- CURRENT_STRUCTURE.md - baseline pre-integrazione backend.

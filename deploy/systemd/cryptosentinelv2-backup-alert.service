@@ -1,0 +1,25 @@
+[Unit]
+Description=CryptoSentinelV2 backup failure alert
+# Started by OnFailure= on cryptosentinelv2-backup.service. It must not depend on
+# the backup unit, or it would be skipped exactly when it is needed.
+
+[Service]
+Type=oneshot
+User=cryptosentinelv2
+Group=cryptosentinelv2
+# Same order as the backend unit: the admin token is defined in both files and
+# the second one wins, so loading only the first would authenticate with a stale
+# value. systemd reads these files as root and passes the variables down, so the
+# service itself stays unprivileged and the 0600 permissions are untouched.
+EnvironmentFile=-/etc/cryptosentinelv2/backend.env
+EnvironmentFile=/opt/cryptosentinelv2/app/.env
+Environment=BACKUP_DIR=/var/backups/cryptosentinelv2
+ExecStart=/opt/cryptosentinelv2/app/deploy/scripts/backup_alert.sh
+UMask=0077
+
+# The alert only reads a result file and posts to the local API.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/cryptosentinelv2/app /var/backups/cryptosentinelv2
