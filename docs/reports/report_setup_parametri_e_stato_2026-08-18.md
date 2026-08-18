@@ -1,6 +1,6 @@
 # Setup: quattro parametri esposti e stato del pannello ricordato
 
-Data: 18 agosto 2026 · Branch: `claude/setup-minori` · Commit: `2d6639a`
+Data: 18 agosto 2026 · Branch: `claude/setup-minori` · Commit: `2d6639a`, `097d3bc`
 
 ## COSA
 
@@ -19,6 +19,18 @@ Due lavori minori sul pannello Setup dell'app, chiusi insieme.
 | N° candele per calcolo stop | Perp → PERP — STRATEGIA, sotto "Buffer Min/Max20 %" | `perp_structural_stop_lookback_candles` |
 | Trailing Stop Perp | Perp, sopra "Protezione profitto" | `perp_trailing_enabled` |
 | Liquidità minima $ | Generale → FILTRI GLOBALI, primo controllo | `min_pool_liquidity_usd` |
+
+3. **Le intestazioni di sezione sono colorate per significato.** Erano tutte
+   grigie e indistinguibili: in una pagina lunga non si capiva a colpo d'occhio
+   che tipo di parametri si stesse guardando.
+
+| tono | sezioni |
+|---|---|
+| rosso | Risk globale · Spot — risk · Perp — risk |
+| blu | Spot/Perp — strategia · **Posizioni aperte** (cio' che e' vivo adesso) |
+| verde | Spot/Perp — protezioni |
+| ambra | Filtri globali |
+| grigio | storici, wallet, watchlist: consultazione, non azione |
 
 ## COME
 
@@ -47,6 +59,13 @@ perché la sezione "Grafico trade" ha da stanotte un "Candele prima
 dell'apertura", e i due parametri sono diversi. Il trailing perp è stato
 allineato al gemello già esistente nella scheda Spot: **"Trailing Stop Perp"**.
 
+**Intestazioni:** nuovo componente `SectionTitle` (barretta verticale + testo
+colorato), scelto da David fra tre varianti guardate nell'anteprima. Il colore
+segue il **significato**, non il mercato: le linguette in alto dicono gia' se sei
+in Spot o Perp, mentre il colore dice cosa stai per toccare. Fuori dal Setup il
+colore acceso resta l'eccezione — se tutto fosse colorato, il colore sarebbe
+decorazione invece che indicazione.
+
 **File nuovo:** i 101 valori di partenza passano a
 `src/components/agentDefaults.ts`. Non è una scelta estetica: esportarli da un
 file di componenti rompe il ricaricamento rapido (`react-refresh`), ed erano da
@@ -63,6 +82,10 @@ esportare per montare il pannello nel banco di anteprima.
   ritrovati aperti. Prima si tornava a "Generale" con tutto richiuso.
 - **Posizioni verificate nel DOM**, non solo nel codice: ogni controllo nuovo con
   i suoi vicini sopra e sotto.
+- **Intestazioni verificate nel pannello reale** leggendo i colori calcolati dal
+  browser, non le classi CSS: "Filtri globali" ambra, "Risk globale" rosso, e
+  nella scheda Perp la sequenza rosso -> blu -> verde. Zero intestazioni rimaste
+  col vecchio stile grigio (19 su 19 convertite).
 - `npx tsc -b` (lo stesso della CI) pulito; ESLint ai **5 errori preesistenti**,
   nessuno introdotto.
 
@@ -101,4 +124,5 @@ Sono difetti latenti del backend, fuori dal perimetro di questa sessione.
 
 - `src/components/AgentTab.tsx` — quattro controlli, stato ricordato, −101 righe
 - `src/components/agentDefaults.ts` — valori di partenza (file nuovo)
+- `SectionTitle` in `AgentTab.tsx` — 19 intestazioni colorate per significato
 - Branch `claude/setup-minori`, commit `2d6639a`, da `main` `d70805a`
