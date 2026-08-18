@@ -219,7 +219,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |-- nginx/cryptosentinelv2.conf - template nginx per dashboard statica e proxy `/api/` verso backend locale.
 |   |-- scripts/ - script installazione, backup SQLite/TWAK encrypted state e healthcheck liveness.
 |   |   |-- install_vps.sh - bootstrap Ubuntu/Debian da eseguire da `/opt/cryptosentinelv2/app`, senza segreti nel repo.
-|   |   |-- backup_sqlite.sh - backup DB SQLite, config versionate non segrete e stato TWAK cifrato.
+|   |   |-- backup_sqlite.sh - backup DB SQLite, impostazioni runtime esportate (`agent_settings.json`, `runtime_state.tsv`), config versionate non segrete e stato TWAK cifrato. Non apre mai il DB di produzione: lo copia e verifica la copia con `integrity_check`; pubblica l'artefatto solo a successo e scrive sempre l'esito in `last_result.json`.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
 |       |-- cryptosentinelv2-backend.service - backend Uvicorn con restart automatico e hardening base.

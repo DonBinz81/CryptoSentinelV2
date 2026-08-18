@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# Backup of the SQLite database, of the runtime settings and of the versioned
+# config defaults.
+#
+# Safety rule (NOTE/54, 2026-08-18): this script never OPENS the production
+# database. The running service is the only process allowed to hold it; opening
+# it from a second process is what removed the -wal/-shm files under the live
+# backend and corrupted the database. Here the files are COPIED (cp reads a
+# file, it does not open a database) and every sqlite3 command runs against the
+# copy.
+#
+# The artifact is built in a staging directory and published only on success, so
+# a failed run can never leave behind a directory that looks like a backup.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/cryptosentinelv2/app}"
@@ -9,30 +21,114 @@ TWAK_HOME="${TWAK_HOME:-/home/cryptosentinelv2/.twak}"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 target_dir="$BACKUP_DIR/$timestamp"
-mkdir -p "$target_dir"
-chmod 700 "$BACKUP_DIR" "$target_dir"
+stage_dir="$BACKUP_DIR/.staging_$timestamp"
+status="failed"
+integrity="not_checked"
+db_bytes=0
+
+chmod 700 "$BACKUP_DIR"
+mkdir -p "$stage_dir"
+chmod 700 "$stage_dir"
+
+# Always publish the outcome, so a failure can never be silent.
+write_result() {
+    cat > "$BACKUP_DIR/last_result.json" <<EOF
+{"timestamp": "$timestamp", "status": "$status", "integrity": "$integrity", "db_bytes": $db_bytes}
+EOF
+    chmod 600 "$BACKUP_DIR/last_result.json"
+}
+
+on_exit() {
+    rc=$?
+    if [ "$status" = "failed" ]; then
+        rm -rf "$stage_dir"
+    fi
+    write_result
+    exit "$rc"
+}
+trap on_exit EXIT
+
+copy_database() {
+    cp "$DB_PATH" "$stage_dir/local.db"
+    if [ -f "$DB_PATH-wal" ]; then cp "$DB_PATH-wal" "$stage_dir/local.db-wal"; fi
+    if [ -f "$DB_PATH-shm" ]; then cp "$DB_PATH-shm" "$stage_dir/local.db-shm"; fi
+}
 
 if [ -f "$DB_PATH" ]; then
+    copy_database
+
     if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$DB_PATH" ".backup '$target_dir/local.db'"
+        # Consolidate the copy into a single file, then verify it. A hot copy can
+        # be inconsistent if a checkpoint ran while copying: retry once before
+        # declaring the backup unusable, to keep false alarms rare.
+        for attempt in 1 2; do
+            sqlite3 "$stage_dir/local.db" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+            # `|| true`: a corrupt database makes sqlite3 exit non-zero, and under
+            # `set -o pipefail` that would abort the run before the artifact can be
+            # kept and flagged. The failure is carried in $integrity instead.
+            integrity="$(sqlite3 "$stage_dir/local.db" 'PRAGMA integrity_check;' 2>&1 | head -1 || true)"
+            if [ "$integrity" = "ok" ]; then
+                break
+            fi
+            if [ "$attempt" = "1" ]; then
+                rm -f "$stage_dir/local.db" "$stage_dir/local.db-wal" "$stage_dir/local.db-shm"
+                sleep 5
+                copy_database
+            fi
+        done
+        rm -f "$stage_dir/local.db-wal" "$stage_dir/local.db-shm"
+
+        # The effective configuration lives only inside the database. Export it in
+        # readable form so it can be audited, diffed over time and used as the
+        # source of truth for analysis, without anyone opening the live database.
+        sqlite3 "$stage_dir/local.db" \
+            "SELECT key || char(9) || value FROM runtime_state ORDER BY key;" \
+            > "$stage_dir/runtime_state.tsv" 2>/dev/null || true
+        sqlite3 "$stage_dir/local.db" \
+            "SELECT value FROM runtime_state WHERE key = 'mobile_agent_settings';" \
+            > "$stage_dir/agent_settings.json" 2>/dev/null || true
+        if command -v python3 >/dev/null 2>&1 && [ -s "$stage_dir/agent_settings.json" ]; then
+            python3 -m json.tool "$stage_dir/agent_settings.json" \
+                > "$stage_dir/agent_settings.pretty.json" 2>/dev/null \
+                && mv "$stage_dir/agent_settings.pretty.json" "$stage_dir/agent_settings.json" \
+                || rm -f "$stage_dir/agent_settings.pretty.json"
+        fi
+        chmod 600 "$stage_dir/runtime_state.tsv" "$stage_dir/agent_settings.json" 2>/dev/null || true
     else
-        cp -p "$DB_PATH" "$target_dir/local.db"
+        integrity="sqlite3_missing"
     fi
+
+    db_bytes="$(stat -c %s "$stage_dir/local.db" 2>/dev/null || echo 0)"
 fi
 
 # Export only versioned non-secret defaults. Local instance config and env files
 # remain outside the backup artifact produced by this repo script.
 if [ -d "$APP_DIR/configs" ]; then
-    mkdir -p "$target_dir/configs"
+    mkdir -p "$stage_dir/configs"
     find "$APP_DIR/configs" -maxdepth 1 -type f -name '*.yaml' ! -name 'instance.yaml' \
-        -exec cp -p {} "$target_dir/configs/" \;
+        -exec cp -p {} "$stage_dir/configs/" \;
 fi
 
 # Preserve encrypted TWAK headless state if present. Do not print contained paths
 # or file names in normal output; this archive is stored with 0600 permissions.
 if [ -d "$TWAK_HOME" ]; then
-    tar -C "$TWAK_HOME" -czf "$target_dir/twak-state.tar.gz" .
-    chmod 600 "$target_dir/twak-state.tar.gz"
+    tar -C "$TWAK_HOME" -czf "$stage_dir/twak-state.tar.gz" .
+    chmod 600 "$stage_dir/twak-state.tar.gz"
 fi
 
-find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +"$RETENTION_DAYS" -exec rm -rf {} +
+# An unreadable copy is still published: when the live database is corrupt this
+# artifact may be the only surviving material. It is flagged, and the non-zero
+# exit makes the timer report a failure instead of passing silently.
+if [ -f "$stage_dir/local.db" ] && [ "$integrity" != "ok" ] && [ "$integrity" != "sqlite3_missing" ]; then
+    status="integrity_failed"
+    mv "$stage_dir" "$target_dir"
+    : > "$target_dir/INTEGRITY_FAILED"
+    echo "backup_sqlite: integrity check failed on the database copy: $integrity" >&2
+    exit 1
+fi
+
+status="ok"
+mv "$stage_dir" "$target_dir"
+
+find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '2*' -mtime +"$RETENTION_DAYS" \
+    -exec rm -rf {} +
