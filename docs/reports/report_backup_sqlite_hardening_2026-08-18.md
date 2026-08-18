@@ -71,6 +71,7 @@ Tre prove eseguite sulla VPS **su dati di test**, prima di qualunque deploy:
 | Database sano | exit 0, artefatto completo e verificato | ✅ `status: ok`, `integrity: ok`, `local.db` 11,5 MB consolidato, `agent_settings.json` 3.816 byte, `runtime_state.tsv` 5.651 byte, `configs/` |
 | Database corrotto (usato il file reale dell'incidente) | exit 1, artefatto **conservato** e marcato | ✅ `status: integrity_failed`, file `INTEGRITY_FAILED` presente, artefatto preservato |
 | Errore reale (database illeggibile) | exit ≠ 0, **nessun** artefatto lasciato a terra | ✅ `status: failed`, solo `last_result.json`, nessuna staging residua |
+| Database inesistente | exit ≠ 0, nessun artefatto | ✅ `status: db_missing` |
 
 La prima esecuzione della prova con database corrotto ha rivelato un **difetto
 nella prima stesura**: sotto `set -o pipefail` il codice di uscita di `sqlite3`

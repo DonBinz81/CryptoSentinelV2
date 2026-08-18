@@ -40,7 +40,9 @@ EOF
 
 on_exit() {
     rc=$?
-    if [ "$status" = "failed" ]; then
+    # Keep the staging directory only when it has been published: "ok" and
+    # "integrity_failed" are the two outcomes that produce an artifact.
+    if [ "$status" != "ok" ] && [ "$status" != "integrity_failed" ]; then
         rm -rf "$stage_dir"
     fi
     write_result
@@ -99,6 +101,13 @@ if [ -f "$DB_PATH" ]; then
     fi
 
     db_bytes="$(stat -c %s "$stage_dir/local.db" 2>/dev/null || echo 0)"
+else
+    # A backup without the database is not a backup. Fail loudly rather than
+    # publish an artifact that looks complete: a wrong path, a renamed file or an
+    # unmounted volume would otherwise be reported as a successful run.
+    status="db_missing"
+    echo "backup_sqlite: no database found at the configured path" >&2
+    exit 1
 fi
 
 # Export only versioned non-secret defaults. Local instance config and env files
