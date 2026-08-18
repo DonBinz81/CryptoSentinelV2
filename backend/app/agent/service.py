@@ -221,6 +221,7 @@ class AgentService:
             perp_ratchet_trailing_pct=getattr(self.settings, "perp_ratchet_trailing_pct", 1.0),
             perp_time_stop_hours=self.settings.perp_time_stop_hours,
             post_close_candles=10,
+            chart_pre_open_candles=getattr(self.settings, "chart_pre_open_candles", 20),
         )
 
     def status(self) -> dict:

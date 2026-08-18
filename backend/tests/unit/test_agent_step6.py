@@ -2522,3 +2522,164 @@ async def test_start_time_kline_fetch_does_not_populate_latest_cache(monkeypatch
     assert len(candles) == 1
     assert "startTime" in calls[0]
     assert get_kline_cache_entry(market="spot", symbol="BTCUSDT", interval="5m") is None
+
+
+@pytest.mark.asyncio
+async def test_chart_pre_open_window_is_independent_from_stop_lookback(monkeypatch) -> None:
+    """The chart can reach back 24h without moving the structural stop reference.
+
+    Before 2026-08-18 the chart reused the stop lookback, so widening the view would
+    have changed where the stop reference sits. The two windows are now separate.
+    """
+
+    opened_at = datetime(2026, 7, 19, 10, 0, tzinfo=UTC)
+    closed_at = datetime(2026, 7, 19, 10, 30, tzinfo=UTC)
+    pre_open = 288  # 24h at 5m
+    expected_start = opened_at - timedelta(minutes=5 * pre_open)
+    chart = {
+        "interval": "5m",
+        "market": "spot",
+        "side": "long",
+        "entry_price": "100",
+        "exit_price": "102",
+        "stop_loss": "92",
+        "opened_at": opened_at.isoformat(),
+        "closed_at": closed_at.isoformat(),
+        "candles": [
+            {"t": opened_at.isoformat(), "o": 100, "h": 101, "l": 99, "c": 100.5},
+            {"t": (opened_at + timedelta(minutes=5)).isoformat(), "o": 100.5, "h": 102, "l": 100, "c": 101.5},
+        ],
+    }
+    calls: list[dict] = []
+
+    class FakeKlineFeed:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def fetch(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                Candle(
+                    timestamp=expected_start + timedelta(minutes=5 * index),
+                    open=100, high=101, low=98.0 + index / 1000, close=100.5, volume=1,
+                )
+                for index in range(pre_open + 10)
+            ]
+
+    monkeypatch.setattr(binance_klines, "BinanceKlineFeed", FakeKlineFeed)
+
+    enriched = await view_routes._enrich_trade_chart_context(
+        chart, "BTC", "spot", "spot", "long", settings(), pre_open
+    )
+
+    assert calls[0]["start_time"] == expected_start
+    # The old cap of 260 would have truncated a 24h window.
+    assert calls[0]["limit"] > 260
+    assert calls[0]["limit"] <= 620
+    assert enriched is not None
+    assert enriched["candles"][0]["t"] == expected_start.isoformat()
+    # The stop reference still counts on the strategy lookback (20), not on 288.
+    assert enriched["stop_reference"]["pre_candles"] == 20
+
+
+@pytest.mark.asyncio
+async def test_chart_pre_open_defaults_to_stop_lookback(monkeypatch) -> None:
+    """Without an explicit window the behaviour is the one from before the change."""
+
+    opened_at = datetime(2026, 7, 19, 10, 0, tzinfo=UTC)
+    closed_at = datetime(2026, 7, 19, 10, 30, tzinfo=UTC)
+    expected_start = opened_at - timedelta(minutes=100)  # 20 candles at 5m
+    chart = {
+        "interval": "5m",
+        "market": "spot",
+        "side": "long",
+        "entry_price": "100",
+        "exit_price": "102",
+        "stop_loss": "92",
+        "opened_at": opened_at.isoformat(),
+        "closed_at": closed_at.isoformat(),
+        "candles": [{"t": opened_at.isoformat(), "o": 100, "h": 101, "l": 99, "c": 100.5}],
+    }
+    calls: list[dict] = []
+
+    class FakeKlineFeed:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def fetch(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                Candle(
+                    timestamp=expected_start + timedelta(minutes=5 * index),
+                    open=100, high=101, low=98.0, close=100.5, volume=1,
+                )
+                for index in range(30)
+            ]
+
+    monkeypatch.setattr(binance_klines, "BinanceKlineFeed", FakeKlineFeed)
+
+    enriched = await view_routes._enrich_trade_chart_context(
+        chart, "BTC", "spot", "spot", "long", settings()
+    )
+
+    assert calls[0]["start_time"] == expected_start
+    assert enriched is not None
+
+
+@pytest.mark.asyncio
+async def test_post_close_candles_work_for_a_trade_closed_days_ago(monkeypatch) -> None:
+    """Interval recovery: the fetch starts at the close, however old the trade is."""
+
+    closed_at = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    now = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)  # 18 days later
+    chart = {
+        "interval": "5m",
+        "opened_at": (closed_at - timedelta(minutes=30)).isoformat(),
+        "closed_at": closed_at.isoformat(),
+        "candles": [{"t": closed_at.isoformat(), "o": 100, "h": 101, "l": 99, "c": 100}],
+    }
+    calls: list[dict] = []
+
+    class FakeKlineFeed:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def fetch(self, **kwargs):
+            calls.append(kwargs)
+            return [
+                Candle(
+                    timestamp=closed_at + timedelta(minutes=5 * (index + 1)),
+                    open=100, high=101, low=99, close=100, volume=1,
+                )
+                for index in range(288)
+            ]
+
+    monkeypatch.setattr(binance_klines, "BinanceKlineFeed", FakeKlineFeed)
+    monkeypatch.setattr(view_routes, "datetime", SimpleNamespace(
+        now=lambda _tz: now,
+        fromisoformat=datetime.fromisoformat,
+    ))
+
+    post = await view_routes._fetch_post_close_candles(chart, "BTC", "spot", count=288)
+
+    assert calls[0]["start_time"] == closed_at + timedelta(milliseconds=1)
+    assert len(post) == 288  # 24h at 5m, the new maximum
+    assert post[0]["t"] == (closed_at + timedelta(minutes=5)).isoformat()
+
+
+def test_chart_window_settings_accept_24h_and_reject_more() -> None:
+    """288 candles = 24h at 5m is the agreed ceiling for both windows."""
+
+    from backend.app.schemas.mobile_agent import AgentMobileSettings
+
+    widest = AgentMobileSettings(post_close_candles=288, chart_pre_open_candles=288)
+    assert widest.post_close_candles == 288
+    assert widest.chart_pre_open_candles == 288
+
+    defaults = AgentMobileSettings()
+    assert defaults.post_close_candles == 10
+    assert defaults.chart_pre_open_candles == 20
+
+    for field, value in (("post_close_candles", 289), ("chart_pre_open_candles", 289), ("chart_pre_open_candles", 0)):
+        with pytest.raises(ValueError):
+            AgentMobileSettings(**{field: value})

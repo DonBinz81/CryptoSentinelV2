@@ -18,3 +18,7 @@ risk:
   minimum_trades_per_day: 1
   dry_run_capital_usd: 200.0
   min_trade_size_usd: 7.0
+  # Candles shown before the trade opening in the position chart. Display only:
+  # the structural stop keeps its own lookback, which must not follow this value.
+  # 20 candles = the current behaviour (~1h40 at 5m); 288 = 24h at 5m.
+  chart_pre_open_candles: 20

@@ -178,6 +178,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "minimum_trades_per_day": "minimum_trades_per_day",
         "dry_run_capital_usd": "dry_run_capital_usd",
         "min_trade_size_usd": "min_trade_size_usd",
+        "chart_pre_open_candles": "chart_pre_open_candles",
     },
     "spot": {
         "confidence_threshold": "spot_confidence_threshold",
@@ -552,6 +553,9 @@ class Settings(BaseSettings):
     minimum_trades_per_day: int = Field(default=1, alias="MINIMUM_TRADES_PER_DAY")
     dry_run_capital_usd: float = Field(default=1000.0, alias="DRY_RUN_CAPITAL_USD")
     min_trade_size_usd: float = Field(default=7.0, alias="MIN_TRADE_SIZE_USD")
+    # Chart display only: how far before the opening the position chart reaches back.
+    # Kept separate from the structural stop lookback, which serves a different purpose.
+    chart_pre_open_candles: int = Field(default=20, alias="CHART_PRE_OPEN_CANDLES")
     risk_capital_per_trade_pct: float = Field(default=6.0, alias="RISK_CAPITAL_PER_TRADE_PCT")
     risk_per_trade_pct: float = Field(default=1.5, alias="RISK_PER_TRADE_PCT")
     risk_max_open_positions: int = Field(default=3, alias="RISK_MAX_OPEN_POSITIONS")
