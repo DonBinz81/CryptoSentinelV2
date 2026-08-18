@@ -219,22 +219,24 @@ export const TradeCandleChartLW: FC<{
     const MIN_GAP_PX = 10;
     const placeInlineLabels = () => {
       const placed = model.levels
-        .map((level) => ({
-          key: level.key,
-          text:
-            level.key === 'trl' && trailingGapPct != null
-              ? `${level.tag} ${trailingGapPct}`
-              : level.tag,
-          color: level.color,
-          bold: KEY_LEVELS.has(level.key) || level.strong,
-          top: series.priceToCoordinate(level.price),
-          lane: 0,
-        }))
-        .filter(
-          (label): label is {
-            key: string; text: string; color: string; bold: boolean; top: number; lane: number;
-          } => label.top != null,
-        )
+        .map((level) => {
+          // priceToCoordinate torna null se il livello cade fuori dall'area
+          // disegnata: in quel caso la sigla non si mostra affatto.
+          const coordinate = series.priceToCoordinate(level.price);
+          if (coordinate == null) return null;
+          return {
+            key: level.key as string,
+            text:
+              level.key === 'trl' && trailingGapPct != null
+                ? `${level.tag} ${trailingGapPct}`
+                : level.tag,
+            color: level.color,
+            bold: KEY_LEVELS.has(level.key) || level.strong,
+            top: coordinate as number,
+            lane: 0,
+          };
+        })
+        .filter((label): label is NonNullable<typeof label> => label != null)
         .sort((a, b) => a.top - b.top);
       // Livelli quasi coincidenti (tipico di E e BE): la sigla NON si sposta in
       // alto — resterebbe a un'altezza che non e' quella della sua linea — ma si
