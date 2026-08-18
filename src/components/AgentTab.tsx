@@ -45,6 +45,7 @@ import {
 import { hapticLight } from '../utils/haptics';
 import { TradeCandleChartLW } from './TradeCandleChartLW';
 import { LEVEL_COLORS } from './tradeChartModel';
+import { defaultSettings } from './agentDefaults';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -108,109 +109,6 @@ const riskGuardrailText: Record<string, { title: string; detail: string }> = {
     title: 'Trading bloccato: equity minima',
     detail: 'Il capitale è sotto il floor di sicurezza. Le nuove entrate sono sospese.',
   },
-};
-
-const defaultSettings: AgentMobileSettings = {
-  mode: 'conservative',
-  markets_enabled: 'both',
-  execution_mode: 'dry_run',
-  network: 'testnet',
-  test_scaling_pct: 10,
-  operating_hours_utc: '00:00-23:59',
-  drawdown_alert_enabled: true,
-  daily_loss_limit_pct: -8,
-  drawdown_cap_pct: -15,
-  min_pool_liquidity_usd: 50000,
-  market_reversal_filter_enabled: true,
-  spot_market_reversal_filter_enabled: true,
-  perp_market_reversal_filter_enabled: false,
-  spot_breakeven_enabled: true,
-  perp_breakeven_enabled: true,
-  spot_trailing_enabled: true,
-  perp_trailing_enabled: true,
-  spot_time_stop_enabled: false,
-  perp_time_stop_enabled: false,
-  perp_trend_shock_enabled: true,
-  perp_trend_shock_adx_threshold: 25,
-  perp_trend_shock_natr_percentile: 90,
-  perp_trend_shock_volume_threshold: 2.0,
-  perp_trend_shock_recovery_confirmations: 3,
-  perp_smart_sl_enabled: true,
-  perp_smart_sl_l1_frac: 0.333,
-  perp_smart_sl_l2_frac: 0.666,
-  perp_smart_sl_split_l1: 0.25,
-  perp_smart_sl_split_l2: 0.55,
-  perp_smart_sl_split_l3: 0.20,
-  perp_smart_sl_rebuy_mode: 'above_entry',
-  perp_smart_sl_rebuy_above_entry_pct: 100,
-  perp_smart_sl_split_l1_r2: 0.75,
-  perp_smart_sl_split_l2_r2: 0.20,
-  perp_smart_sl_split_l3_r2: 0.05,
-  perp_smart_sl_delta_l1: 0.08,
-  perp_smart_sl_delta_l2: 0.16,
-  perp_smart_sl_confirmation_candles: 2,
-  perp_smart_sl_max_reentries: 1,
-  perp_smart_sl_tp_adjust_after_rebuy: true,
-  perp_smart_sl_tp_recovery_delta_pct: 7,
-  spot_breakeven_mode: 'atr' as const,
-  perp_breakeven_mode: 'atr' as const,
-  spot_sl_mode: 'atr' as const,
-  perp_sl_mode: 'atr' as const,
-  spot_structural_stop_lookback_candles: 20,
-  spot_structural_stop_buffer_pct: 1.10,
-  perp_structural_stop_lookback_candles: 20,
-  perp_structural_stop_buffer_pct: 1.10,
-  perp_min_rr: 1.2,
-  perp_tp1_atr_multiplier: 2.5,
-  perp_tp2_atr_multiplier: 4.0,
-  spot_capital_per_trade_pct: 6,
-  spot_per_trade_pct: 1.5,
-  spot_max_open_positions: 3,
-  spot_max_exposure_pct: 30,
-  spot_cooldown_minutes: 30,
-  spot_max_slippage_pct: 1,
-  perp_capital_per_trade_pct: 4,
-  perp_per_trade_pct: 1.5,
-  perp_max_open_positions: 5,
-  perp_max_exposure_pct: 20,
-  perp_cooldown_minutes: 15,
-  perp_max_slippage_pct: 0.5,
-  perp_fixed_margin_enabled: false,
-  perp_fixed_margin_usd: 50,
-  capital_per_trade_pct: 6,
-  per_trade_pct: 1.5,
-  max_open_positions: 3,
-  max_total_exposure_pct: 30,
-  max_slippage_pct: 1,
-  cooldown_minutes: 30,
-  spot_confidence_threshold: 0.7,
-  spot_volatility_trigger_pct: 3,
-  spot_relative_volume_threshold: 1.8,
-  spot_atr_stop_multiplier: 1.5,
-  spot_trailing_distance_pct: 2,
-  spot_partial_take_profit_pct: 50,
-  spot_tp1_close_pct: 50,
-  spot_time_stop_hours: 6,
-  perp_direction_mode: 'long_short',
-  perp_min_leverage: 4,
-  perp_max_leverage: 40,
-  perp_value_area_pct: 68,
-  perp_atr_stop_multiplier: 0.8,
-  perp_trailing_mode: 'largo' as const,
-  perp_trailing_pnl_pct: 0,
-  perp_protection_mode: 'trailing' as const,
-  perp_profit_lock_steps: [[0.5, 0.25], [0.7, 0.5], [0.95, 0.8]] as Array<[number, number]>,
-  perp_ratchet_breakeven_pct: 50,
-  perp_ratchet_breakeven_after_step: 3,
-  perp_ratchet_run_beyond_tp2: true,
-  perp_ratchet_trailing_pct: 1,
-  perp_breakeven_min_profit_usd: 0,
-  perp_tp1_close_pct: 70,
-  perp_time_stop_hours: 8,
-  perp_fee_mode: 'taker' as const,
-  spot_fee_mode: 'all' as const,
-  post_close_candles: 10,
-  chart_pre_open_candles: 20,
 };
 
 const AGENT_REFRESH_MS = 45_000;
@@ -644,12 +542,17 @@ const HelpTip: FC<{ text: string; top?: boolean }> = ({ text, top }) => {
 // partono chiuse, così la scheda Perp resta leggibile senza scorrere decine di
 // campi che si toccano una volta ogni tanto.
 const Collapsible: FC<{ title: string; count: number; children: React.ReactNode }> = ({ title, count, children }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => agentCache.openBlocks.includes(title));
+  const toggle = () => setOpen((v) => !v);
+  useEffect(() => {
+    const rest = agentCache.openBlocks.filter((t) => t !== title);
+    agentCache.openBlocks = open ? [...rest, title] : rest;
+  }, [open, title]);
   return (
     <div className="rounded-lg border border-dark-700">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
       >
         <span className="text-sm font-semibold text-white">{title}</span>
@@ -1566,7 +1469,7 @@ const SETUP_TABS: Array<{ id: SetupTab; label: string }> = [
   { id: 'sistema', label: 'Sistema' },
 ];
 
-const SetupPane: FC<{
+export const SetupPane: FC<{
   settings: AgentMobileSettings;
   onSettings: (settings: AgentMobileSettings) => void;
   adminToken: string;
@@ -1600,7 +1503,8 @@ const SetupPane: FC<{
   const patch = (partial: Partial<AgentMobileSettings>) => onSettings({ ...settings, ...partial });
   // Sotto-schede del setup: separano i parametri per mercato (stesso schema di CoinsPane).
   // I settings restano un unico oggetto: cambiare scheda non tocca né i valori né il dirty.
-  const [setupTab, setSetupTab] = useState<SetupTab>('generale');
+  const [setupTab, setSetupTab] = useState<SetupTab>(agentCache.setupTab);
+  useEffect(() => { agentCache.setupTab = setupTab; }, [setupTab]);
   const [equityInput, setEquityInput] = useState('');
   const equityValue = Number(equityInput);
   const equityValid = equityInput.trim() !== '' && Number.isFinite(equityValue) && equityValue !== 0;
@@ -1793,6 +1697,9 @@ const SetupPane: FC<{
 
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Filtri globali</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <NumberInput label="Liquidità minima $" help={'Soglia di liquidità sotto la quale una coin viene scartata: sotto questa cifra il libro degli ordini è troppo sottile e il prezzo scivola quando si entra o si esce.'} value={settings.min_pool_liquidity_usd} step={1000} onChange={(min_pool_liquidity_usd) => patch({ min_pool_liquidity_usd })} />
+        </div>
         <ToggleInput
           label="Filtro inversione mercato — Spot"
           help="Blocca le nuove entrate spot quando il mercato sta girando contro la direzione del segnale. Sullo spot ha senso: la strategia segue il trend, e questo evita di comprare proprio mentre si ribalta."
@@ -1852,6 +1759,7 @@ const SetupPane: FC<{
           <NumberInput label="Rel volume" help={'Quante volte il volume deve superare la sua media per confermare il segnale. A 1.5 serve volume una volta e mezza il normale: filtra i movimenti senza partecipazione.'} value={settings.spot_relative_volume_threshold} step={0.1} onChange={(spot_relative_volume_threshold) => patch({ spot_relative_volume_threshold })} />
           <NumberInput label="ATR stop" help={'Distanza dello stop loss dall\'ingresso, misurata in ATR (la volatilità media). Più alto significa stop più largo: meno stop presi per caso, ma perdite più grandi quando scatta.'} value={settings.spot_atr_stop_multiplier} step={0.1} onChange={(spot_atr_stop_multiplier) => patch({ spot_atr_stop_multiplier })} />
           <NumberInput label="Buffer Min20 %" help={'Cuscinetto sotto il minimo delle ultime candele, quando lo stop è di tipo strutturale. Serve a non farsi prendere lo stop per un soffio.'} value={settings.spot_structural_stop_buffer_pct} step={0.1} onChange={(spot_structural_stop_buffer_pct) => patch({ spot_structural_stop_buffer_pct })} />
+          <NumberInput label="N° candele per calcolo stop" help={'Su quante candele cercare il minimo che fa da stop strutturale. Poche candele = stop vicino, esce prima; molte = stop largo, lascia respirare. Nessun rapporto con le candele mostrate nel grafico.'} value={settings.spot_structural_stop_lookback_candles} step={1} onChange={(spot_structural_stop_lookback_candles) => patch({ spot_structural_stop_lookback_candles: Math.round(spot_structural_stop_lookback_candles) })} />
           <NumberInput label="Chiudi a TP1 %" help={'Quanta parte della posizione chiudere al primo obiettivo. Al 50% incassi metà e lasci correre il resto.'} value={settings.spot_tp1_close_pct} step={5} onChange={(spot_tp1_close_pct) => patch({ spot_tp1_close_pct })} />
           <NumberInput label="Time Stop ore" help={'Dopo quante ore chiudere una posizione che non è andata né a target né a stop. Libera capitale bloccato in operazioni che non si muovono.'} value={settings.spot_time_stop_hours} step={1} onChange={(spot_time_stop_hours) => patch({ spot_time_stop_hours: Math.round(spot_time_stop_hours) })} />
           <SelectInput label="Fee mode (dry-run)" help={'Quali costi simulare nel dry run:\n\nSwap fee + Slippage — realistico, 0.15%\nNessuna — strategia lorda, senza costi'} value={settings.spot_fee_mode} onChange={(v) => patch({ spot_fee_mode: v as 'all' | 'none' })} options={[
@@ -1929,9 +1837,18 @@ const SetupPane: FC<{
           <NumberInput label="Value area %" help={'Quanta parte del volume definisce la zona di prezzo dove il mercato ha scambiato di più. Il segnale nasce ai bordi di questa zona.'} value={settings.perp_value_area_pct} onChange={(perp_value_area_pct) => patch({ perp_value_area_pct })} />
           <NumberInput label="ATR stop" help={'Distanza dello stop dall\'ingresso in ATR, quando lo stop è di tipo ATR. Più alto, stop più largo.'} value={settings.perp_atr_stop_multiplier} step={0.1} onChange={(perp_atr_stop_multiplier) => patch({ perp_atr_stop_multiplier })} />
           <NumberInput label="Buffer Min/Max20 %" help={'Cuscinetto oltre il minimo (o massimo) recente, quando lo stop è strutturale. Evita di farsi prendere lo stop per un soffio.'} value={settings.perp_structural_stop_buffer_pct} step={0.1} onChange={(perp_structural_stop_buffer_pct) => patch({ perp_structural_stop_buffer_pct })} />
+          <NumberInput label="N° candele per calcolo stop" help={'Su quante candele cercare il minimo (o massimo) che fa da stop strutturale. Poche candele = stop vicino, esce prima; molte = stop largo, lascia respirare. Nessun rapporto con le candele mostrate nel grafico.'} value={settings.perp_structural_stop_lookback_candles} step={1} onChange={(perp_structural_stop_lookback_candles) => patch({ perp_structural_stop_lookback_candles: Math.round(perp_structural_stop_lookback_candles) })} />
           <NumberInput label="Filtro R:R min (0=off)" help={'Rapporto minimo fra guadagno atteso al primo obiettivo e perdita allo stop. A 1.2 servono almeno 1.2 di guadagno per 1 di rischio, altrimenti il segnale viene scartato. Zero disattiva il filtro.'} value={settings.perp_min_rr} step={0.1} onChange={(perp_min_rr) => patch({ perp_min_rr })} />
           <NumberInput label="TP1 (× ATR)" help={'Distanza del primo obiettivo dall\'ingresso, in ATR. Più basso significa incassare prima ma meno.'} value={settings.perp_tp1_atr_multiplier} step={0.1} onChange={(perp_tp1_atr_multiplier) => patch({ perp_tp1_atr_multiplier })} />
           <NumberInput label="TP2 (× ATR)" help={'Distanza del secondo obiettivo, in ATR. È il traguardo del residuo dopo il primo incasso.'} value={settings.perp_tp2_atr_multiplier} step={0.1} onChange={(perp_tp2_atr_multiplier) => patch({ perp_tp2_atr_multiplier })} />
+          <div className="col-span-2">
+            <ToggleInput
+              label="Trailing Stop Perp"
+              help={'Interruttore generale del trailing sul perp: da spento, lo stop non insegue mai il prezzo, nemmeno con la protezione qui sotto impostata su Trailing ATR. Il Profit Lock continua invece a funzionare.'}
+              checked={settings.perp_trailing_enabled}
+              onChange={(perp_trailing_enabled) => patch({ perp_trailing_enabled })}
+            />
+          </div>
           <SelectInput label="Protezione profitto (post-TP1)" help={'Come proteggere il profitto dopo il primo incasso:\n\nOff — nessuna protezione\nTrailing ATR — lo stop insegue il prezzo\nProfit Lock — uscite parziali a scalini fra i due obiettivi'} value={settings.perp_protection_mode} onChange={(v) => patch({ perp_protection_mode: v as 'off' | 'trailing' | 'profit_lock' })} options={[
             { value: 'off', label: 'Off — solo breakeven' },
             { value: 'trailing', label: 'Trailing ATR' },
@@ -2378,10 +2295,16 @@ const agentCache: {
   execWallets: ExecutionWalletsResponse | null;
   claudeUsage: ClaudeUsageView | null;
   loaded: boolean;
+  // Stato del setup: sotto-scheda attiva e blocchi richiudibili aperti. Sta qui e
+  // non in useState perche' il pannello viene smontato a ogni cambio di vista, e
+  // tornando indietro si ripartiva sempre da "Generale" con tutto richiuso.
+  setupTab: SetupTab;
+  openBlocks: string[];
 } = {
   pane: 'spot', status: null, spot: null, perp: null, global: null, equity: null,
   equityRange: '24h', decisions: null, assetBreakdown: null, settings: null,
   execWallets: null, claudeUsage: null, loaded: false,
+  setupTab: 'generale', openBlocks: [],
 };
 
 const AgentTab: FC<AgentTabProps> = ({
