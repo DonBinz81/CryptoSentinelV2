@@ -264,7 +264,7 @@ export const TradeCandleChartLW: FC<{
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [model, height]);
+  }, [model, height, trailingGapPct]);
 
   if (model === null) {
     return <p className="text-xs text-gray-500">Grafico non disponibile per questo trade.</p>;

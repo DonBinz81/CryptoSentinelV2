@@ -43,7 +43,8 @@ import {
   verifyAdminToken,
 } from '../services/agentApi';
 import { hapticLight } from '../utils/haptics';
-import { TradeCandleChart } from './TradeCandleChart';
+import { TradeCandleChartLW } from './TradeCandleChartLW';
+import { LEVEL_COLORS } from './tradeChartModel';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -2175,7 +2176,7 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               <h3 className="text-sm font-semibold text-white">{detail.chart.live ? 'Grafico posizione (live)' : 'Grafico del trade'}</h3>
               <span className="text-xs text-gray-500">{detail.chart.interval}</span>
             </div>
-            <TradeCandleChart
+            <TradeCandleChartLW
               chart={detail.chart}
               breakeven={detail.breakeven_price}
               trailing={detail.trailing_stop}
@@ -2183,17 +2184,19 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               smartSlState={detail.smart_sl_state_summary}
             />
             <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
-              <span>⚪ Entry</span>
+              {/* La legenda prende i colori dalla stessa palette del grafico: se un
+                  livello cambia tinta, qui non resta indietro. */}
+              <span style={{ color: LEVEL_COLORS.entry }}>⬆ E = ingresso</span>
               {/* Il marker segna il prezzo del trade: su una chiusura è l'uscita, non
                   il prezzo corrente, anche quando le candele continuano a scorrere. */}
-              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
-              <span style={{ color: '#fca5a5' }}>- - SL</span>
-              {detail.smart_sl_levels && <span style={{ color: '#fb923c' }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
-              {detail.chart.stop_reference && <span className="text-purple-300">- - SL ref</span>}
-              {detail.breakeven_price != null && <span style={{ color: '#fcd34d' }}>- - Breakeven</span>}
-              {detail.trailing_stop != null && <span style={{ color: '#7dd3fc' }}>- - Trailing/Lock</span>}
-              <span style={{ color: '#86efac' }}>- - TP1</span>
-              <span style={{ color: '#5eead4' }}>- - TP2</span>
+              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>⬇ {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
+              <span style={{ color: LEVEL_COLORS.sl }}>- - SL</span>
+              {detail.smart_sl_levels && <span style={{ color: LEVEL_COLORS.s2 }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
+              {detail.chart.stop_reference && <span style={{ color: LEVEL_COLORS.ref }}>▮ candela dello stop</span>}
+              {detail.breakeven_price != null && <span style={{ color: LEVEL_COLORS.be }}>- - BE = pareggio</span>}
+              {detail.trailing_stop != null && <span style={{ color: LEVEL_COLORS.trl }}>- - TRL = trailing</span>}
+              <span style={{ color: LEVEL_COLORS.tp1 }}>- - TP1</span>
+              <span style={{ color: LEVEL_COLORS.tp2 }}>- - TP2</span>
             </div>
           </section>
         )}
