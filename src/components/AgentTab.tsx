@@ -43,6 +43,8 @@ import {
   verifyAdminToken,
 } from '../services/agentApi';
 import { hapticLight } from '../utils/haptics';
+import { TradeCandleChartLW } from './TradeCandleChartLW';
+import { LEVEL_COLORS } from './tradeChartModel';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -208,6 +210,7 @@ const defaultSettings: AgentMobileSettings = {
   perp_fee_mode: 'taker' as const,
   spot_fee_mode: 'all' as const,
   post_close_candles: 10,
+  chart_pre_open_candles: 20,
 };
 
 const AGENT_REFRESH_MS = 45_000;
@@ -1820,7 +1823,8 @@ const SetupPane: FC<{
       <section className="space-y-3">
         <h3 className="px-1 text-xs font-semibold uppercase text-gray-500">Grafico trade</h3>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde.'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde. Massimo 288 (24 ore a 5 minuti).'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele prima dell'apertura" help={'Quante candele di contesto mostrare prima dell\'ingresso del trade. Massimo 288 (24 ore a 5 minuti). Non tocca il calcolo dello stop, solo il grafico.'} value={settings.chart_pre_open_candles} step={1} onChange={(chart_pre_open_candles) => patch({ chart_pre_open_candles: Math.round(chart_pre_open_candles) })} />
         </div>
       </section>
         </>
@@ -2132,203 +2136,6 @@ const SetupPane: FC<{
   );
 };
 
-const TradeCandleChart: FC<{
-  chart: NonNullable<TradeDetail['chart']>;
-  breakeven?: string | null;
-  trailing?: string | null;
-  smartSlLevels?: string[] | null;
-  smartSlState?: { status: string }[] | null;
-}> = ({ chart, breakeven, trailing, smartSlLevels, smartSlState }) => {
-  const candles = chart.candles ?? [];
-  const postClose = chart.post_close_candles ?? [];
-  const allCandles = [...candles, ...postClose];
-  if (allCandles.length < 2) {
-    return <p className="text-xs text-gray-500">Grafico non disponibile per questo trade.</p>;
-  }
-  // Geometria: area di plot + margine destro per i prezzi (Y) e inferiore per gli orari (X).
-  const W = Math.max(340, allCandles.length * 8 + 58);
-  const H = 200;
-  const padX = 6;
-  const padTop = 10;
-  const axisW = 46;
-  const axisH = 16;
-  const plotR = W - axisW;
-  const plotB = H - axisH;
-  const entry = Number(chart.entry_price);
-  const exit = Number(chart.exit_price);
-  const sl = chart.stop_loss != null ? Number(chart.stop_loss) : null;
-  const tp1 = chart.take_profit_1 != null ? Number(chart.take_profit_1) : null;
-  const tp2 = chart.take_profit_2 != null ? Number(chart.take_profit_2) : null;
-  const be = breakeven != null ? Number(breakeven) : null;
-  const trail = trailing != null ? Number(trailing) : null;
-  // Smart SL: [L1, L2, L3]; L3 = stop iniziale, già rappresentato dalla linea SL.
-  const s1 = smartSlLevels?.[0] != null ? Number(smartSlLevels[0]) : null;
-  const s2 = smartSlLevels?.[1] != null ? Number(smartSlLevels[1]) : null;
-  const s1Sold = smartSlState?.[0]?.status === 'sold';
-  const s2Sold = smartSlState?.[1]?.status === 'sold';
-
-  const levels = [entry, exit, sl, tp1, tp2, be, trail, s1, s2].filter((v): v is number => v != null && !Number.isNaN(v));
-  let hi = Math.max(...allCandles.map((c) => c.h), ...levels);
-  let lo = Math.min(...allCandles.map((c) => c.l), ...levels);
-  if (hi === lo) { hi += 1; lo -= 1; }
-  const range = hi - lo;
-  const y = (price: number) => padTop + (1 - (price - lo) / range) * (plotB - padTop);
-  const colW = (plotR - padX) / allCandles.length;
-  const cx = (i: number) => padX + colW * (i + 0.5);
-
-  // Marker temporali: candela piu' vicina ad apertura/chiusura sull'intero grafico.
-  const ts = (s: string) => new Date(s).getTime();
-  const nearest = (target: number, pool: typeof allCandles) => {
-    let best = 0;
-    let bestD = Infinity;
-    pool.forEach((c, i) => { const d = Math.abs(ts(c.t) - target); if (d < bestD) { bestD = d; best = i; } });
-    return best;
-  };
-  const atOrBefore = (target: number, pool: typeof allCandles) => {
-    let best = -1;
-    pool.forEach((c, i) => { if (ts(c.t) <= target) best = i; });
-    return best >= 0 ? best : nearest(target, pool);
-  };
-  const entryIdx = nearest(ts(chart.opened_at), allCandles);
-  const exitIdx = atOrBefore(ts(chart.closed_at), allCandles);
-  const stopRefIdx = chart.stop_reference?.t ? nearest(ts(chart.stop_reference.t), allCandles) : null;
-  const stopRefPrice = sl ?? (chart.stop_reference?.price != null ? Number(chart.stop_reference.price) : null);
-  const exitGood = exit >= entry;
-
-  // Etichette asse Y (prezzo).
-  const fmtAxisPrice = (p: number) => {
-    if (p >= 1000) return p.toFixed(0);
-    if (p >= 1) return p.toFixed(2);
-    if (p >= 0.01) return p.toFixed(4);
-    return p.toPrecision(3);
-  };
-  const yTicks = [0, 1, 2, 3, 4].map((k) => lo + (range * k) / 4);
-
-  // Etichette asse X (orario).
-  const spanMs = ts(allCandles[allCandles.length - 1].t) - ts(allCandles[0].t);
-  const fmtAxisTime = (iso: string) => {
-    const d = new Date(iso);
-    return spanMs > 24 * 3600 * 1000
-      ? d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
-      : d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  };
-  const last = allCandles.length - 1;
-  const xTickIdx = [0, Math.round(last / 3), Math.round((2 * last) / 3), last];
-
-  // Linea di livello con etichetta: tag right-aligned appena sopra la linea, dentro il
-  // plot (l'asse destro resta ai tick di prezzo). strong=true = livello già eseguito.
-  const levelLine = (price: number | null, color: string, dash: string, tag?: string, strong?: boolean) =>
-    price == null || Number.isNaN(price) ? null : (
-      <g opacity={strong ? 0.85 : 0.5}>
-        <line x1={padX} x2={plotR} y1={y(price)} y2={y(price)} stroke={color} strokeWidth={strong ? 1.4 : 1} strokeDasharray={dash} />
-        {tag && (
-          <text x={plotR - 3} y={y(price) - 2.5} fontSize="7" fill={color} textAnchor="end" fontWeight={strong ? 600 : 400}>
-            {tag}
-          </text>
-        )}
-      </g>
-    );
-
-  const stopRefLine = (idx: number) => {
-    const candle = allCandles[idx];
-    if (!candle) return null;
-    const gap = 3;
-    const x = cx(idx);
-    const topEnd = Math.max(padTop, y(candle.h) - gap);
-    const bottomStart = Math.min(plotB, y(candle.l) + gap);
-    return (
-      <>
-        {topEnd > padTop && (
-          <line x1={x} x2={x} y1={padTop} y2={topEnd} stroke="#a855f7" strokeWidth="1" strokeDasharray="2 2" opacity="0.9" />
-        )}
-        {bottomStart < plotB && (
-          <line x1={x} x2={x} y1={bottomStart} y2={plotB} stroke="#a855f7" strokeWidth="1" strokeDasharray="2 2" opacity="0.9" />
-        )}
-      </>
-    );
-  };
-
-  // Linea verticale tratteggiata subito dopo la candela di chiusura.
-  const closeLineX = postClose.length > 0 ? cx(exitIdx + 0.5) : null;
-
-  return (
-    <div className="overflow-x-auto pb-1">
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: `${W}px`, minWidth: '100%', height: 'auto' }}>
-      {/* griglia + etichette asse Y */}
-      {yTicks.map((p, k) => (
-        <g key={`yt${k}`}>
-          <line x1={padX} x2={plotR} y1={y(p)} y2={y(p)} stroke="#1f2937" strokeWidth="0.5" opacity="0.6" />
-          <text x={plotR + 4} y={y(p)} fontSize="8" fill="#6b7280" dominantBaseline="middle">{fmtAxisPrice(p)}</text>
-        </g>
-      ))}
-      {/* assi */}
-      <line x1={plotR} x2={plotR} y1={padTop} y2={plotB} stroke="#374151" strokeWidth="0.5" />
-      <line x1={padX} x2={plotR} y1={plotB} y2={plotB} stroke="#374151" strokeWidth="0.5" />
-      {/* etichette asse X */}
-      {xTickIdx.map((i, k) => (
-        <text
-          key={`xt${k}`}
-          x={cx(i)}
-          y={H - 4}
-          fontSize="8"
-          fill="#6b7280"
-          textAnchor={k === 0 ? 'start' : k === xTickIdx.length - 1 ? 'end' : 'middle'}
-        >
-          {fmtAxisTime(allCandles[i].t)}
-        </text>
-      ))}
-      {/* sfondo post-close */}
-      {closeLineX != null && (
-        <rect x={closeLineX} y={padTop} width={plotR - closeLineX} height={plotB - padTop} fill="#111827" opacity="0.4" />
-      )}
-      {/* Candles outside the active trade window are contextual and muted. */}
-      {allCandles.map((c, i) => {
-        const isPost = i >= candles.length;
-        const isPreEntry = i < entryIdx;
-        const up = c.c >= c.o;
-        const color = isPost ? (up ? '#166534' : '#7f1d1d') : (up ? '#22c55e' : '#ef4444');
-        const opacity = isPost || isPreEntry ? 0.55 : 1;
-        const bodyTop = y(Math.max(c.o, c.c));
-        const bodyBot = y(Math.min(c.o, c.c));
-        const bw = Math.max(1, colW * 0.6);
-        return (
-          <g key={i} opacity={opacity}>
-            <line x1={cx(i)} x2={cx(i)} y1={y(c.h)} y2={y(c.l)} stroke={color} strokeWidth="1" />
-            <rect x={cx(i) - bw / 2} y={bodyTop} width={bw} height={Math.max(1, bodyBot - bodyTop)} fill={color} />
-          </g>
-        );
-      })}
-      {/* linea verticale tratteggiata di chiusura */}
-      {closeLineX != null && (
-        <line x1={closeLineX} x2={closeLineX} y1={padTop} y2={plotB} stroke="#6b7280" strokeWidth="1" strokeDasharray="3 2" opacity="0.8" />
-      )}
-      {stopRefIdx != null && (
-        <>
-          {stopRefLine(stopRefIdx)}
-          <text x={Math.min(plotR - 4, cx(stopRefIdx) + 4)} y={padTop + 8} fontSize="8" fill="#c084fc">SL ref</text>
-          {stopRefPrice != null && !Number.isNaN(stopRefPrice) && (
-            <circle cx={cx(stopRefIdx)} cy={y(stopRefPrice)} r="3" fill="#a855f7" stroke="#0b0e11" strokeWidth="1" />
-          )}
-        </>
-      )}
-      {/* Livelli di uscita — pastello tenue, tag per livello; Smart SL in gradazione
-          arancio (perdita parziale, tra BE giallo e SL rosso), ✓ = già eseguito. */}
-      {levelLine(sl, '#fca5a5', '4 3', 'SL')}
-      {levelLine(s1, '#fdba74', '6 4', s1Sold ? 'S1 ✓' : 'S1', s1Sold)}
-      {levelLine(s2, '#fb923c', '6 4', s2Sold ? 'S2 ✓' : 'S2', s2Sold)}
-      {levelLine(be, '#fcd34d', '3 3', 'BE')}
-      {levelLine(trail, '#7dd3fc', '3 3', 'TRL')}
-      {levelLine(tp1, '#86efac', '4 3', 'TP1')}
-      {levelLine(tp2, '#5eead4', '2 3', 'TP2')}
-      {levelLine(entry, '#cbd5e1', '1 0', 'E')}
-      {/* marker ingresso/uscita */}
-      <circle cx={cx(entryIdx)} cy={y(entry)} r="3.5" fill="#e5e7eb" stroke="#0b0e11" strokeWidth="1" />
-      <circle cx={cx(exitIdx)} cy={y(exit)} r="3.5" fill={exitGood ? '#22c55e' : '#ef4444'} stroke="#0b0e11" strokeWidth="1" />
-    </svg>
-    </div>
-  );
-};
-
 const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ detail, onBack }) => (
   <div className="space-y-4">
     <button onClick={onBack} className="rounded-lg bg-dark-800 px-3 py-2 text-sm font-semibold text-gray-300">
@@ -2371,7 +2178,7 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               <h3 className="text-sm font-semibold text-white">{detail.chart.live ? 'Grafico posizione (live)' : 'Grafico del trade'}</h3>
               <span className="text-xs text-gray-500">{detail.chart.interval}</span>
             </div>
-            <TradeCandleChart
+            <TradeCandleChartLW
               chart={detail.chart}
               breakeven={detail.breakeven_price}
               trailing={detail.trailing_stop}
@@ -2379,17 +2186,19 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               smartSlState={detail.smart_sl_state_summary}
             />
             <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
-              <span>⚪ Entry</span>
+              {/* La legenda prende i colori dalla stessa palette del grafico: se un
+                  livello cambia tinta, qui non resta indietro. */}
+              <span style={{ color: LEVEL_COLORS.entry }}>⬆ E = ingresso</span>
               {/* Il marker segna il prezzo del trade: su una chiusura è l'uscita, non
                   il prezzo corrente, anche quando le candele continuano a scorrere. */}
-              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>● {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
-              <span style={{ color: '#fca5a5' }}>- - SL</span>
-              {detail.smart_sl_levels && <span style={{ color: '#fb923c' }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
-              {detail.chart.stop_reference && <span className="text-purple-300">- - SL ref</span>}
-              {detail.breakeven_price != null && <span style={{ color: '#fcd34d' }}>- - Breakeven</span>}
-              {detail.trailing_stop != null && <span style={{ color: '#7dd3fc' }}>- - Trailing/Lock</span>}
-              <span style={{ color: '#86efac' }}>- - TP1</span>
-              <span style={{ color: '#5eead4' }}>- - TP2</span>
+              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>⬇ {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
+              <span style={{ color: LEVEL_COLORS.sl }}>- - SL</span>
+              {detail.smart_sl_levels && <span style={{ color: LEVEL_COLORS.s2 }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
+              {detail.chart.stop_reference && <span style={{ color: LEVEL_COLORS.ref }}>▮ candela dello stop</span>}
+              {detail.breakeven_price != null && <span style={{ color: LEVEL_COLORS.be }}>- - BE = pareggio</span>}
+              {detail.trailing_stop != null && <span style={{ color: LEVEL_COLORS.trl }}>- - TRL = trailing</span>}
+              <span style={{ color: LEVEL_COLORS.tp1 }}>- - TP1</span>
+              <span style={{ color: LEVEL_COLORS.tp2 }}>- - TP2</span>
             </div>
           </section>
         )}
