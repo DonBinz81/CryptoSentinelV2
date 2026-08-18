@@ -1,0 +1,11 @@
+[Unit]
+Description=CryptoSentinelV2 database corruption watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=cryptosentinelv2-db-watchdog.service
+
+[Install]
+WantedBy=timers.target
