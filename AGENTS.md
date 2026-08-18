@@ -70,6 +70,10 @@ Operational rules for AI agents working on CryptoSentinelHackathon.
   Added BTC, BNB, SOL, NEAR; removed XAUt, XAUM; ATOM and INJ restored to mirror the V1
   perp watchlist for comparison. Keep the count and the rationale in
   `configs/eligible_tokens.yaml` in sync with this rule.
+- Entries must also be unique **after upper-case normalisation**, because the risk guard
+  compares normalised symbols: two entries differing only by case are one symbol to it.
+  Decided by the repository owner on 2026-08-18, replacing `USDF` (Aster USDF) with `SUI`
+  after `USDf` and `USDF` - two different coins sharing a ticker - collapsed into one.
 - Trades outside the eligible-token universe must not be allowed.
 - Telegram/open organizer questions are not blockers; use prudent defaults from the plan and update later if official answers arrive.
 

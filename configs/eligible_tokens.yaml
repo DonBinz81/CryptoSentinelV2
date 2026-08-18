@@ -7,6 +7,15 @@
 # belongs to Tokamak Network (rank ~840, a different coin). Under the old symbol the
 # perp looked unlisted on Aster and Binance klines were stale; as GRAM the market is
 # live (GRAMUSDT) and the coin ranks ~25. Count stays at 150: one symbol replaced.
+# USDF replaced by SUI on 2026-08-18. The list held two entries, "USDf" and "USDF",
+# which are two different coins sharing one ticker: Falcon USD (falcon-finance, rank 54)
+# and Aster USDF (astherus-usdf, rank 229). The risk guard normalises symbols to upper
+# case, so the two were indistinguishable to it - the same ambiguity that made the
+# "BTC" ticker resolve to an unrelated token. Neither is tradable here: no address in
+# the curated SPOT_TOKEN_MAP, and no perp pair on Aster. Removed the less useful of the
+# two (Aster USDF: 18k daily volume, a stablecoin pegged at 1.00, therefore worthless to
+# a mean-reversion strategy) and added SUI (rank 34, 2.67B cap, 248M daily volume,
+# TRADING on Aster). Count stays at 150, and now unique symbols are 150 as well.
 
 eligible_tokens:
   - BTC
@@ -109,7 +118,7 @@ eligible_tokens:
   - KOGE
   - ALE
   - FRXUSD
-  - USDF
+  - SUI
   - GOMINING
   - VCNT
   - GUA
