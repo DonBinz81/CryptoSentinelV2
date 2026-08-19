@@ -15,6 +15,7 @@ import {
   fetchTradeDetail,
   saveAgentSettings,
   setKillSwitch,
+  resetDailyCounter,
   riskCloseAll,
   adjustEquity,
   validateOnboarding,
@@ -47,6 +48,7 @@ import { TradeCandleChartLW } from './TradeCandleChartLW';
 import { LEVEL_COLORS } from './tradeChartModel';
 import { defaultSettings } from './agentDefaults';
 import { GuardianBanner } from './GuardianBanner';
+import { DEV_PIN } from '../utils/devPin';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -211,7 +213,78 @@ const EmptyState: FC<{ title: string; detail: string }> = ({ title, detail }) =>
   </div>
 );
 
-const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void }> = ({ guardrail, onOpenSetup }) => {
+/**
+ * Conferma per azzerare il conteggio della perdita giornaliera (NOTE/63).
+ *
+ * Tre livelli di attrito, voluti da David: l'admin token (verificato dal backend),
+ * il PIN, e questi numeri davanti agli occhi. Quel limite serve proprio nel momento
+ * in cui uno vuole scavalcarlo — dopo una giornata storta — quindi il gesto deve
+ * costare qualcosa.
+ */
+const ResetCounterDialog: FC<{
+  guardrail: NonNullable<GlobalView['risk_guardrail']>;
+  busy: boolean;
+  error: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}> = ({ guardrail, busy, error, onConfirm, onCancel }) => {
+  const [pin, setPin] = useState('');
+  const pinOk = pin === DEV_PIN;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-5">
+      <div className="w-full max-w-sm rounded-xl border border-dark-600 bg-dark-800 p-4 space-y-3">
+        <p className="text-sm font-bold text-white">Azzerare il conteggio di oggi?</p>
+        <p className="text-xs leading-5 text-gray-300">
+          Il conteggio riparte da adesso. Il limite <b className="text-white">non cambia</b> e continua
+          a valere sul nuovo tratto: puoi perdere di nuovo fino alla stessa soglia prima che il
+          blocco torni.
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+            Perdita oggi <b className="text-accent-red">{fmtPct(guardrail.daily_loss_used_pct)}</b>
+          </span>
+          <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+            Limite <b className="text-white">{fmtPct(guardrail.daily_loss_limit_pct)}</b>
+          </span>
+        </div>
+        <p className="text-[11px] leading-4 text-gray-500">
+          Le perdite delle posizioni ancora aperte continuano a contare: l&apos;azzeramento
+          riguarda solo quelle gia&apos; chiuse.
+        </p>
+        <div>
+          <label className="text-[11px] text-gray-500">PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            className="mt-1 w-full rounded-lg bg-dark-900 px-3 py-2.5 text-sm text-white outline-none"
+            placeholder="····"
+          />
+        </div>
+        {error && <p className="text-xs text-accent-red">{error}</p>}
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="flex-1 rounded-lg bg-dark-700 px-3 py-2.5 text-sm font-semibold text-gray-300 disabled:opacity-40"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!pinOk || busy}
+            className="flex-1 rounded-lg bg-accent-red px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+          >
+            {busy ? 'Attendi…' : 'Azzera'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void; onResetCounter?: () => void }> = ({ guardrail, onOpenSetup, onResetCounter }) => {
   if (!guardrail?.blocked) return null;
   const copy = guardrail.reason ? riskGuardrailText[guardrail.reason] : undefined;
   return (
@@ -243,17 +316,38 @@ const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenS
           </>
         )}
       </div>
-      {/* Il limite si allenta dal setup: da qui ci si arriva in un tocco invece di
-          cercarlo. Non e' uno sblocco — il valore resta cambiato, quindi si vede
-          di stare correndo senza rete. */}
-      {onOpenSetup && (
-        <button
-          onClick={onOpenSetup}
-          className="mt-3 w-full rounded-lg border border-accent-red/40 px-3 py-2 text-xs font-semibold text-accent-red"
-        >
-          {guardrail.reason === 'daily_loss_limit_guard' ? 'Rivedi il limite giornaliero' : 'Rivedi i limiti di rischio'}
-        </button>
+      {/* Quante volte il conteggio e' stato azzerato oggi. Il limite resta
+          aggirabile — e' una scelta di David — ma non silenziosamente. */}
+      {(guardrail.daily_counter_resets_today ?? 0) > 0 && (
+        <p className="mt-2 text-[11px] text-accent-yellow">
+          Conteggio azzerato {guardrail.daily_counter_resets_today}
+          {guardrail.daily_counter_resets_today === 1 ? ' volta' : ' volte'} oggi
+          {guardrail.daily_counter_reset_at && ` · ultimo alle ${new Date(guardrail.daily_counter_reset_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
+        </p>
       )}
+      <div className="mt-3 space-y-2">
+        {/* Il limite si allenta dal setup: da qui ci si arriva in un tocco invece di
+            cercarlo. Non e' uno sblocco — il valore resta cambiato, quindi si vede
+            di stare correndo senza rete. */}
+        {onOpenSetup && (
+          <button
+            onClick={onOpenSetup}
+            className="w-full rounded-lg border border-accent-red/40 px-3 py-2 text-xs font-semibold text-accent-red"
+          >
+            {guardrail.reason === 'daily_loss_limit_guard' ? 'Rivedi il limite giornaliero' : 'Rivedi i limiti di rischio'}
+          </button>
+        )}
+        {/* Azzerare il conteggio scavalca una protezione del capitale: tre livelli
+            di attrito voluti da David — admin token, PIN, e la conferma coi numeri. */}
+        {guardrail.reason === 'daily_loss_limit_guard' && onResetCounter && (
+          <button
+            onClick={onResetCounter}
+            className="w-full rounded-lg bg-dark-700 px-3 py-2 text-xs font-semibold text-gray-300"
+          >
+            Azzera il conteggio di oggi
+          </button>
+        )}
+      </div>
     </div>
   );
 };
@@ -990,7 +1084,31 @@ const GlobalPane: FC<{
   assetBreakdown: AssetBreakdownResponse | null;
   claudeUsage: ClaudeUsageView | null;
   onOpenSetup?: () => void;
-}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup }) => {
+  adminToken?: string;
+  onCounterReset?: () => void;
+}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup, adminToken, onCounterReset }) => {
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState('');
+
+  const confirmReset = async () => {
+    if (!adminToken) { setResetError("Serve l'admin token: salvalo nel setup."); return; }
+    setResetBusy(true);
+    setResetError('');
+    try {
+      const esito = await resetDailyCounter(adminToken, 'da app');
+      if (esito.status !== 'ok' && esito.status !== 'success') {
+        setResetError(esito.reason ?? 'Il backend ha rifiutato la richiesta.');
+        return;
+      }
+      setResetOpen(false);
+      onCounterReset?.();
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : 'Errore di rete.');
+    } finally {
+      setResetBusy(false);
+    }
+  };
   const hasHistory = (data?.pnl_history.length ?? 0) > 0;
   const hasPortfolio = Number(data?.total_equity_usd ?? 0) > 0 || Number(data?.initial_equity_usd ?? 0) > 0;
   const hasTradesToday = Number(data?.trades_today ?? 0) > 0;
@@ -1000,7 +1118,20 @@ const GlobalPane: FC<{
 
   return (
     <div className="space-y-3">
-      <RiskGuardrailBanner guardrail={data?.risk_guardrail} onOpenSetup={onOpenSetup} />
+      <RiskGuardrailBanner
+        guardrail={data?.risk_guardrail}
+        onOpenSetup={onOpenSetup}
+        onResetCounter={() => { setResetError(''); setResetOpen(true); }}
+      />
+      {resetOpen && data?.risk_guardrail && (
+        <ResetCounterDialog
+          guardrail={data.risk_guardrail}
+          busy={resetBusy}
+          error={resetError}
+          onConfirm={() => void confirmReset()}
+          onCancel={() => setResetOpen(false)}
+        />
+      )}
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Equity" value={fmtUsd(data?.total_equity_usd)} />
         <Stat label="PnL tot." value={fmtUsd(data?.pnl_total_usd)} tone={Number(data?.pnl_total_usd ?? 0) >= 0 ? 'good' : 'bad'} />
@@ -2808,7 +2939,7 @@ const AgentTab: FC<AgentTabProps> = ({
       )}
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
       {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
-      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
+      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} adminToken={adminToken} onCounterReset={() => void refresh()} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
       {pane === 'wallet' && <WalletPane execWallets={execWallets} spot={spot} perp={perp} />}
       {pane === 'coins' && (
         <CoinsPane

@@ -209,6 +209,9 @@ export interface GlobalView {
     daily_loss_used_pct: string;
     daily_loss_limit_pct: number;
     min_portfolio_value_usd: number;
+    /** Quante volte il conteggio giornaliero e' stato azzerato oggi (NOTE/63). */
+    daily_counter_resets_today?: number;
+    daily_counter_reset_at?: string | null;
   } | null;
   pnl_history: PnlPoint[];
 }
@@ -655,6 +658,27 @@ export function setKillSwitch(state: KillSwitchState, adminToken: string): Promi
   return request<AgentStatus>('/api/v1/agent/kill-switch', {
     method: 'PUT',
     body: { state },
+    token: adminToken,
+  });
+}
+
+export interface ResetDailyCounterResponse {
+  status: string;
+  reason?: string;
+  resets_today?: number;
+  pnl_before_pct?: string;
+  reset_at?: string;
+}
+
+/**
+ * Fa ripartire da adesso il conteggio della perdita giornaliera (NOTE/63).
+ * Non cambia il limite e non disarma la protezione: lo stesso limite vale sul
+ * nuovo tratto. Il backend conta e registra ogni azzeramento.
+ */
+export function resetDailyCounter(adminToken: string, note?: string): Promise<ResetDailyCounterResponse> {
+  return request<ResetDailyCounterResponse>('/api/v1/agent/risk/reset-daily-counter', {
+    method: 'POST',
+    body: { note: note ?? null },
     token: adminToken,
   });
 }

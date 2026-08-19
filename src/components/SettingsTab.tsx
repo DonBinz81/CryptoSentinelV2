@@ -3,6 +3,7 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { ALERTS_TOKEN, BACKEND_URL, DEVICE_TOKEN, READ_TOKEN } from '../services/http';
 import { openNotificationSettings, getRegistrationLogs } from '../utils/notifications';
 import { openBatterySettings } from '../utils/energySaving';
+import { DEV_PIN } from '../utils/devPin';
 import { checkForUpdates, downloadAndInstall, openDownloadsFolder, getDevBuildInfo, mergeToMain, APK_PAGES_URL, type UpdateResult, type DevBuildInfo } from '../utils/update';
 import type { Currency } from '../hooks/useCurrency';
 import {
@@ -64,7 +65,7 @@ const SUPPORT_STATUSES: Array<{ value: TicketStatus; label: string }> = [
   { value: 'archived', label: 'Archiviato' },
 ];
 
-const DEV_PIN = '6878';
+
 const SUPPORT_DISPLAY_NAME_KEY = 'cs_support_display_name';
 
 type UpdateState = 'idle' | 'checking' | 'up-to-date' | 'available' | 'error';
