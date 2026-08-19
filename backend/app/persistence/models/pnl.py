@@ -44,6 +44,14 @@ class PortfolioState(Base):
     exposure_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=Decimal("0"))
     daily_pnl_usd: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False, default=Decimal("0"))
     daily_loss_limit_used_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, default=Decimal("0"))
+    # Manual daily-counter reset (admin, NOTE/63): when set and later than the
+    # current day start, the daily realized-PnL sum starts here instead of at
+    # midnight UTC. The limit itself is untouched; every reset is counted and
+    # timestamped so the app can show it was used. Cleared automatically on the
+    # first portfolio update after the next midnight.
+    daily_counter_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    daily_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    daily_counter_resets_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle")
     trades_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extra_json: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -335,6 +335,14 @@ class ViewService:
                 daily_loss_used_pct=portfolio.daily_loss_limit_used_pct,
                 daily_loss_limit_pct=self._daily_loss_limit_pct,
                 min_portfolio_value_usd=self._min_portfolio_value_usd,
+                daily_counter_resets_today=int(
+                    getattr(portfolio, "daily_counter_resets_today", 0) or 0
+                ),
+                daily_counter_reset_at=(
+                    reset_at.isoformat()
+                    if (reset_at := getattr(portfolio, "daily_counter_reset_at", None)) is not None
+                    else None
+                ),
             ),
             pnl_history=[
                 PnlPoint(
@@ -355,6 +363,8 @@ def _risk_guardrail(
     daily_loss_used_pct: Decimal,
     daily_loss_limit_pct: float,
     min_portfolio_value_usd: float,
+    daily_counter_resets_today: int = 0,
+    daily_counter_reset_at: str | None = None,
 ) -> RiskGuardrailView:
     drawdown_cap = abs(Decimal(str(drawdown_cap_pct)))
     daily_cap = Decimal(str(daily_loss_limit_pct))
@@ -370,6 +380,8 @@ def _risk_guardrail(
             daily_loss_used_pct=daily_loss_used_pct,
             daily_loss_limit_pct=daily_loss_limit_pct,
             min_portfolio_value_usd=min_portfolio_value_usd,
+            daily_counter_resets_today=daily_counter_resets_today,
+            daily_counter_reset_at=daily_counter_reset_at,
         )
     if drawdown_pct >= drawdown_cap:
         return RiskGuardrailView(
@@ -382,6 +394,8 @@ def _risk_guardrail(
             daily_loss_used_pct=daily_loss_used_pct,
             daily_loss_limit_pct=daily_loss_limit_pct,
             min_portfolio_value_usd=min_portfolio_value_usd,
+            daily_counter_resets_today=daily_counter_resets_today,
+            daily_counter_reset_at=daily_counter_reset_at,
         )
     if daily_loss_used_pct <= daily_cap:
         return RiskGuardrailView(
@@ -394,6 +408,8 @@ def _risk_guardrail(
             daily_loss_used_pct=daily_loss_used_pct,
             daily_loss_limit_pct=daily_loss_limit_pct,
             min_portfolio_value_usd=min_portfolio_value_usd,
+            daily_counter_resets_today=daily_counter_resets_today,
+            daily_counter_reset_at=daily_counter_reset_at,
         )
     return RiskGuardrailView(
         blocked=False,
@@ -402,6 +418,10 @@ def _risk_guardrail(
         daily_loss_used_pct=daily_loss_used_pct,
         daily_loss_limit_pct=daily_loss_limit_pct,
         min_portfolio_value_usd=min_portfolio_value_usd,
+        # Reset trail stays visible ESPECIALLY when the guard is green again:
+        # that is precisely the state a reset produces.
+        daily_counter_resets_today=daily_counter_resets_today,
+        daily_counter_reset_at=daily_counter_reset_at,
     )
 
 
