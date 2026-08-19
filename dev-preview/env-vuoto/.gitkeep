@@ -1,0 +1,2 @@
+Cartella deliberatamente vuota: e' il puntamento di envDir per l'anteprima, cosi'
+nessun file .env del progetto viene mai letto quando si guarda il grafico.
