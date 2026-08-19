@@ -221,6 +221,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |-- scripts/ - script installazione, backup SQLite/TWAK encrypted state e healthcheck liveness.
 |   |   |-- install_vps.sh - bootstrap Ubuntu/Debian da eseguire da `/opt/cryptosentinelv2/app`, senza segreti nel repo.
 |   |   |-- backup_sqlite.sh - backup DB SQLite, impostazioni runtime esportate (`agent_settings.json`, `runtime_state.tsv`), config versionate non segrete e stato TWAK cifrato. Non apre mai il DB di produzione: lo copia e verifica la copia con `integrity_check`; pubblica l'artefatto solo a successo e scrive sempre l'esito in `last_result.json`.
+|   |   |-- notify_alert.sh - punto unico di consegna degli allarmi: FCM piu' Telegram come canale d'emergenza indipendente da backend e database. Esce 0 se almeno un canale accetta; non stampa mai i segreti.
 |   |   |-- db_watchdog.sh - controllo ogni minuto su descrittori orfani e firme di corruzione nel journal; non apre mai il DB.
 |   |   |-- backup_alert.sh - notifica push critica quando il backup fallisce o la copia del DB non passa `integrity_check`. Riceve il token admin da EnvironmentFile e non lo stampa mai.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.

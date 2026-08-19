@@ -13,10 +13,12 @@
 #
 # The database is never opened, and never even read: only /proc and the journal.
 #
-# Known limit, accepted deliberately: the alert is delivered over FCM, which
-# needs the device_tokens table. During the 18/08 incident that table was the
-# corrupt one, so an alert would not have been delivered. A channel independent
-# from the database (Telegram, SMTP) remains the way to close this gap.
+# Delivery goes through notify_alert.sh, which fans the alert out to every
+# configured channel. Since 2026-08-19 that includes Telegram, which talks to
+# api.telegram.org directly: it needs neither the backend nor the database, and so
+# it survives the very incident this watchdog exists for. During the 18/08 outage
+# the corrupt table was device_tokens - the one FCM needs - so the push had no way
+# out; Telegram would have gone through.
 set -uo pipefail
 
 SERVICE="${SERVICE:-cryptosentinelv2-backend}"
@@ -87,19 +89,10 @@ fi
 if [ "$NOTIFY" != "1" ]; then
     exit 0
 fi
-if [ -z "${API_ADMIN_TOKEN:-}" ]; then
-    echo "db_watchdog: no admin token in the environment, cannot notify" >&2
-    exit 1
-fi
 
 body="Anomalia rilevata sul database di produzione: ${findings}. Il backend e' attivo. Verificare prima che peggiori."
-payload="$(printf '{"title":"Problema database","body":"%s","severity":"critical","data":{"source":"db_watchdog"}}' "$body")"
 
-if curl --fail --silent --show-error --max-time 10 \
-    -X POST "$API_URL" \
-    -H "Authorization: Bearer $API_ADMIN_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "$payload" >/dev/null; then
+if "$(dirname "$0")/notify_alert.sh" "Problema database" "$body" db_watchdog; then
     echo "$now" > "$stamp_file"
 else
     # Do not update the stamp: a failed delivery must be retried next minute.
