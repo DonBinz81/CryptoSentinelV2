@@ -211,7 +211,7 @@ const EmptyState: FC<{ title: string; detail: string }> = ({ title, detail }) =>
   </div>
 );
 
-const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail'] }> = ({ guardrail }) => {
+const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void }> = ({ guardrail, onOpenSetup }) => {
   if (!guardrail?.blocked) return null;
   const copy = guardrail.reason ? riskGuardrailText[guardrail.reason] : undefined;
   return (
@@ -225,10 +225,35 @@ const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail'] }> = ({ 
           {guardrail.reason?.replace(/_/g, ' ') ?? 'blocked'}
         </span>
       </div>
+      {/* I numeri devono essere QUELLI del blocco scattato. Prima si mostrava sempre
+          drawdown e suo cap: con un blocco per perdita giornaliera si leggeva
+          "9,28% su 15%" (sembri lontano dal limite) mentre il limite superato era
+          un altro, -9,07% contro -8,00%. Un numero sbagliato accanto a un blocco
+          e' peggio di nessun numero. */}
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Drawdown <b className="text-white">{fmtPct(guardrail.drawdown_pct)}</b></span>
-        <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Cap <b className="text-white">{fmtPct(Math.abs(guardrail.drawdown_cap_pct))}</b></span>
+        {guardrail.reason === 'daily_loss_limit_guard' ? (
+          <>
+            <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Perdita oggi <b className="text-white">{fmtPct(guardrail.daily_loss_used_pct)}</b></span>
+            <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Limite <b className="text-white">{fmtPct(guardrail.daily_loss_limit_pct)}</b></span>
+          </>
+        ) : (
+          <>
+            <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Drawdown <b className="text-white">{fmtPct(guardrail.drawdown_pct)}</b></span>
+            <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">Cap <b className="text-white">{fmtPct(Math.abs(guardrail.drawdown_cap_pct))}</b></span>
+          </>
+        )}
       </div>
+      {/* Il limite si allenta dal setup: da qui ci si arriva in un tocco invece di
+          cercarlo. Non e' uno sblocco — il valore resta cambiato, quindi si vede
+          di stare correndo senza rete. */}
+      {onOpenSetup && (
+        <button
+          onClick={onOpenSetup}
+          className="mt-3 w-full rounded-lg border border-accent-red/40 px-3 py-2 text-xs font-semibold text-accent-red"
+        >
+          {guardrail.reason === 'daily_loss_limit_guard' ? 'Rivedi il limite giornaliero' : 'Rivedi i limiti di rischio'}
+        </button>
+      )}
     </div>
   );
 };
@@ -964,7 +989,8 @@ const GlobalPane: FC<{
   decisions: AgentDecisionResponse | null;
   assetBreakdown: AssetBreakdownResponse | null;
   claudeUsage: ClaudeUsageView | null;
-}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage }) => {
+  onOpenSetup?: () => void;
+}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup }) => {
   const hasHistory = (data?.pnl_history.length ?? 0) > 0;
   const hasPortfolio = Number(data?.total_equity_usd ?? 0) > 0 || Number(data?.initial_equity_usd ?? 0) > 0;
   const hasTradesToday = Number(data?.trades_today ?? 0) > 0;
@@ -974,7 +1000,7 @@ const GlobalPane: FC<{
 
   return (
     <div className="space-y-3">
-      <RiskGuardrailBanner guardrail={data?.risk_guardrail} />
+      <RiskGuardrailBanner guardrail={data?.risk_guardrail} onOpenSetup={onOpenSetup} />
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Equity" value={fmtUsd(data?.total_equity_usd)} />
         <Stat label="PnL tot." value={fmtUsd(data?.pnl_total_usd)} tone={Number(data?.pnl_total_usd ?? 0) >= 0 ? 'good' : 'bad'} />
@@ -2782,7 +2808,7 @@ const AgentTab: FC<AgentTabProps> = ({
       )}
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
       {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
-      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} />}
+      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
       {pane === 'wallet' && <WalletPane execWallets={execWallets} spot={spot} perp={perp} />}
       {pane === 'coins' && (
         <CoinsPane
