@@ -1,0 +1,152 @@
+import type { FC } from 'react';
+import type { GuardianStatus } from '../services/agentApi';
+
+// Banner del guardiano di regime. Deve essere impossibile da non vedere quando il bot
+// si sta proteggendo, e quasi invisibile quando va tutto bene: in VERDE resta un chip.
+//
+// I comandi di emergenza stanno DENTRO il banner, non tre tocchi piu' in la': quando
+// serve fermare il bot, cercarli nel setup e' esattamente il momento sbagliato.
+
+const TONI = {
+  red: {
+    bordo: 'border-accent-red/50',
+    fondo: 'bg-accent-red/10',
+    testo: 'text-accent-red',
+    puntino: 'bg-accent-red',
+    titolo: 'PROTEZIONE ATTIVA',
+    sottotitolo: 'Nessuna nuova posizione finche\' il mercato non si calma',
+  },
+  yellow: {
+    bordo: 'border-accent-yellow/50',
+    fondo: 'bg-accent-yellow/10',
+    testo: 'text-accent-yellow',
+    puntino: 'bg-accent-yellow',
+    titolo: 'PRUDENZA',
+    sottotitolo: 'Posizioni dimezzate: il mercato ha fatto scattare degli stop',
+  },
+  green: {
+    bordo: 'border-accent-green/30',
+    fondo: 'bg-accent-green/5',
+    testo: 'text-accent-green',
+    puntino: 'bg-accent-green',
+    titolo: 'REGIME NORMALE',
+    sottotitolo: '',
+  },
+} as const;
+
+/** "3 ore fa", "22 minuti fa": piu' leggibile di un orario quando conta il "quanto e' passato". */
+const quantoFa = (iso: string | null): string | null => {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const min = Math.floor((Date.now() - t) / 60000);
+  if (min < 1) return 'ora';
+  if (min < 60) return `${min} min fa`;
+  const ore = Math.floor(min / 60);
+  if (ore < 24) return `${ore} ${ore === 1 ? 'ora' : 'ore'} fa`;
+  const gg = Math.floor(ore / 24);
+  return `${gg} ${gg === 1 ? 'giorno' : 'giorni'} fa`;
+};
+
+/**
+ * La spiegazione vale solo se appartiene alla transizione corrente: se il backend non
+ * l'ha ancora scritta, o se e' rimasta indietro rispetto al cambio di stato, si mostrano
+ * i dati concreti invece di un testo che racconta un'altra storia.
+ */
+const spiegazioneValida = (g: GuardianStatus): string | null => {
+  const testo = g.explanation?.trim();
+  if (!testo) return null;
+  if (!g.explained_at || !g.changed_at) return testo;
+  const spiegata = new Date(g.explained_at).getTime();
+  const cambiata = new Date(g.changed_at).getTime();
+  if (Number.isNaN(spiegata) || Number.isNaN(cambiata)) return testo;
+  // Tolleranza: il Brain risponde qualche secondo dopo la transizione.
+  return spiegata + 120_000 >= cambiata ? testo : null;
+};
+
+export const GuardianBanner: FC<{
+  guardian: GuardianStatus | null | undefined;
+  killSwitch: string | undefined;
+  adminToken: string;
+  busy: boolean;
+  onPause: () => void;
+  onCloseAll: () => void;
+}> = ({ guardian, killSwitch, adminToken, busy, onPause, onCloseAll }) => {
+  if (!guardian || !guardian.enabled) return null;
+
+  const tono = TONI[guardian.state] ?? TONI.green;
+  const attivo = killSwitch === 'running';
+
+  // VERDE: solo un chip. Nei giorni normali il guardiano non deve fare rumore.
+  if (guardian.state === 'green') {
+    return (
+      <div className="flex items-center gap-2 px-1">
+        <span className={`h-1.5 w-1.5 rounded-full ${tono.puntino}`} />
+        <span className="text-[11px] text-gray-500">Regime normale</span>
+      </div>
+    );
+  }
+
+  const spiegazione = spiegazioneValida(guardian);
+  const ultimoStop = quantoFa(guardian.last_stop_at);
+  const daQuando = quantoFa(guardian.changed_at);
+  const rosso = guardian.state === 'red';
+
+  return (
+    <section
+      className={`rounded-xl border ${tono.bordo} ${tono.fondo} px-4 py-3 space-y-3`}
+      role={rosso ? 'alert' : 'status'}
+    >
+      <div className="flex items-start gap-2.5">
+        <span
+          className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${tono.puntino} ${rosso ? 'animate-pulse' : ''}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className={`text-sm font-bold ${tono.testo}`}>{tono.titolo}</p>
+            {daQuando && <span className="flex-shrink-0 text-[11px] text-gray-500">da {daQuando}</span>}
+          </div>
+          <p className="mt-0.5 text-xs leading-5 text-gray-300">{tono.sottotitolo}</p>
+        </div>
+      </div>
+
+      {/* La spiegazione del Brain se c'e'; altrimenti i fatti concreti, che restano utili. */}
+      <div className="rounded-lg bg-dark-900/60 px-3 py-2">
+        {spiegazione ? (
+          <p className="text-xs leading-5 text-gray-300">{spiegazione}</p>
+        ) : (
+          <p className="text-xs leading-5 text-gray-400">
+            <b className="text-white">{guardian.stops_in_window}</b>{' '}
+            {guardian.stops_in_window === 1 ? 'stop pieno' : 'stop pieni'} nelle ultime{' '}
+            <b className="text-white">{Math.round(guardian.window_hours)}</b> ore
+            {ultimoStop && <> · l&apos;ultimo {ultimoStop}</>}
+          </p>
+        )}
+      </div>
+
+      {/* Comandi di emergenza dentro il banner: quando servono, servono subito. */}
+      <div className="flex gap-2">
+        <button
+          onClick={onCloseAll}
+          disabled={!adminToken || busy}
+          className="flex-1 rounded-lg bg-accent-red px-3 py-2.5 text-xs font-bold text-white disabled:opacity-40"
+        >
+          {busy ? 'Attendi…' : '⛔ Chiudi tutto'}
+        </button>
+        {/* soft_stop: blocca le nuove entrate, non tocca le posizioni gia' aperte. */}
+        {attivo && (
+          <button
+            onClick={onPause}
+            disabled={!adminToken || busy}
+            className="flex-1 rounded-lg border border-gray-600 bg-dark-800 px-3 py-2.5 text-xs font-semibold text-gray-200 disabled:opacity-40"
+          >
+            ⏸ Blocca entrate
+          </button>
+        )}
+      </div>
+      {!adminToken && (
+        <p className="text-[11px] text-gray-600">Per usare i comandi serve l&apos;admin token nel setup.</p>
+      )}
+    </section>
+  );
+};

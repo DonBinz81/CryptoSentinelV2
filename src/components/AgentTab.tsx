@@ -46,6 +46,7 @@ import { hapticLight } from '../utils/haptics';
 import { TradeCandleChartLW } from './TradeCandleChartLW';
 import { LEVEL_COLORS } from './tradeChartModel';
 import { defaultSettings } from './agentDefaults';
+import { GuardianBanner } from './GuardianBanner';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -1564,13 +1565,34 @@ export const SetupPane: FC<{
         >
           {saving ? 'Esecuzione...' : '⛔ Chiudi tutto & metti in pausa'}
         </button>
-        <button
-          onClick={() => onKill('running')}
-          disabled={!adminToken || saving || agentStatus?.kill_switch === 'running'}
-          className="w-full rounded-lg bg-accent-green/20 px-3 py-2.5 text-sm font-semibold text-accent-green disabled:opacity-40"
-        >
-          ▶ Riprendi agente
-        </button>
+        {/* Prima lo stato, poi il comando. Il pulsante "Riprendi" restava visibile ma
+            disabilitato anche ad agente attivo: sembrava un bottone rotto invece che
+            uno stato, e durante il drawdown del 19/08 ha fatto credere a David che
+            l'agente fosse fermo. Ora il badge dice come sta, e si vede solo il comando
+            che ha senso premere adesso. */}
+        <div className="flex items-center gap-2 rounded-lg bg-dark-900/60 px-3 py-2">
+          <span
+            className={`h-2 w-2 flex-shrink-0 rounded-full ${
+              agentStatus?.kill_switch === 'running' ? 'bg-accent-green' : 'bg-accent-yellow'
+            }`}
+          />
+          <span
+            className={`text-xs font-bold uppercase tracking-wide ${
+              agentStatus?.kill_switch === 'running' ? 'text-accent-green' : 'text-accent-yellow'
+            }`}
+          >
+            {agentStatus?.kill_switch === 'running' ? 'Agente attivo' : 'Agente in pausa'}
+          </span>
+        </div>
+        {agentStatus?.kill_switch !== 'running' && (
+          <button
+            onClick={() => onKill('running')}
+            disabled={!adminToken || saving}
+            className="w-full rounded-lg bg-accent-green/20 px-3 py-2.5 text-sm font-semibold text-accent-green disabled:opacity-40"
+          >
+            ▶ Riprendi agente
+          </button>
+        )}
         {!adminToken && <p className="text-xs text-gray-600">Richiede admin token salvato.</p>}
       </section>
 
@@ -2733,6 +2755,15 @@ const AgentTab: FC<AgentTabProps> = ({
           <span className={`text-xs font-semibold ${statusTone}`}>{status?.kill_switch ?? 'loading'}</span>
         </div>
       </div>
+
+      <GuardianBanner
+        guardian={status?.guardian}
+        killSwitch={status?.kill_switch}
+        adminToken={adminToken}
+        busy={saving}
+        onPause={() => void handleKill('soft_stop')}
+        onCloseAll={() => void handleCloseAll()}
+      />
 
       <div className="grid grid-cols-3 gap-1.5">
         <SegmentButton id="spot" label="Spot" active={pane === 'spot'} onClick={setPane} />

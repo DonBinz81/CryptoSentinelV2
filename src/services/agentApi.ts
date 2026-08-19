@@ -2,6 +2,21 @@ import { BackendHttpError, backendRequest } from './http';
 
 export type KillSwitchState = 'running' | 'soft_stop' | 'hard_stop' | 'degraded';
 
+/** Stato del guardiano di regime: verde normale, giallo prudenza, rosso stop alle aperture. */
+export type GuardianState = 'green' | 'yellow' | 'red';
+
+export interface GuardianStatus {
+  state: GuardianState;
+  enabled: boolean;
+  stops_in_window: number;
+  window_hours: number;
+  last_stop_at: string | null;
+  changed_at: string | null;
+  /** Spiegazione del Brain sull'ultima transizione. null quando non disponibile. */
+  explanation: string | null;
+  explained_at: string | null;
+}
+
 export interface AgentStatus {
   mode: string;
   markets_enabled: string;
@@ -9,6 +24,7 @@ export interface AgentStatus {
   kill_switch: KillSwitchState;
   fast_loop_last_tick: string | null;
   slow_loop_last_tick: string | null;
+  guardian?: GuardianStatus | null;
 }
 
 export interface EligibleTokensResponse {
