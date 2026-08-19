@@ -91,6 +91,56 @@ class ClaudeMetaController:
                 return self._local_fallback(signal, risk, reason_prefix="claude_unavailable_dry_run"), None
             raise MetaControllerError("claude_meta_controller_unavailable") from exc
 
+    async def explain(
+        self, *, instruction: str, context: dict[str, Any]
+    ) -> tuple[str | None, BrainUsage | None]:
+        """Short free-text explanation for user-facing notifications.
+
+        Used by the regime guardian (NOTE/61) to describe what the bot sees at
+        a state change. Best effort: any failure returns (None, None) and the
+        caller falls back to a code-composed text. Never raises.
+        """
+        if not self.settings.anthropic_api_key:
+            return None, None
+        try:
+            payload = {
+                "model": self.settings.anthropic_model,
+                "max_tokens": 300,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"{instruction}\n\nDATI (JSON):\n{json.dumps(context, default=str)}",
+                    }
+                ],
+            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": self.settings.anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=payload,
+                )
+            response.raise_for_status()
+            body = response.json()
+            text = "".join(
+                block.get("text", "")
+                for block in body.get("content", [])
+                if block.get("type") == "text"
+            ).strip()
+            usage_data = body.get("usage", {})
+            usage = BrainUsage(
+                model=self.settings.anthropic_model,
+                input_tokens=int(usage_data.get("input_tokens", 0)),
+                output_tokens=int(usage_data.get("output_tokens", 0)),
+            )
+            return (text or None), usage
+        except Exception as exc:
+            logger.warning("claude_guardian_explain_failed", error=str(exc))
+            return None, None
+
     def _local_fallback(
         self,
         signal: dict[str, Any],

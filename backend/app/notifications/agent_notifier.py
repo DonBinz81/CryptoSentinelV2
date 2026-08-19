@@ -150,6 +150,34 @@ class AgentNotifier:
     # Allarmi rischio
     # ------------------------------------------------------------------
 
+    async def notify_guardian_state(
+        self,
+        user_id: str,
+        *,
+        title: str,
+        body: str,
+        state: str,
+    ) -> bool:
+        """Regime guardian state change: one push per transition.
+
+        Transitions are discrete events (a handful per day at worst), so no
+        extra dedup key is needed here; risk_alerts preference still applies.
+        """
+        prefs = self.get_preferences(user_id)
+        if not prefs.risk_alerts:
+            return False
+        return await self._send(
+            user_id=user_id,
+            title=title,
+            body=body,
+            severity="critical",
+            data={
+                "topic": self.settings.fcm_risk_topic,
+                "alert_type": "guardian",
+                "state": state,
+            },
+        )
+
     async def notify_risk_alert(
         self,
         user_id: str,
