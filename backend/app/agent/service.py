@@ -3154,6 +3154,14 @@ class AgentService:
                         pass
             except Exception as exc:
                 logger.warning("guardian_brain_explain_failed", error=str(exc))
+            if brain_txt:
+                # Persisted separately from the push body (NOTE/61 §6-bis,
+                # requested by chat C): the push body lives seconds in a
+                # notification tray, but the app banner needs this text
+                # available whenever it is opened, not just at transition time.
+                self.guardian.record_explanation(
+                    text=brain_txt, at=datetime.now(UTC), for_change_at=change.changed_at
+                )
             body = f"{base}\n\n{brain_txt}" if brain_txt else base
             notifier = get_agent_notifier()
             await notifier.notify_guardian_state(

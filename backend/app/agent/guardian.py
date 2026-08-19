@@ -54,6 +54,7 @@ class GuardianChange:
     stops_in_window: int
     window_hours: float
     last_stop_at: datetime | None
+    changed_at: datetime
 
 
 class RegimeGuardian:
@@ -67,6 +68,12 @@ class RegimeGuardian:
         # Stop events kept for the notification text: (asset, pnl_usd, time).
         self._stop_events: list[tuple[str, float, datetime]] = []
         self._changed_at: datetime | None = None
+        # Brain explanation of the LATEST transition (app banner, chat C /
+        # NOTE/61 §6-bis). Reset to None on every new transition so a stale
+        # explanation from a previous state can never be shown as current;
+        # filled in later by record_explanation() once the Brain call returns.
+        self._explanation: str | None = None
+        self._explained_at: datetime | None = None
 
     # ── persistence ──────────────────────────────────────────────────────
 
@@ -89,6 +96,9 @@ class RegimeGuardian:
             ]
             changed = data.get("changed_at")
             self._changed_at = datetime.fromisoformat(changed) if changed else None
+            self._explanation = data.get("explanation")
+            explained = data.get("explained_at")
+            self._explained_at = datetime.fromisoformat(explained) if explained else None
         except Exception as exc:  # never let a corrupt blob stop the agent
             logger.warning("guardian_state_load_failed", error=str(exc))
 
@@ -100,6 +110,8 @@ class RegimeGuardian:
                 (a, p, t.isoformat()) for a, p, t in self._stop_events
             ],
             "changed_at": self._changed_at.isoformat() if self._changed_at else None,
+            "explanation": self._explanation,
+            "explained_at": self._explained_at.isoformat() if self._explained_at else None,
         }
         set_runtime_value(self.user_id, GUARDIAN_STATE_KEY, json.dumps(payload))
 
@@ -135,6 +147,8 @@ class RegimeGuardian:
             "window_hours": cfg.window_hours,
             "last_stop_at": last.isoformat() if last else None,
             "changed_at": self._changed_at.isoformat() if self._changed_at else None,
+            "explanation": self._explanation,
+            "explained_at": self._explained_at.isoformat() if self._explained_at else None,
         }
 
     # ── transitions ──────────────────────────────────────────────────────
@@ -158,6 +172,12 @@ class RegimeGuardian:
         previous = self._state
         self._state = new_state
         self._changed_at = now
+        # A new transition invalidates any explanation of the previous one:
+        # cleared here (not just left for the async Brain call to overwrite),
+        # so a slow/failed explain() never leaves a stale text attached to
+        # the wrong state. record_explanation() below fills it back in.
+        self._explanation = None
+        self._explained_at = None
         self._save()
         change = GuardianChange(
             previous=previous,
@@ -165,6 +185,7 @@ class RegimeGuardian:
             stops_in_window=self.stops_in_window(now, cfg),
             window_hours=cfg.window_hours,
             last_stop_at=self.last_stop_at(),
+            changed_at=now,
         )
         logger.info(
             "guardian_state_changed",
@@ -173,6 +194,22 @@ class RegimeGuardian:
             stops_in_window=change.stops_in_window,
         )
         return change
+
+    def record_explanation(self, *, text: str, at: datetime, for_change_at: datetime) -> None:
+        """Persist the Brain's explanation of a transition (NOTE/61 §6-bis).
+
+        ``for_change_at`` must match the transition's own ``changed_at``: if a
+        newer transition already superseded it (the explain() call is async
+        and can lag behind a fast-moving guardian), the stale text is
+        dropped instead of being attached to the wrong state.
+        """
+        self._load()
+        if self._changed_at is None or self._changed_at != for_change_at:
+            logger.info("guardian_explanation_superseded", for_change_at=for_change_at.isoformat())
+            return
+        self._explanation = text
+        self._explained_at = at
+        self._save()
 
     def record_stop(
         self, *, asset: str, pnl_usd: float, now: datetime, cfg: GuardianConfig

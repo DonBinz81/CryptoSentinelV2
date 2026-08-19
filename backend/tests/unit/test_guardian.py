@@ -138,6 +138,48 @@ class TestDisabled:
         assert g.snapshot(T0 + _h(0.1), off)["state"] == GREEN
 
 
+class TestExplanationPersistence:
+    """Chat C (NOTE/61 §6-bis) needs the Brain's explanation available for the
+    app banner whenever it is opened, not just alive in a single push."""
+
+    def test_explanation_attaches_to_its_own_transition(self):
+        g = _guardian()
+        change = g.record_stop(asset="A", pnl_usd=-1, now=T0, cfg=CFG)
+        g.record_explanation(text="Prudenza: primo stop.", at=T0 + timedelta(seconds=2), for_change_at=change.changed_at)
+        snap = g.snapshot(T0 + timedelta(minutes=1), CFG)
+        assert snap["explanation"] == "Prudenza: primo stop."
+        assert snap["explained_at"] is not None
+
+    def test_new_transition_clears_previous_explanation_immediately(self):
+        # The banner must never show YELLOW's text while already RED, even
+        # before the (async) Brain call for RED has returned.
+        g = _guardian()
+        c1 = g.record_stop(asset="A", pnl_usd=-1, now=T0, cfg=CFG)
+        g.record_explanation(text="Prudenza.", at=T0, for_change_at=c1.changed_at)
+        g.record_stop(asset="B", pnl_usd=-2, now=T0 + _h(1), cfg=CFG)  # -> RED
+        snap = g.snapshot(T0 + _h(1), CFG)
+        assert snap["state"] == RED
+        assert snap["explanation"] is None
+        assert snap["explained_at"] is None
+
+    def test_stale_explanation_for_superseded_transition_is_dropped(self):
+        # Simulates a slow Brain call: by the time it returns, a newer
+        # transition has already happened. The old text must not attach.
+        g = _guardian()
+        c1 = g.record_stop(asset="A", pnl_usd=-1, now=T0, cfg=CFG)
+        g.record_stop(asset="B", pnl_usd=-2, now=T0 + _h(1), cfg=CFG)  # -> RED, c1 superseded
+        g.record_explanation(text="Testo vecchio della gialla.", at=T0 + _h(1.1), for_change_at=c1.changed_at)
+        snap = g.snapshot(T0 + _h(1), CFG)
+        assert snap["explanation"] is None
+
+    def test_failed_explain_leaves_field_null_not_empty_string(self):
+        g = _guardian()
+        g.record_stop(asset="A", pnl_usd=-1, now=T0, cfg=CFG)
+        # record_explanation is simply never called (explain() failed upstream).
+        snap = g.snapshot(T0 + timedelta(minutes=1), CFG)
+        assert snap["explanation"] is None
+
+
 class TestCapitalPreservationView:
     def test_defense_values_substitute_management_knobs(self):
         ms = AgentMobileSettings(
