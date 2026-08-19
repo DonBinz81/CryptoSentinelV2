@@ -3185,9 +3185,12 @@ class AgentService:
             # Drawdown
             drawdown = float(getattr(portfolio, "drawdown_pct", 0) or 0)
             if self.settings.risk_drawdown_alert_enabled and drawdown >= self.settings.risk_notify_drawdown_pct:
+                # ``value`` feeds the notifier throttle: reminder once per
+                # interval, immediate re-send only if it worsens by >= step.
                 await notifier.notify_risk_alert(
                     user_id, "drawdown",
-                    f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%"
+                    f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%",
+                    value=drawdown,
                 )
 
             # Portfolio floor

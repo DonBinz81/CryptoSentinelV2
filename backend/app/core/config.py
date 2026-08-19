@@ -160,6 +160,8 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "summary_minute_utc": "agent_summary_minute_utc",
         "risk_drawdown_alert_enabled": "risk_drawdown_alert_enabled",
         "risk_notify_drawdown_pct": "risk_notify_drawdown_pct",
+        "risk_alert_min_interval_minutes": "risk_alert_min_interval_minutes",
+        "risk_alert_escalation_step": "risk_alert_escalation_step",
     },
     "risk": {
         "capital_per_trade_pct": "risk_capital_per_trade_pct",
@@ -549,6 +551,10 @@ class Settings(BaseSettings):
     agent_summary_minute_utc: int = Field(default=55, alias="AGENT_SUMMARY_MINUTE_UTC")
     risk_drawdown_alert_enabled: bool = Field(default=True, alias="RISK_DRAWDOWN_ALERT_ENABLED")
     risk_notify_drawdown_pct: float = Field(default=10.0, alias="RISK_NOTIFY_DRAWDOWN_PCT")
+    # Risk-alert throttling (NOTE/60 §4): one reminder per interval per alert
+    # type; an escalation (value worsening by >= step) re-sends immediately.
+    risk_alert_min_interval_minutes: float = Field(default=60.0, alias="RISK_ALERT_MIN_INTERVAL_MINUTES")
+    risk_alert_escalation_step: float = Field(default=1.0, alias="RISK_ALERT_ESCALATION_STEP")
 
     agent_mode: str = Field(default="conservative", alias="AGENT_MODE")
     markets_enabled: str = Field(default="both", alias="MARKETS_ENABLED")

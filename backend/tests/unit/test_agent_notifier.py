@@ -30,6 +30,9 @@ def _make_settings(
     s.fcm_risk_topic = "cryptosentinelv2-risk"
     s.fcm_summary_topic = "cryptosentinelv2-summary"
     s.fcm_critical_topic = "cryptosentinelv2-critical"
+    # Risk-alert throttle knobs must be real numbers, not MagicMock attributes.
+    s.risk_alert_min_interval_minutes = 60.0
+    s.risk_alert_escalation_step = 1.0
     return s
 
 
@@ -279,8 +282,12 @@ async def test_risk_no_spam():
 
 
 @pytest.mark.asyncio
-async def test_risk_different_detail_resends():
-    """Dettaglio diverso genera nuova notifica rischio."""
+async def test_risk_small_oscillation_is_throttled():
+    """A 0.1pp move in the alert text must NOT re-send within the interval.
+
+    This is the 202-pushes-in-2-hours bug of 2026-08-19 (NOTE/60 §4): the old
+    dedup keyed on the exact text, so every decimal change re-notified.
+    """
     notifier, mock_fcm, mock_svc = _notifier_with_mocks()
     store: dict[str, str] = {}
 
@@ -295,12 +302,72 @@ async def test_risk_different_detail_resends():
         patch("backend.app.notifications.agent_notifier.set_runtime_value", side_effect=fake_set),
         patch("backend.app.notifications.agent_notifier.get_notification_service", return_value=mock_svc),
     ):
-        r1 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.5%")
-        r2 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 11.0%")  # dettaglio diverso
+        r1 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.5%", value=10.5)
+        r2 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.6%", value=10.6)
+        r3 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.9%", value=10.9)
 
     assert r1 is True
-    assert r2 is True
+    assert r2 is False and r3 is False
+    assert mock_fcm.send.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_risk_escalation_resends_before_interval():
+    """Worsening by >= the escalation step (1pp) re-sends immediately."""
+    notifier, mock_fcm, mock_svc = _notifier_with_mocks()
+    store: dict[str, str] = {}
+
+    def fake_get(user_id: str, key: str):
+        return store.get(f"{user_id}:{key}")
+
+    def fake_set(user_id: str, key: str, value: str):
+        store[f"{user_id}:{key}"] = value
+
+    with (
+        patch("backend.app.notifications.agent_notifier.get_runtime_value", side_effect=fake_get),
+        patch("backend.app.notifications.agent_notifier.set_runtime_value", side_effect=fake_set),
+        patch("backend.app.notifications.agent_notifier.get_notification_service", return_value=mock_svc),
+    ):
+        r1 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.5%", value=10.5)
+        r2 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 11.5%", value=11.5)
+
+    assert r1 is True and r2 is True
     assert mock_fcm.send.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_risk_reminder_after_interval():
+    """The same ongoing condition is re-sent once the interval has elapsed."""
+    import json as _json
+    from datetime import UTC, datetime, timedelta
+
+    notifier, mock_fcm, mock_svc = _notifier_with_mocks()
+    stale = _json.dumps(
+        {
+            "detail": "Drawdown 10.5%",
+            "value": 10.5,
+            "sent_at": (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+        }
+    )
+    store: dict[str, str] = {
+        f"{USER_ID}:{AgentNotifier.RISK_STATE_KEY}:drawdown": stale,
+    }
+
+    def fake_get(user_id: str, key: str):
+        return store.get(f"{user_id}:{key}")
+
+    def fake_set(user_id: str, key: str, value: str):
+        store[f"{user_id}:{key}"] = value
+
+    with (
+        patch("backend.app.notifications.agent_notifier.get_runtime_value", side_effect=fake_get),
+        patch("backend.app.notifications.agent_notifier.set_runtime_value", side_effect=fake_set),
+        patch("backend.app.notifications.agent_notifier.get_notification_service", return_value=mock_svc),
+    ):
+        r1 = await notifier.notify_risk_alert(USER_ID, "drawdown", "Drawdown 10.5%", value=10.5)
+
+    assert r1 is True
+    assert mock_fcm.send.call_count == 1
 
 
 # ---------------------------------------------------------------------------
