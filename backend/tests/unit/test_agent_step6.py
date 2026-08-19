@@ -15,6 +15,10 @@ import pytest
 from backend.app.agent.brain import ClaudeMetaController
 from backend.app.agent.ohlcv_warmup import warmup_selected_watchlist
 from backend.app.agent.risk import KillSwitchState, RiskDecision, RiskManager, SignalIntent
+from sqlalchemy import text
+
+from backend.app.persistence.models.decisions import AgentDecision
+from backend.app.agent import service as service_module
 from backend.app.agent.service import AgentService
 from backend.app.agent.signals.common.indicators import Candle
 from backend.app.agent.signals.perp import binance_klines
@@ -2683,3 +2687,75 @@ def test_chart_window_settings_accept_24h_and_reject_more() -> None:
     for field, value in (("post_close_candles", 289), ("chart_pre_open_candles", 289), ("chart_pre_open_candles", 0)):
         with pytest.raises(ValueError):
             AgentMobileSettings(**{field: value})
+
+
+@pytest.mark.asyncio
+async def test_one_broken_asset_does_not_stop_the_scan_of_the_others(db, monkeypatch) -> None:
+    """A failing asset must not take the whole cycle down with it.
+
+    Regression guard for the cascade fixed upstream by Marco (V1 commit 9504142).
+    The per-asset try/except is not enough on its own: when an ORM flush fails, the
+    async session stays in a pending-rollback state, so every asset scanned afterwards
+    dies with PendingRollbackError. That is the incident of NOTE/36, where the blame
+    went to the signal filters for hours while the real cause was a failed INSERT on
+    agent_decisions poisoning the shared session.
+
+    The failure below is a real failed flush, measured to be the only thing that
+    reproduces the cascade on this stack: a plain exception - or even an invalid raw
+    SQL statement - leaves the session healthy, and the test would pass without the
+    fix, proving nothing.
+    """
+
+    service = AgentService(
+        settings(eligible_tokens=["AAA", "BBB", "CCC"] + [f"TOKEN_{i}" for i in range(147)]),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    monkeypatch.setattr("backend.app.agent.service.selected_spot_watchlist", lambda _s: [])
+    monkeypatch.setattr(
+        "backend.app.agent.service.selected_perp_watchlist", lambda _s: ["AAA", "BBB", "CCC"]
+    )
+
+    def decision(decision_id: str, asset: str) -> AgentDecision:
+        return AgentDecision(
+            decision_id=decision_id,
+            user_id=str(USER_ID),
+            timestamp_utc=datetime(2026, 8, 19, 12, 0, tzinfo=UTC),
+            asset=asset,
+            market="perp",
+            signal_quality=0.5,
+            confidence=0.5,
+            action="skip",
+            reasoning="scan cascade guard",
+            execution_result="skipped",
+        )
+
+    evaluated: list[str] = []
+    persisted: list[str] = []
+
+    async def fake_evaluate_perp(payload, session):
+        asset = payload["asset"]
+        evaluated.append(asset)
+        if asset == "AAA":
+            # Duplicate primary key -> the flush fails, exactly like the corrupted
+            # agent_decisions INSERT that started the cascade in production.
+            session.add(decision("dec_dup", asset))
+            await session.commit()
+            session.add(decision("dec_dup", asset))
+            await session.commit()
+        session.add(decision(f"dec_{asset}", asset))
+        await session.commit()
+        persisted.append(asset)
+        return {"signal": {"asset": asset, "market": "perp", "action": "skip"}, "risk": {}, "execution": {}}
+
+    monkeypatch.setattr(service, "evaluate_perp", fake_evaluate_perp)
+
+    async with get_session_factory()() as session:
+        result = await service.slow_tick(session, now=datetime(2026, 8, 19, 12, 0, tzinfo=UTC))
+
+    # Every asset is attempted...
+    assert evaluated == ["AAA", "BBB", "CCC"]
+    # ...and the healthy ones after the broken asset still reach the database.
+    # Without the rollback these two die with PendingRollbackError.
+    assert persisted == ["BBB", "CCC"]
+    assert [item["asset"] for item in result["scanner_results"]] == ["BBB", "CCC"]
