@@ -199,6 +199,13 @@ def _settings_from_config(settings: SettingsDep) -> AgentMobileSettings:
             settings, "perp_defense_profit_lock_steps", [(0.30, 0.50), (0.50, 0.80), (0.70, 1.00)]
         ),
         perp_defense_trailing_enabled=getattr(settings, "perp_defense_trailing_enabled", False),
+        perp_breach_mode=getattr(settings, "perp_breach_mode", "shadow"),
+        perp_breach_sl_persistence_seconds=getattr(settings, "perp_breach_sl_persistence_seconds", 5.0),
+        perp_breach_sl_bypass_pct=getattr(settings, "perp_breach_sl_bypass_pct", 0.15),
+        perp_breach_smart_sl_persistence_seconds=getattr(
+            settings, "perp_breach_smart_sl_persistence_seconds", 900.0
+        ),
+        perp_breach_smart_sl_bypass_pct=getattr(settings, "perp_breach_smart_sl_bypass_pct", 0.30),
         post_close_candles=10,
     )
 

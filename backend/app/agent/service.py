@@ -12,6 +12,7 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.brain import ClaudeMetaController, MetaControllerError
+from backend.app.agent.breach import BreachRuleConfig, evaluate_breach
 from backend.app.agent.guardian import (
     RED as GUARDIAN_RED,
     YELLOW as GUARDIAN_YELLOW,
@@ -1881,6 +1882,77 @@ class AgentService:
         )
         return True
 
+    def _evaluate_breach_levels(
+        self, pos: PerpPosition, price: Decimal, is_long: bool, now: datetime, ms: AgentMobileSettings
+    ) -> None:
+        """Shadow-mode breach telemetry (NOTE/64): advance the persistence+bypass
+        episode for the SL level and, if Smart SL is enabled and still idle, for
+        L1/L2. Logs only; perp_breach_mode="shadow" never changes what the
+        engine does. Best-effort: any failure here must not affect the tick.
+        """
+        try:
+            state = json.loads(pos.breach_state) if pos.breach_state else {}
+            sl_cfg = BreachRuleConfig(
+                persistence_seconds=float(ms.perp_breach_sl_persistence_seconds),
+                bypass_pct=float(ms.perp_breach_sl_bypass_pct),
+            )
+            smart_cfg = BreachRuleConfig(
+                persistence_seconds=float(ms.perp_breach_smart_sl_persistence_seconds),
+                bypass_pct=float(ms.perp_breach_smart_sl_bypass_pct),
+            )
+
+            levels: list[tuple[str, Decimal, BreachRuleConfig]] = []
+            if pos.stop_loss is not None:
+                levels.append(("SL", pos.stop_loss, sl_cfg))
+            if ms.perp_smart_sl_enabled and pos.initial_stop_loss is not None:
+                dist = abs(pos.entry_price - pos.initial_stop_loss)
+                if dist > 0:
+                    ssl_levels_sold = set()
+                    if pos.smart_sl_state:
+                        try:
+                            ssl_st = json.loads(pos.smart_sl_state)
+                            ssl_levels_sold = {
+                                i for i, lv in enumerate(ssl_st.get("levels", [])) if lv.get("status") != "idle"
+                            }
+                        except (ValueError, KeyError):
+                            pass
+                    fracs = [ms.perp_smart_sl_l1_frac, ms.perp_smart_sl_l2_frac]
+                    for i, name in enumerate(("L1", "L2")):
+                        if i in ssl_levels_sold:
+                            continue
+                        f = Decimal(str(fracs[i]))
+                        lvl_price = pos.entry_price - f * dist if is_long else pos.entry_price + f * dist
+                        levels.append((name, lvl_price, smart_cfg))
+
+            changed = False
+            for name, lvl_price, cfg in levels:
+                new_ep, events = evaluate_breach(
+                    state=state.get(name),
+                    level=name,
+                    level_price=float(lvl_price),
+                    current_price=float(price),
+                    is_long=is_long,
+                    now=now,
+                    cfg=cfg,
+                )
+                if new_ep is not state.get(name):
+                    changed = True
+                    if new_ep is None:
+                        state.pop(name, None)
+                    else:
+                        state[name] = new_ep
+                for ev in events:
+                    logger.info(
+                        f"breach_{ev.kind}",
+                        asset=pos.asset, position_id=pos.position_id, level=ev.level,
+                        duration_s=round(ev.duration_s, 1), max_depth_pct=round(ev.max_depth_pct, 4),
+                        fired_by=ev.fired_by, mode=ms.perp_breach_mode,
+                    )
+            if changed:
+                pos.breach_state = json.dumps(state) if state else None
+        except Exception as exc:
+            logger.warning("breach_evaluate_failed", asset=pos.asset, error=str(exc))
+
     async def _check_sl_tp(
         self,
         session: AsyncSession,
@@ -2018,6 +2090,9 @@ class AgentService:
                 if pos.max_price is None or price < pos.max_price:
                     pos.max_price = price; pos.updated_at = now; session.add(pos)
             extreme = pos.max_price if pos.max_price is not None else price
+
+            if self._ms.perp_breach_mode != "off":
+                self._evaluate_breach_levels(pos, price, is_long, now, self._ms)
 
             _ssl_suspended = False
             if pos.smart_sl_state:

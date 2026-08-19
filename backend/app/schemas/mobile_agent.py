@@ -86,6 +86,13 @@ class AgentMobileSettings(BaseModel):
     )
     perp_defense_trailing_enabled: bool = Field(default=False)
 
+    # --- Breach persistence+bypass telemetry (NOTE/64) ---
+    perp_breach_mode: str = Field(default="shadow", pattern=r"^(off|shadow|enforce_sl|enforce_all)$")
+    perp_breach_sl_persistence_seconds: float = Field(default=5.0, ge=0.0, le=3600.0)
+    perp_breach_sl_bypass_pct: float = Field(default=0.15, ge=0.0, le=20.0)
+    perp_breach_smart_sl_persistence_seconds: float = Field(default=900.0, ge=0.0, le=7200.0)
+    perp_breach_smart_sl_bypass_pct: float = Field(default=0.30, ge=0.0, le=20.0)
+
     # --- Parametri SPOT ---
     spot_capital_per_trade_pct: float = Field(default=6.0, gt=0.0, le=100.0)
     spot_per_trade_pct: float = Field(default=1.5, gt=0.0, le=20.0)
