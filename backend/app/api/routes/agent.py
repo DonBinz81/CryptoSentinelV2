@@ -268,6 +268,24 @@ async def risk_close_all(session: SessionDep, _: AdminAccessDep) -> dict:
     return await get_agent_service().close_all_and_pause(session, reason="manual_risk")
 
 
+class ResetDailyCounterRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=120)
+
+
+@router.post("/risk/reset-daily-counter")
+async def reset_daily_counter(
+    request: ResetDailyCounterRequest, session: SessionDep, _: AdminAccessDep
+) -> dict:
+    """Restart the daily-loss counter from now (admin only, NOTE/63).
+
+    Does not change the limit and does not disarm the guard: the same
+    daily_loss_limit_pct applies to the new stretch. Every reset is counted,
+    timestamped and logged; the app shows it next to the risk banner.
+    """
+
+    return await get_agent_service().reset_daily_loss_counter(session, note=request.note)
+
+
 class ResetDbRequest(BaseModel):
     backup_name: str | None = Field(default=None, max_length=120)
 

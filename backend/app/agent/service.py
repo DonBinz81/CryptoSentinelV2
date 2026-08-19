@@ -97,6 +97,11 @@ class _CapitalPreservationView:
         return getattr(inner, self._DEFENSE_MAP.get(name, name))
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """SQLite hands back naive datetimes; they are stored as UTC, mark them so."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
 def _estimate_liquidation_price(entry: Decimal, leverage: int, side: str) -> Decimal | None:
     """Stima il prezzo di liquidazione (cross, senza maintenance margin).
 
@@ -344,6 +349,64 @@ class AgentService:
     def set_kill_switch(self, state: KillSwitchState) -> dict:
         self.risk.set_kill_switch(state)
         return self.status()
+
+    async def reset_daily_loss_counter(self, session: AsyncSession, *, note: str | None = None) -> dict:
+        """Restart the daily-loss counter from now (admin action, NOTE/63).
+
+        The limit itself is NOT changed and the guard is NOT disarmed: the same
+        ``daily_loss_limit_pct`` keeps applying to the new stretch. Unrealized
+        PnL of open positions keeps counting — open risk is never hidden, the
+        reset restarts the realized sum only. Every reset is deliberate and
+        visible: counted per day, timestamped, and logged with the loss it
+        wiped, so bypassing the daily cap is always on the record.
+        """
+        user_id = str(self.settings.default_user_id)
+        pnl_repo = PnlRepository(session)
+        portfolio = await pnl_repo.get_portfolio(user_id)
+        if portfolio is None:
+            return {"status": "error", "reason": "portfolio_not_initialised"}
+
+        now = datetime.now(UTC)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        pnl_before_pct = portfolio.daily_loss_limit_used_pct
+        last_reset = getattr(portfolio, "daily_counter_reset_at", None)
+        same_day = last_reset is not None and _ensure_utc(last_reset) >= day_start
+        resets_today = (int(getattr(portfolio, "daily_counter_resets_today", 0) or 0) + 1) if same_day else 1
+
+        portfolio.daily_counter_since = now
+        portfolio.daily_counter_reset_at = now
+        portfolio.daily_counter_resets_today = resets_today
+        portfolio.updated_at = now
+        session.add(portfolio)
+        await session.commit()
+        logger.info(
+            "daily_loss_counter_reset",
+            pnl_before_pct=float(pnl_before_pct),
+            equity_usd=float(portfolio.total_equity_usd),
+            resets_today=resets_today,
+            note=note,
+        )
+
+        # Recompute the portfolio right away so /views/global shows the new
+        # counter on the next read, not after the next 5s tick.
+        spot_positions = await SpotPositionRepository(session).open_for_user(user_id)
+        perp_positions = await PerpPositionRepository(session).open_for_user(user_id)
+        open_spot = [p for p in spot_positions if p.status == "open"]
+        open_perp = [p for p in perp_positions if p.status == "open"]
+        try:
+            await self._refresh_position_prices(session, open_spot, open_perp)
+        except Exception:
+            pass  # best effort: the stored current_price is good enough here
+        await self._update_portfolio_state(session, open_spot, open_perp, now)
+        refreshed = await pnl_repo.get_portfolio(user_id)
+        return {
+            "status": "ok",
+            "reset_at": now.isoformat(),
+            "resets_today": resets_today,
+            "pnl_before_pct": float(pnl_before_pct),
+            "daily_loss_used_pct_now": float(refreshed.daily_loss_limit_used_pct) if refreshed else None,
+            "note": note,
+        }
 
     async def close_all_and_pause(self, session: AsyncSession, *, reason: str = "manual_risk") -> dict:
         """Chiude TUTTE le posizioni aperte (spot + perp) al prezzo di mercato e
@@ -2245,8 +2308,22 @@ class AgentService:
         total = portfolio.initial_equity_usd + realized + unrealized
 
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        daily_realized_spot = await spot_repo.sum_realized_pnl(user_id, since=day_start)
-        daily_realized_perp = await perp_repo.sum_realized_pnl(user_id, since=day_start)
+        # Manual daily-counter reset (NOTE/63): when an admin restarted the
+        # counter, the realized sum starts there instead of at midnight. A
+        # marker left over from a previous day is cleared right here, in the
+        # same tick that crosses midnight — no separate rollover job. The
+        # cleared fields are persisted by the upsert below (same session).
+        counter_since = getattr(portfolio, "daily_counter_since", None)
+        if counter_since is not None and _ensure_utc(counter_since) <= day_start:
+            portfolio.daily_counter_since = None
+            portfolio.daily_counter_reset_at = None
+            portfolio.daily_counter_resets_today = 0
+            counter_since = None
+        effective_start = _ensure_utc(counter_since) if counter_since is not None else day_start
+        daily_realized_spot = await spot_repo.sum_realized_pnl(user_id, since=effective_start)
+        daily_realized_perp = await perp_repo.sum_realized_pnl(user_id, since=effective_start)
+        # Unrealized PnL of OPEN positions keeps counting after a reset: open
+        # risk is never hidden — the reset restarts the realized sum only.
         daily_pnl = daily_realized_spot + daily_realized_perp + unrealized
         # % di PnL giornaliero sull'equity (negativo in perdita) per la guardia daily_loss_limit.
         daily_loss_limit_used_pct = (

@@ -143,6 +143,10 @@ class RiskGuardrailView(BaseModel):
     daily_loss_used_pct: Decimal = Decimal("0")
     daily_loss_limit_pct: float
     min_portfolio_value_usd: float
+    # Manual daily-counter reset trail (NOTE/63): the limit can be restarted by
+    # an admin, but never silently — the app shows when and how many times.
+    daily_counter_resets_today: int = 0
+    daily_counter_reset_at: str | None = None
 
 
 class GlobalView(BaseModel):

@@ -51,6 +51,9 @@ async def _apply_column_migrations(conn) -> None:
         ("support_tickets", "user_last_seen_at", "DATETIME"),
         ("support_tickets", "admin_last_seen_at", "DATETIME"),
         ("perp_trades", "position_id", "VARCHAR(64)"),
+        ("portfolio_state", "daily_counter_since", "DATETIME"),
+        ("portfolio_state", "daily_counter_reset_at", "DATETIME"),
+        ("portfolio_state", "daily_counter_resets_today", "INTEGER NOT NULL DEFAULT 0"),
     ]
     for table, column, col_type in new_columns:
         try:
