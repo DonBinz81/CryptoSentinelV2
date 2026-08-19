@@ -37,6 +37,9 @@ function faded(hex: string, alpha: number): string {
 // dalla finestra del trade usano le stesse tinte spente.
 // Il marker d'ingresso ha lo stesso bianco della linea E: freccia e livello sono
 // la stessa informazione, il momento e il prezzo dell'ingresso.
+/** Quanto la sigla sta sopra la sua linea. Serve anche a capire se esce in cima. */
+const LABEL_OFFSET_PX = 13;
+
 const ENTRY_MARKER = LEVEL_COLORS.entry;
 const CANDLE_UP = '#089981';
 const CANDLE_DOWN = '#f23645';
@@ -223,10 +226,16 @@ export const TradeCandleChartLW: FC<{
     const placeInlineLabels = () => {
       const placed = model.levels
         .map((level) => {
-          // priceToCoordinate torna null se il livello cade fuori dall'area
-          // disegnata: in quel caso la sigla non si mostra affatto.
           const coordinate = series.priceToCoordinate(level.price);
+          // priceToCoordinate NON torna null per i livelli fuori vista: restituisce
+          // comunque un numero, negativo sopra il grafico o maggiore dell'altezza
+          // sotto. Senza questo controllo, zoomando le sigle uscivano dal riquadro
+          // e finivano sparse nella pagina (TP2 sopra la card, SL dentro la scheda
+          // del trade). Chi esce non si disegna: il suo prezzo resta comunque
+          // leggibile nella scala di destra finche' la linea e' in vista.
           if (coordinate == null) return null;
+          const y = coordinate as number;
+          if (y - LABEL_OFFSET_PX < 0 || y > height) return null;
           return {
             key: level.key as string,
             text:
@@ -317,7 +326,7 @@ export const TradeCandleChartLW: FC<{
     return <p className="text-xs text-gray-500">Grafico non disponibile per questo trade.</p>;
   }
   return (
-    <div style={{ position: 'relative', width: '100%', height }}>
+    <div style={{ position: 'relative', width: '100%', height, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height }} />
       {inlineLabels.map((label) => (
         <span
@@ -330,7 +339,7 @@ export const TradeCandleChartLW: FC<{
             right: priceAxisWidth + 4 + label.lane * 26,
             // Appena sopra la linea, con un po' d'aria: lo scostamento e' fisso e
             // uguale per tutte, cosi' resta chiaro a quale livello appartengono.
-            top: label.top - 13,
+            top: label.top - LABEL_OFFSET_PX,
             fontSize: 7,
             lineHeight: '9px',
             fontWeight: label.bold ? 600 : 400,
