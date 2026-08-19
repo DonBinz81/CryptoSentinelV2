@@ -99,3 +99,11 @@ perp:
     - [0.50, 0.80]
     - [0.70, 1.00]
   defense_trailing_enabled: false
+  # Breach persistence+bypass telemetry (NOTE/64): shadow-only, logs what the
+  # rule would do without changing engine behavior. off | shadow | enforce_sl
+  # | enforce_all. Thresholds from the 18-19/08 retrospective (NOTE/60/64).
+  breach_mode: shadow
+  breach_sl_persistence_seconds: 5.0
+  breach_sl_bypass_pct: 0.15
+  breach_smart_sl_persistence_seconds: 900.0
+  breach_smart_sl_bypass_pct: 0.30

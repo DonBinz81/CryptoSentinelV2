@@ -298,6 +298,11 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "defense_smart_sl_confirmation_candles": "perp_defense_smart_sl_confirmation_candles",
         "defense_profit_lock_steps": "perp_defense_profit_lock_steps",
         "defense_trailing_enabled": "perp_defense_trailing_enabled",
+        "breach_mode": "perp_breach_mode",
+        "breach_sl_persistence_seconds": "perp_breach_sl_persistence_seconds",
+        "breach_sl_bypass_pct": "perp_breach_sl_bypass_pct",
+        "breach_smart_sl_persistence_seconds": "perp_breach_smart_sl_persistence_seconds",
+        "breach_smart_sl_bypass_pct": "perp_breach_smart_sl_bypass_pct",
     },
     "signal_engine": {
         "binance_futures_base_url": "binance_futures_base_url",
@@ -781,6 +786,18 @@ class Settings(BaseSettings):
         alias="PERP_DEFENSE_PROFIT_LOCK_STEPS",
     )
     perp_defense_trailing_enabled: bool = Field(default=False, alias="PERP_DEFENSE_TRAILING_ENABLED")
+    # Breach persistence+bypass telemetry (NOTE/64): shadow-only for now, logs
+    # what the rule would have done without changing engine behavior. Modes:
+    # off | shadow | enforce_sl | enforce_all. Thresholds from the 18-19/08
+    # retrospective on real tick data (NOTE/60/64); NOT re-verified across
+    # other market regimes yet.
+    perp_breach_mode: str = Field(default="shadow", alias="PERP_BREACH_MODE")
+    perp_breach_sl_persistence_seconds: float = Field(default=5.0, alias="PERP_BREACH_SL_PERSISTENCE_SECONDS")
+    perp_breach_sl_bypass_pct: float = Field(default=0.15, alias="PERP_BREACH_SL_BYPASS_PCT")
+    perp_breach_smart_sl_persistence_seconds: float = Field(
+        default=900.0, alias="PERP_BREACH_SMART_SL_PERSISTENCE_SECONDS"
+    )
+    perp_breach_smart_sl_bypass_pct: float = Field(default=0.30, alias="PERP_BREACH_SMART_SL_BYPASS_PCT")
 
     binance_futures_base_url: str | None = Field(default=None, alias="BINANCE_FUTURES_BASE_URL")
     binance_futures_ws_url: str | None = Field(default=None, alias="BINANCE_FUTURES_WS_URL")
