@@ -2510,6 +2510,7 @@ class AgentService:
                 try:
                     scanner_results.append(await self.evaluate_spot(_scanner_payload(asset, "spot"), session))
                 except Exception as exc:
+                    await _rollback_failed_scan_session(session)
                     scan_errors.append(str(exc))
                     logger.warning("scanner_spot_asset_error", asset=asset, error=str(exc))
         for asset in perp_assets:
@@ -2517,6 +2518,7 @@ class AgentService:
             try:
                 scanner_results.append(await self.evaluate_perp(_scanner_payload(asset, "perp"), session))
             except Exception as exc:
+                await _rollback_failed_scan_session(session)
                 scan_errors.append(str(exc))
                 logger.warning("scanner_perp_asset_error", asset=asset, error=str(exc))
         try:
@@ -3549,6 +3551,29 @@ def _active_markets(value: str) -> set[str]:
     if normalized in {"perp", "perpetual"}:
         return {"perp"}
     return {"spot", "perp"}
+
+
+async def _rollback_failed_scan_session(session: AsyncSession) -> None:
+    """Recover the scanner DB session after a per-asset persistence failure.
+
+    Ported from the V1 upstream (Iridexx/CryptoSentinelHackathon, commit 9504142
+    "Fix agent scan rollback cascade", 2026-08-19). Author: Marco.
+
+    The per-asset try/except is not enough on its own: after a failed statement an
+    async SQLAlchemy session stays unusable until someone rolls it back, so the next
+    asset fails too, and the one after that. One broken asset took down the whole
+    scan cycle. That cascade is what NOTE/36 diagnosed the hard way, blaming the
+    signal filters for hours while the real cause was a failed INSERT.
+
+    Committed work is not lost: every decision and every position is committed as it
+    is written, so the rollback only discards the half-written state of the asset
+    that just failed.
+    """
+
+    try:
+        await session.rollback()
+    except Exception as exc:  # pragma: no cover - defensive, the cycle must go on
+        logger.warning("scanner_session_rollback_failed", error=str(exc))
 
 
 def _scanner_payload(asset: str, market: str) -> dict:
