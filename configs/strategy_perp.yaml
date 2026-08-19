@@ -81,3 +81,21 @@ perp:
   smart_sl_tp_recovery_delta_pct: 7    # delta extra % oltre copertura perdite (guadagno minimo)
   smart_sl_confirmation_candles: 2   # candele 5min di conferma (sell e rebuy above_entry)
   smart_sl_max_reentries: 1          # max cicli sell→rebuy
+  # Regime guardian (VERDE/GIALLO/ROSSO) driven by the bot's own full stop-losses
+  # on a rolling window. YELLOW scales new entries, RED blocks them; open positions
+  # stay managed. See NOTE/61 for the study behind defaults.
+  guardian_enabled: true
+  guardian_window_hours: 6.0         # rolling window for counting full stops
+  guardian_yellow_stops: 1           # stops in window -> YELLOW
+  guardian_red_stops: 2              # stops in window -> RED
+  guardian_yellow_size_factor: 0.5   # new-entry size multiplier while YELLOW
+  guardian_reentry_hours: 6.0        # clean hours per step-down RED->YELLOW->GREEN
+  # Capital Preservation Mode: defensive management values applied while RED.
+  # Read-time override only: the user's saved settings are never modified.
+  defense_tp1_close_pct: 100.0       # bank the whole position at TP1 while RED
+  defense_smart_sl_confirmation_candles: 0   # immediate L1/L2 partial sells while RED
+  defense_profit_lock_steps:         # front-loaded ratchet while RED
+    - [0.30, 0.50]
+    - [0.50, 0.80]
+    - [0.70, 1.00]
+  defense_trailing_enabled: false

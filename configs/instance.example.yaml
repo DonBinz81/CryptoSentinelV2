@@ -150,6 +150,10 @@ fcm:
   critical_topic: cryptosentinelv2-critical
   token_store_path: backend/storage/fcm_tokens.json
   risk_drawdown_alert_enabled: true
+  # Risk-alert throttling: one reminder per interval per alert type; a value
+  # worsening by >= escalation step re-sends immediately (NOTE/60).
+  risk_alert_min_interval_minutes: 60.0
+  risk_alert_escalation_step: 1.0
 
 signal_engine:
   binance_futures_base_url: ""

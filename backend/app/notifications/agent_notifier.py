@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
 from uuid import UUID
@@ -150,22 +151,85 @@ class AgentNotifier:
     # Allarmi rischio
     # ------------------------------------------------------------------
 
+    async def notify_guardian_state(
+        self,
+        user_id: str,
+        *,
+        title: str,
+        body: str,
+        state: str,
+    ) -> bool:
+        """Regime guardian state change: one push per transition.
+
+        Transitions are discrete events (a handful per day at worst), so no
+        extra dedup key is needed here; risk_alerts preference still applies.
+        """
+        prefs = self.get_preferences(user_id)
+        if not prefs.risk_alerts:
+            return False
+        return await self._send(
+            user_id=user_id,
+            title=title,
+            body=body,
+            severity="critical",
+            data={
+                "topic": self.settings.fcm_risk_topic,
+                "alert_type": "guardian",
+                "state": state,
+            },
+        )
+
     async def notify_risk_alert(
         self,
         user_id: str,
         alert_type: str,
         detail: str,
+        *,
+        value: float | None = None,
     ) -> bool:
-        """Notifica allarme rischio con anti-spam (no ri-invio se stesso stato)."""
+        """Risk alert with time-based throttling.
+
+        Risk conditions are continuous (re-evaluated every fast tick, ~5s), so
+        the old exact-state dedup re-sent a push every time the number in the
+        text moved by 0.1pp: 202 pushes in 2 hours on 2026-08-19 (NOTE/60 §4).
+        New contract, per alert_type:
+          - at most one push per ``risk_alert_min_interval_minutes`` (reminder
+            for an ongoing condition);
+          - re-sent EARLIER only if ``value`` worsened by at least
+            ``risk_alert_escalation_step`` since the last push (escalation must
+            not wait for the interval).
+        """
         prefs = self.get_preferences(user_id)
         if not prefs.risk_alerts:
             return False
 
-        # Anti-spam: non inviare se stesso alert_type + detail già notificato
-        last_raw = get_runtime_value(user_id, self.RISK_STATE_KEY)
-        current_state = json.dumps({"alert_type": alert_type, "detail": detail})
-        if last_raw == current_state:
-            return False
+        key = f"{self.RISK_STATE_KEY}:{alert_type}"
+        now = datetime.now(UTC)
+        last_raw = get_runtime_value(user_id, key)
+        if last_raw:
+            try:
+                last = json.loads(last_raw)
+            except ValueError:
+                last = {}
+            interval_ok = True
+            sent_at_raw = last.get("sent_at")
+            if sent_at_raw:
+                try:
+                    interval = timedelta(
+                        minutes=float(getattr(self.settings, "risk_alert_min_interval_minutes", 60.0))
+                    )
+                    interval_ok = now - datetime.fromisoformat(sent_at_raw) >= interval
+                except ValueError:
+                    pass
+            last_value = last.get("value")
+            step = float(getattr(self.settings, "risk_alert_escalation_step", 1.0))
+            worsened = (
+                value is not None
+                and isinstance(last_value, (int, float))
+                and value >= float(last_value) + step
+            )
+            if not interval_ok and not worsened:
+                return False
 
         title = f"Allarme rischio: {alert_type.replace('_', ' ').title()}"
         body = detail
@@ -181,7 +245,11 @@ class AgentNotifier:
             },
         )
         if sent:
-            set_runtime_value(user_id, self.RISK_STATE_KEY, current_state)
+            set_runtime_value(
+                user_id,
+                key,
+                json.dumps({"detail": detail, "value": value, "sent_at": now.isoformat()}),
+            )
         return sent
 
     # ------------------------------------------------------------------

@@ -12,6 +12,13 @@ from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.brain import ClaudeMetaController, MetaControllerError
+from backend.app.agent.guardian import (
+    RED as GUARDIAN_RED,
+    YELLOW as GUARDIAN_YELLOW,
+    GuardianChange,
+    GuardianConfig,
+    RegimeGuardian,
+)
 from backend.app.agent.heartbeat import heartbeat
 from backend.app.agent.risk import KillSwitchState, RiskDecision, RiskManager, SignalIntent
 from backend.app.agent.signals.perp.binance_klines import BinanceKlineFeed, BinanceMarket, get_kline_cache_entry
@@ -67,6 +74,29 @@ BTC_TREND_SHOCK_5M_VOL_LOOKBACK = 50
 # Sentinel per la lazy-init del resolver token (distingue "non inizializzato" da "None").
 
 
+class _CapitalPreservationView:
+    """Read-only view over AgentMobileSettings used while the guardian is RED.
+
+    Substitutes the defensive management values (Capital Preservation Mode) for
+    their normal counterparts; every other attribute passes through untouched.
+    Position levels (SL/TP prices) are frozen on the position and unaffected.
+    """
+
+    _DEFENSE_MAP = {
+        "perp_tp1_close_pct": "perp_defense_tp1_close_pct",
+        "perp_smart_sl_confirmation_candles": "perp_defense_smart_sl_confirmation_candles",
+        "perp_profit_lock_steps": "perp_defense_profit_lock_steps",
+        "perp_trailing_enabled": "perp_defense_trailing_enabled",
+    }
+
+    def __init__(self, ms) -> None:
+        object.__setattr__(self, "_inner", ms)
+
+    def __getattr__(self, name: str):
+        inner = object.__getattribute__(self, "_inner")
+        return getattr(inner, self._DEFENSE_MAP.get(name, name))
+
+
 def _estimate_liquidation_price(entry: Decimal, leverage: int, side: str) -> Decimal | None:
     """Stima il prezzo di liquidazione (cross, senza maintenance margin).
 
@@ -115,6 +145,8 @@ class AgentService:
         self.price_feed = BinanceKlineFeed(
             timeout_seconds=self.settings.market_data_request_timeout_seconds
         )
+        # Regime guardian (NOTE/61): reacts to the bot's own full stops.
+        self.guardian = RegimeGuardian(str(self.settings.default_user_id))
 
     @property
     def _ms(self) -> AgentMobileSettings:
@@ -224,6 +256,28 @@ class AgentService:
             chart_pre_open_candles=getattr(self.settings, "chart_pre_open_candles", 20),
         )
 
+    def _guardian_cfg(self, ms: AgentMobileSettings | None = None) -> GuardianConfig:
+        """Guardian knobs from the mobile settings (app-configurable)."""
+        m = ms or self._ms
+        return GuardianConfig(
+            enabled=bool(getattr(m, "perp_guardian_enabled", True)),
+            window_hours=float(getattr(m, "perp_guardian_window_hours", 6.0)),
+            yellow_stops=int(getattr(m, "perp_guardian_yellow_stops", 1)),
+            red_stops=int(getattr(m, "perp_guardian_red_stops", 2)),
+            reentry_hours=float(getattr(m, "perp_guardian_reentry_hours", 6.0)),
+        )
+
+    def _eff_ms(self) -> AgentMobileSettings | "_CapitalPreservationView":
+        """Management settings, with Capital Preservation values while RED.
+
+        Read-time resolution only: the user's saved settings are never
+        modified, so leaving RED needs no restore step.
+        """
+        ms = self._ms
+        if getattr(ms, "perp_guardian_enabled", True) and self.guardian.state == GUARDIAN_RED:
+            return _CapitalPreservationView(ms)
+        return ms
+
     def status(self) -> dict:
         return {
             "mode": self._ms.mode,
@@ -237,6 +291,8 @@ class AgentService:
             "watchlist_spot_count": len(selected_spot_watchlist(self.settings)),
             "watchlist_perp_count": len(selected_perp_watchlist(self.settings)),
             "heartbeat": heartbeat.as_dict(),
+            # Regime guardian (NOTE/61): state for the app banner.
+            "guardian": self.guardian.snapshot(datetime.now(UTC), self._guardian_cfg()),
         }
 
     def data_coverage(self) -> dict:
@@ -767,6 +823,23 @@ class AgentService:
                 )
                 signal["action"] = "skip"
                 signal["reason"] = "btc_trend_shock_blocked"
+        # Regime guardian: while RED no new perp entry is allowed (Capital
+        # Preservation Mode). Checked after the market filters so the recorded
+        # rejection reason is unambiguous.
+        if signal.get("action") != "skip":
+            g_cfg = self._guardian_cfg()
+            if g_cfg.enabled and self.guardian.state == GUARDIAN_RED:
+                logger.info(
+                    "perp_entry_rejected",
+                    asset=signal.get("asset"),
+                    candidate_side=signal.get("side"),
+                    reason="guardian_red_capital_preservation",
+                    stops_in_window=self.guardian.stops_in_window(datetime.now(UTC), g_cfg),
+                    entry_price=signal.get("price"),
+                    quality=signal.get("quality"),
+                )
+                signal["action"] = "skip"
+                signal["reason"] = "guardian_red_capital_preservation"
         # Il segnale embeds la leva calcolata con il config YAML statico.
         # La sovrascriviamo con i mobile settings (RuntimeState) per rispettare
         # la leva impostata dall'utente nell'app.
@@ -1245,7 +1318,9 @@ class AgentService:
         # Fee pura = opening_fee_usd escludendo lo slippage già incluso nell'entry_price.
         fee_only = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
 
-        f_req = close_fraction if close_fraction is not None else Decimal(str(self._ms.perp_tp1_close_pct)) / Decimal("100")
+        # Effective settings: while the guardian is RED the TP1 fraction comes
+        # from the Capital Preservation profile (defense_tp1_close_pct).
+        f_req = close_fraction if close_fraction is not None else Decimal(str(self._eff_ms().perp_tp1_close_pct)) / Decimal("100")
         f_req = max(Decimal("0"), min(Decimal("1"), f_req))
         # Una quota del 100% (o che lascerebbe una size trascurabile) è una chiusura piena:
         # altrimenti la posizione resterebbe "open" con size 0.
@@ -1336,6 +1411,20 @@ class AgentService:
             "perp_position_closed",
             asset=pos.asset, reason=reason, partial=partial, pnl_usd=float(pnl), mfe_to_tp2=mfe_to_tp2,
         )
+        # Regime guardian: a FULL stop-loss is the regime signal (NOTE/61).
+        # Partial exits, breakevens and smart-SL sells do not count.
+        if reason == "stop_loss" and not partial:
+            try:
+                change = self.guardian.record_stop(
+                    asset=pos.asset,
+                    pnl_usd=float(pnl),
+                    now=now,
+                    cfg=self._guardian_cfg(),
+                )
+                if change is not None:
+                    await self._notify_guardian_change(session, change, now)
+            except Exception as exc:  # the guardian must never block a close
+                logger.warning("guardian_record_stop_failed", error=str(exc))
         # Notifica chiusura trade (fire-and-forget)
         try:
             notifier = get_agent_notifier()
@@ -1834,7 +1923,10 @@ class AgentService:
                     )
                 )
 
-        ms = self._ms
+        # Effective settings: identical to self._ms while GREEN/YELLOW; while
+        # RED the Capital Preservation values replace the management knobs
+        # (tp1 fraction, smart-SL confirmation, ratchet steps, trailing flag).
+        ms = self._eff_ms()
         if (ms.perp_trailing_mode or "largo").lower() == "stretto":
             trail_base = self.settings.perp_trailing_base_atr_stretto
             trail_floor = self.settings.perp_trailing_floor_atr_stretto
@@ -2246,6 +2338,14 @@ class AgentService:
                 await self._btc_trend_shock_filter()
             except Exception as exc:
                 logger.warning("btc_trend_shock_filter_error", error=str(exc))
+            # Regime guardian re-check: de-escalates after clean hours (and
+            # covers escalation after a restart). One notification per change.
+            try:
+                change = self.guardian.evaluate(now=_now, cfg=self._guardian_cfg())
+                if change is not None:
+                    await self._notify_guardian_change(session, change, _now)
+            except Exception as exc:
+                logger.warning("guardian_evaluate_error", error=str(exc))
         spot_assets = selected_spot_watchlist(self.settings) if "spot" in markets else []
         perp_assets = selected_perp_watchlist(self.settings) if "perp" in markets else []
         selected_assets = list(dict.fromkeys([*spot_assets, *perp_assets]))
@@ -2453,6 +2553,22 @@ class AgentService:
             open_perp_positions=perp_positions,
             ms=self._ms,
         )
+        # Regime guardian YELLOW: scale down approved perp entries. Applied
+        # before the brain so every downstream consumer sees the real size.
+        if risk_decision.allowed and str(signal.get("market")) == "perp":
+            g_ms = self._ms
+            g_cfg = self._guardian_cfg(g_ms)
+            if g_cfg.enabled and self.guardian.state == GUARDIAN_YELLOW:
+                factor = Decimal(str(getattr(g_ms, "perp_guardian_yellow_size_factor", 0.5)))
+                scaled = risk_decision.size_quote * factor
+                if scaled < Decimal(str(self.settings.min_trade_size_usd)):
+                    risk_decision = RiskDecision(
+                        False, "guardian_yellow_below_min_size", size_quote=scaled
+                    )
+                else:
+                    risk_decision.size_quote = scaled
+                    risk_decision.risk_amount_quote = risk_decision.risk_amount_quote * factor
+                    risk_decision.reason = "risk_approved_guardian_yellow"
         brain_decision = await self._brain_decision(session, signal, risk_decision)
         decision = await self._record_decision(session, signal, risk_decision, brain_decision)
         execution = {"status": "skipped", "reason": "brain_or_risk_blocked"}
@@ -2963,6 +3079,92 @@ class AgentService:
         except Exception:
             pass  # le notifiche non bloccano mai l'agente
 
+    async def _notify_guardian_change(
+        self, session: AsyncSession, change: GuardianChange, now: datetime
+    ) -> None:
+        """One push per guardian transition: what happened and what the bot sees."""
+        try:
+            ms = self._ms
+            cfg = self._guardian_cfg(ms)
+            events = self.guardian.recent_stop_events(now, cfg)
+            stops_txt = " · ".join(f"{a} {p:+.2f}$" for a, p, _ in events[-5:]) or "nessuno"
+            window_pnl = sum(p for _, p, _ in events)
+            factor_pct = int(float(getattr(ms, "perp_guardian_yellow_size_factor", 0.5)) * 100)
+            if change.current == GUARDIAN_RED:
+                title = "🔴 Guardiano: Protezione capitale ATTIVA"
+                base = (
+                    f"Condizioni non favorevoli: {change.stops_in_window} stop in "
+                    f"{cfg.window_hours:.0f}h ({stops_txt}, {window_pnl:+.2f}$). "
+                    "Nuove aperture sospese; le posizioni aperte restano gestite in "
+                    "Protezione capitale. Rivaluto ogni 5 minuti: rientro graduale "
+                    f"dopo {cfg.reentry_hours:.0f}h senza nuovi stop."
+                )
+            elif change.current == GUARDIAN_YELLOW and change.previous == GUARDIAN_RED:
+                title = "🟡 Guardiano: rientro graduale"
+                base = (
+                    f"Nessuno stop da {cfg.reentry_hours:.0f}h: Protezione capitale "
+                    f"disattivata, nuove aperture a size ridotta ({factor_pct}%). "
+                    f"Operatività piena tra {cfg.reentry_hours:.0f}h se resta pulito."
+                )
+            elif change.current == GUARDIAN_YELLOW:
+                title = "🟡 Guardiano: prudenza"
+                base = (
+                    f"{change.stops_in_window} stop nelle ultime {cfg.window_hours:.0f}h "
+                    f"({stops_txt}). Nuove aperture a size ridotta ({factor_pct}%); "
+                    f"un altro stop attiva la Protezione capitale."
+                )
+            else:
+                title = "🟢 Guardiano: operatività piena"
+                base = f"Nessuno stop nelle ultime {cfg.reentry_hours:.0f}h: si torna alla size normale."
+            # Brain enrichment (best effort): a short human explanation of what
+            # the bot sees right now. Falls back to the code-composed text.
+            brain_txt = None
+            try:
+                shock = await self._btc_trend_shock_filter()
+                context = {
+                    "transizione": f"{change.previous} -> {change.current}",
+                    "stop_nella_finestra": [
+                        {"asset": a, "pnl_usd": round(p, 2), "quando": t.isoformat()}
+                        for a, p, t in events
+                    ],
+                    "pnl_finestra_usd": round(window_pnl, 2),
+                    "btc_regime": {
+                        k: shock.get(k)
+                        for k in ("state", "adx", "natr_percentile", "relative_volume")
+                    },
+                }
+                brain_txt, usage = await self.brain.explain(
+                    instruction=(
+                        "Sei il meta-controller di un bot di trading perp. Il guardiano "
+                        "di regime ha appena cambiato stato. Scrivi 2-3 frasi in italiano, "
+                        "asciutte e professionali, che spieghino cosa sta succedendo e "
+                        "perché il bot si sta proteggendo o sta riaprendo, usando SOLO i "
+                        "dati forniti. Nessun consiglio, nessuna promessa."
+                    ),
+                    context=context,
+                )
+                if usage is not None:
+                    try:
+                        await ApiUsageRepository(session).record(
+                            model=usage.model,
+                            input_tokens=usage.input_tokens,
+                            output_tokens=usage.output_tokens,
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.warning("guardian_brain_explain_failed", error=str(exc))
+            body = f"{base}\n\n{brain_txt}" if brain_txt else base
+            notifier = get_agent_notifier()
+            await notifier.notify_guardian_state(
+                str(self.settings.default_user_id),
+                title=title,
+                body=body,
+                state=change.current,
+            )
+        except Exception as exc:  # notifications must never break the engine
+            logger.warning("guardian_notify_failed", error=str(exc))
+
     async def _check_risk_notifications(self, session: AsyncSession, spot_positions: list, perp_positions: list) -> None:
         """Controlla condizioni di rischio e invia push se necessario."""
         try:
@@ -2983,9 +3185,12 @@ class AgentService:
             # Drawdown
             drawdown = float(getattr(portfolio, "drawdown_pct", 0) or 0)
             if self.settings.risk_drawdown_alert_enabled and drawdown >= self.settings.risk_notify_drawdown_pct:
+                # ``value`` feeds the notifier throttle: reminder once per
+                # interval, immediate re-send only if it worsens by >= step.
                 await notifier.notify_risk_alert(
                     user_id, "drawdown",
-                    f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%"
+                    f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%",
+                    value=drawdown,
                 )
 
             # Portfolio floor

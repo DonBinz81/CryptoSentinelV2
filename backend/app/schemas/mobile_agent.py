@@ -70,6 +70,22 @@ class AgentMobileSettings(BaseModel):
     perp_smart_sl_confirmation_candles: int = Field(default=2, ge=1, le=10)
     perp_smart_sl_max_reentries: int = Field(default=1, ge=0, le=5)
 
+    # --- Regime guardian + Capital Preservation Mode (NOTE/61) ---
+    perp_guardian_enabled: bool = Field(default=True)
+    perp_guardian_window_hours: float = Field(default=6.0, ge=1.0, le=48.0)
+    perp_guardian_yellow_stops: int = Field(default=1, ge=1, le=10)
+    perp_guardian_red_stops: int = Field(default=2, ge=1, le=20)
+    perp_guardian_yellow_size_factor: float = Field(default=0.5, ge=0.1, le=1.0)
+    perp_guardian_reentry_hours: float = Field(default=6.0, ge=0.5, le=72.0)
+    # Defensive management values applied while the guardian is RED. Read-time
+    # override only: the user's saved values below are never rewritten.
+    perp_defense_tp1_close_pct: float = Field(default=100.0, ge=1.0, le=100.0)
+    perp_defense_smart_sl_confirmation_candles: int = Field(default=0, ge=0, le=10)
+    perp_defense_profit_lock_steps: list[tuple[float, float]] = Field(
+        default_factory=lambda: [(0.30, 0.50), (0.50, 0.80), (0.70, 1.00)]
+    )
+    perp_defense_trailing_enabled: bool = Field(default=False)
+
     # --- Parametri SPOT ---
     spot_capital_per_trade_pct: float = Field(default=6.0, gt=0.0, le=100.0)
     spot_per_trade_pct: float = Field(default=1.5, gt=0.0, le=20.0)
@@ -178,6 +194,23 @@ class AgentMobileSettings(BaseModel):
         n_steps = len(self.perp_profit_lock_steps or [])
         if n_steps and self.perp_ratchet_breakeven_after_step > n_steps:
             self.perp_ratchet_breakeven_after_step = n_steps
+        # Guardian sanity: RED must require at least as many stops as YELLOW.
+        if self.perp_guardian_red_stops < self.perp_guardian_yellow_stops:
+            raise ValueError("perp_guardian_red_stops must be >= perp_guardian_yellow_stops")
+        # The defensive ratchet steps follow the same rules as the normal ones.
+        prev_thr = 0.0
+        prev_frac = 0.0
+        for pair in self.perp_defense_profit_lock_steps or []:
+            if len(pair) != 2:
+                raise ValueError("each defensive ratchet step must be (level, close_fraction)")
+            thr, frac = float(pair[0]), float(pair[1])
+            if not (0.0 < thr < 1.0):
+                raise ValueError("defensive step level must be in (0,1)")
+            if not (0.0 < frac <= 1.0):
+                raise ValueError("defensive step close fraction must be in (0,1]")
+            if thr <= prev_thr or frac <= prev_frac:
+                raise ValueError("defensive step levels and fractions must be strictly increasing")
+            prev_thr, prev_frac = thr, frac
         return self
 
 

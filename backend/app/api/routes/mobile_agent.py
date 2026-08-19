@@ -184,6 +184,21 @@ def _settings_from_config(settings: SettingsDep) -> AgentMobileSettings:
         perp_ratchet_trailing_pct=getattr(settings, "perp_ratchet_trailing_pct", 1.0),
         perp_tp1_close_pct=70.0,
         perp_time_stop_hours=settings.perp_time_stop_hours,
+        # Regime guardian + Capital Preservation Mode (NOTE/61)
+        perp_guardian_enabled=getattr(settings, "perp_guardian_enabled", True),
+        perp_guardian_window_hours=getattr(settings, "perp_guardian_window_hours", 6.0),
+        perp_guardian_yellow_stops=getattr(settings, "perp_guardian_yellow_stops", 1),
+        perp_guardian_red_stops=getattr(settings, "perp_guardian_red_stops", 2),
+        perp_guardian_yellow_size_factor=getattr(settings, "perp_guardian_yellow_size_factor", 0.5),
+        perp_guardian_reentry_hours=getattr(settings, "perp_guardian_reentry_hours", 6.0),
+        perp_defense_tp1_close_pct=getattr(settings, "perp_defense_tp1_close_pct", 100.0),
+        perp_defense_smart_sl_confirmation_candles=getattr(
+            settings, "perp_defense_smart_sl_confirmation_candles", 0
+        ),
+        perp_defense_profit_lock_steps=getattr(
+            settings, "perp_defense_profit_lock_steps", [(0.30, 0.50), (0.50, 0.80), (0.70, 1.00)]
+        ),
+        perp_defense_trailing_enabled=getattr(settings, "perp_defense_trailing_enabled", False),
         post_close_candles=10,
     )
 

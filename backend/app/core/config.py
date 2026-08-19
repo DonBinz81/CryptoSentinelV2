@@ -160,6 +160,8 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "summary_minute_utc": "agent_summary_minute_utc",
         "risk_drawdown_alert_enabled": "risk_drawdown_alert_enabled",
         "risk_notify_drawdown_pct": "risk_notify_drawdown_pct",
+        "risk_alert_min_interval_minutes": "risk_alert_min_interval_minutes",
+        "risk_alert_escalation_step": "risk_alert_escalation_step",
     },
     "risk": {
         "capital_per_trade_pct": "risk_capital_per_trade_pct",
@@ -286,6 +288,16 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "smart_sl_delta_l2": "perp_smart_sl_delta_l2",
         "smart_sl_confirmation_candles": "perp_smart_sl_confirmation_candles",
         "smart_sl_max_reentries": "perp_smart_sl_max_reentries",
+        "guardian_enabled": "perp_guardian_enabled",
+        "guardian_window_hours": "perp_guardian_window_hours",
+        "guardian_yellow_stops": "perp_guardian_yellow_stops",
+        "guardian_red_stops": "perp_guardian_red_stops",
+        "guardian_yellow_size_factor": "perp_guardian_yellow_size_factor",
+        "guardian_reentry_hours": "perp_guardian_reentry_hours",
+        "defense_tp1_close_pct": "perp_defense_tp1_close_pct",
+        "defense_smart_sl_confirmation_candles": "perp_defense_smart_sl_confirmation_candles",
+        "defense_profit_lock_steps": "perp_defense_profit_lock_steps",
+        "defense_trailing_enabled": "perp_defense_trailing_enabled",
     },
     "signal_engine": {
         "binance_futures_base_url": "binance_futures_base_url",
@@ -539,6 +551,10 @@ class Settings(BaseSettings):
     agent_summary_minute_utc: int = Field(default=55, alias="AGENT_SUMMARY_MINUTE_UTC")
     risk_drawdown_alert_enabled: bool = Field(default=True, alias="RISK_DRAWDOWN_ALERT_ENABLED")
     risk_notify_drawdown_pct: float = Field(default=10.0, alias="RISK_NOTIFY_DRAWDOWN_PCT")
+    # Risk-alert throttling (NOTE/60 §4): one reminder per interval per alert
+    # type; an escalation (value worsening by >= step) re-sends immediately.
+    risk_alert_min_interval_minutes: float = Field(default=60.0, alias="RISK_ALERT_MIN_INTERVAL_MINUTES")
+    risk_alert_escalation_step: float = Field(default=1.0, alias="RISK_ALERT_ESCALATION_STEP")
 
     agent_mode: str = Field(default="conservative", alias="AGENT_MODE")
     markets_enabled: str = Field(default="both", alias="MARKETS_ENABLED")
@@ -745,6 +761,26 @@ class Settings(BaseSettings):
     perp_smart_sl_delta_l2: float = Field(default=0.16, alias="PERP_SMART_SL_DELTA_L2")
     perp_smart_sl_confirmation_candles: int = Field(default=2, alias="PERP_SMART_SL_CONFIRMATION_CANDLES")
     perp_smart_sl_max_reentries: int = Field(default=1, alias="PERP_SMART_SL_MAX_REENTRIES")
+    # Regime guardian (VERDE/GIALLO/ROSSO): reacts to the bot's own full stop-losses
+    # on a rolling window. GIALLO scales down new entries, ROSSO blocks them while
+    # open positions keep being managed under the capital-preservation profile.
+    perp_guardian_enabled: bool = Field(default=True, alias="PERP_GUARDIAN_ENABLED")
+    perp_guardian_window_hours: float = Field(default=6.0, alias="PERP_GUARDIAN_WINDOW_HOURS")
+    perp_guardian_yellow_stops: int = Field(default=1, alias="PERP_GUARDIAN_YELLOW_STOPS")
+    perp_guardian_red_stops: int = Field(default=2, alias="PERP_GUARDIAN_RED_STOPS")
+    perp_guardian_yellow_size_factor: float = Field(default=0.5, alias="PERP_GUARDIAN_YELLOW_SIZE_FACTOR")
+    # Hours without new full stops required to step down RED->YELLOW->GREEN.
+    perp_guardian_reentry_hours: float = Field(default=6.0, alias="PERP_GUARDIAN_REENTRY_HOURS")
+    # Capital Preservation Mode: defensive values used by position management while
+    # the guardian is RED. Same knobs as the normal profile, never written back to
+    # the user's saved settings (resolved at read time).
+    perp_defense_tp1_close_pct: float = Field(default=100.0, alias="PERP_DEFENSE_TP1_CLOSE_PCT")
+    perp_defense_smart_sl_confirmation_candles: int = Field(default=0, alias="PERP_DEFENSE_SMART_SL_CONFIRMATION_CANDLES")
+    perp_defense_profit_lock_steps: list[tuple[float, float]] = Field(
+        default_factory=lambda: [(0.30, 0.50), (0.50, 0.80), (0.70, 1.00)],
+        alias="PERP_DEFENSE_PROFIT_LOCK_STEPS",
+    )
+    perp_defense_trailing_enabled: bool = Field(default=False, alias="PERP_DEFENSE_TRAILING_ENABLED")
 
     binance_futures_base_url: str | None = Field(default=None, alias="BINANCE_FUTURES_BASE_URL")
     binance_futures_ws_url: str | None = Field(default=None, alias="BINANCE_FUTURES_WS_URL")
