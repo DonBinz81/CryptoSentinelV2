@@ -65,7 +65,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |   |-- ohlcv_warmup.py - warm-up storico delle klines 5m Binance per watchlist AI, con lock/cadenza anti-burst e popolamento cache Data Coverage/signal engine.
 |   |   |   |-- brain/ - Claude meta-controller con poteri limitati; fallback dry-run deterministico e fail-closed fuori dry-run.
 |   |   |   |-- loops/ - loop veloce gestione posizioni e loop lento scansione/decisione safe-by-default.
-|   |   |   |-- risk/ - risk manager fail-closed con kill switch, universo eligible, sizing dry-run realistico, override margine fisso Perp opzionale, soglia minima trade e guardrail portfolio/drawdown/daily loss.
+|   |   |   |-- risk/ - risk manager fail-closed con kill switch, universo eligible, sizing dry-run realistico, margine fisso Perp opzionale **cappato dal budget di rischio** (NOTE/70: `min(margine_fisso, risk_bounded)` — la perdita allo stop non puo' superare `equity × per_trade_pct`, fee escluse; reason `risk_approved_fixed_margin_capped` quando il cap morde; cap sotto la size minima → rifiuto fail-closed; senza stop loss il fisso passa come prima, caso teorico inchiodato da test), soglia minima trade e guardrail portfolio/drawdown/daily loss.
 |   |   |   `-- signals/ - signal engine modulare Spot/Perp/V2.
 |   |   |       |-- base.py - primitive base signal engine.
 |   |   |       |-- common/indicators.py - primitive Candle, EMA, VWAP, ATR, RSI e relative volume.
