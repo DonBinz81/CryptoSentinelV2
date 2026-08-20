@@ -223,3 +223,42 @@ class TestSchemaValidation:
 
         with pytest.raises(ValueError):
             AgentMobileSettings(perp_defense_profit_lock_steps=[(0.5, 0.8), (0.3, 0.9)])
+
+
+class TestGuardianYellowScaling:
+    """YELLOW must rebuild the FROZEN RiskDecision, never mutate it (the first
+    version raised FrozenInstanceError on every YELLOW approval, so YELLOW
+    silently blocked all perp entries instead of halving them)."""
+
+    def test_yellow_halves_an_approved_decision(self):
+        from decimal import Decimal
+
+        from backend.app.agent.risk import RiskDecision
+        from backend.app.agent.service import _apply_guardian_yellow
+
+        original = RiskDecision(
+            True, "risk_approved",
+            size_quote=Decimal("50"), risk_amount_quote=Decimal("15.2"),
+        )
+        out = _apply_guardian_yellow(
+            original, factor=Decimal("0.5"), min_trade_size=Decimal("7")
+        )
+        assert out.allowed is True
+        assert out.size_quote == Decimal("25")
+        assert out.risk_amount_quote == Decimal("7.6")
+        assert out.reason == "risk_approved_guardian_yellow"
+        # the input (frozen) is untouched
+        assert original.size_quote == Decimal("50") and original.reason == "risk_approved"
+
+    def test_yellow_rejects_below_minimum_size(self):
+        from decimal import Decimal
+
+        from backend.app.agent.risk import RiskDecision
+        from backend.app.agent.service import _apply_guardian_yellow
+
+        out = _apply_guardian_yellow(
+            RiskDecision(True, "risk_approved", size_quote=Decimal("12")),
+            factor=Decimal("0.5"), min_trade_size=Decimal("7"),
+        )
+        assert out.allowed is False
+        assert out.reason == "guardian_yellow_below_min_size"
