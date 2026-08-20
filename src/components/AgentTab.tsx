@@ -2337,9 +2337,15 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               {/* La legenda prende i colori dalla stessa palette del grafico: se un
                   livello cambia tinta, qui non resta indietro. */}
               <span style={{ color: LEVEL_COLORS.entry }}>⬆ E = ingresso</span>
-              {/* Il marker segna il prezzo del trade: su una chiusura è l'uscita, non
-                  il prezzo corrente, anche quando le candele continuano a scorrere. */}
-              <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>⬇ {detail.close_reason ? 'Uscita' : (detail.chart.live ? 'Ora' : 'Exit')}</span>
+              {/* Su una posizione ancora aperta il prezzo "adesso" non è un evento con un
+                  verso giusto o sbagliato: niente più freccia verde/rossa, solo una riga
+                  di riferimento come le altre (scelta di David, 20/08). Su un trade chiuso
+                  l'uscita resta un evento preciso, marcato con la freccia colorata. */}
+              {detail.chart.live ? (
+                <span style={{ color: LEVEL_COLORS.now }}>- - Ora</span>
+              ) : (
+                <span className={Number(detail.chart.exit_price) >= Number(detail.chart.entry_price) ? 'text-accent-green' : 'text-accent-red'}>⬇ {detail.close_reason ? 'Uscita' : 'Exit'}</span>
+              )}
               <span style={{ color: LEVEL_COLORS.sl }}>- - SL</span>
               {detail.smart_sl_levels && <span style={{ color: LEVEL_COLORS.s2 }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
               {detail.chart.stop_reference && <span style={{ color: LEVEL_COLORS.ref }}>▮ candela dello stop</span>}

@@ -208,16 +208,36 @@ export const TradeCandleChartLW: FC<{
         color: ENTRY_MARKER,
         shape: model.isLong ? 'arrowUp' : 'arrowDown',
       },
-      {
+    ];
+    // Su una posizione ANCORA APERTA il prezzo "adesso" non e' un evento — cambia
+    // ogni tick, non ha un verso giusto o sbagliato — quindi non e' piu' una freccia
+    // verde/rossa: e' una riga tratteggiata leggera come le altre, col prezzo sulla
+    // scala di destra (scelta di David, 20/08). Su un trade CHIUSO invece l'uscita
+    // e' un evento preciso, a un prezzo e un istante precisi: li' la freccia resta.
+    if (!chart.live) {
+      markers.push({
         time: seconds(model.candles[model.exitIndex].t),
         position: 'aboveBar',
         color: model.exitGood ? CANDLE_UP : CANDLE_DOWN,
         shape: 'arrowDown',
-      },
-    ];
+      });
+    }
     // I marker vanno in ordine di tempo, altrimenti la libreria li rifiuta.
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(series, markers);
+
+    if (chart.live) {
+      series.createPriceLine({
+        price: model.exitPrice,
+        color: LEVEL_COLORS.now,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        axisLabelColor: '#0b0e11',
+        axisLabelTextColor: LEVEL_COLORS.now,
+        title: '',
+      });
+    }
 
     c.timeScale().fitContent();
 
@@ -320,7 +340,7 @@ export const TradeCandleChartLW: FC<{
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [model, height, trailingGapPct]);
+  }, [model, height, trailingGapPct, chart.live]);
 
   if (model === null) {
     return <p className="text-xs text-gray-500">Grafico non disponibile per questo trade.</p>;
