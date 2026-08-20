@@ -139,6 +139,7 @@ class RiskManager:
         risk_size = nominal_size
         # La size si adatta alla distanza dello stop; lo stop NON si stringe per rientrare nel rischio.
         risk_amount = equity * Decimal(str(per_trade_pct)) / Decimal("100")
+        risk_bounded: Decimal | None = None
         if intent.stop_loss is not None and intent.price > Decimal("0"):
             stop_distance_pct = abs(intent.price - intent.stop_loss) / intent.price
             if stop_distance_pct > 0:
@@ -152,8 +153,22 @@ class RiskManager:
                     lev = Decimal(max(int(intent.leverage or 1), 1))
                     risk_bounded = risk_bounded / lev
                 risk_size = min(nominal_size, risk_bounded)
+        fixed_margin_capped = False
         if is_perp and ms is not None and ms.perp_fixed_margin_enabled:
-            risk_size = Decimal(str(ms.perp_fixed_margin_usd))
+            # Risk cap on the fixed margin (NOTE/60 §2): the fixed value is a
+            # TARGET, never a way past the per-trade risk budget. It used to
+            # override the FIX-1 bound unconditionally, making the loss at stop
+            # margin*leverage*stop_distance — 1.8x the configured budget on the
+            # 2026-08-19 LINK stop. Capped, the loss at stop can never exceed
+            # equity*per_trade_pct (fees excluded). With no computable stop
+            # distance the fixed value still passes: perp signals always carry
+            # a structural stop, so that path is theoretical.
+            fixed_margin = Decimal(str(ms.perp_fixed_margin_usd))
+            if risk_bounded is not None and risk_bounded < fixed_margin:
+                risk_size = risk_bounded
+                fixed_margin_capped = True
+            else:
+                risk_size = fixed_margin
 
         # Esposizione calcolata per-mercato: spot = nozionale, perp = margine (nozionale/leva)
         if equity > Decimal("0"):
@@ -188,7 +203,9 @@ class RiskManager:
 
         return RiskDecision(
             True,
-            "risk_approved",
+            # Distinct reason when the cap reduced the fixed margin, so the
+            # decision log shows when and how much the budget is binding.
+            "risk_approved_fixed_margin_capped" if fixed_margin_capped else "risk_approved",
             size_quote=risk_size,
             risk_amount_quote=min(risk_amount, risk_size),
             exposure_after_pct=exposure_after,
