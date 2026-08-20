@@ -15,6 +15,7 @@ from .positions import PerpPosition, SpotPosition
 from .runtime_state import RuntimeState
 from .support import SupportMessage, SupportTicket
 from .trade_charts import TradeChartSnapshot
+from .telemetry import EntryTelemetry, PositionTelemetry
 from .trades import PerpTrade, SpotTrade
 from .x402 import X402DailyBudget
 
