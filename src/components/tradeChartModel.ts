@@ -81,6 +81,10 @@ export const LEVEL_COLORS = {
   ref: '#8b5cf6',   // viola: la candela da cui e' stato calcolato lo stop. Sta fuori
                     // dalle tre famiglie (rischio, obiettivi, neutri) perche' non e' un
                     // livello operativo ma un dato di costruzione.
+  now: '#9ca3af',   // grigio chiaro, apposta leggero: il prezzo corrente su una
+                    // posizione live non e' un giudizio (a differenza della vecchia
+                    // freccia verde/rossa), e' solo un riferimento — non deve competere
+                    // visivamente con SL/TP che sono i livelli che contano davvero.
 } as const;
 
 const ts = (s: string) => new Date(s).getTime();
