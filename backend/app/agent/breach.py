@@ -73,6 +73,12 @@ def evaluate_breach(
         state = {"start": now.isoformat(), "max_depth_pct": depth_pct, "fired": False, "fired_by": None}
         events.append(BreachEvent("started", level, 0.0, depth_pct))
     else:
+        # Never mutate the caller's dict: purity here is load-bearing. The
+        # caller detects change by comparing old and new state; an in-place
+        # mutation made them identical, the change was never persisted, and
+        # the "fired" latch was lost on every reload — 24 rule_fired for one
+        # episode in production (NOTE/73).
+        state = dict(state)
         state["max_depth_pct"] = max(state["max_depth_pct"], depth_pct)
 
     start = datetime.fromisoformat(state["start"])

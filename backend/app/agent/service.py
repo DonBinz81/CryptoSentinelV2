@@ -1935,7 +1935,12 @@ class AgentService:
                     now=now,
                     cfg=cfg,
                 )
-                if new_ep is not state.get(name):
+                # Compare by VALUE, never by identity (NOTE/73): an in-place
+                # mutation returns the same reference and `is not` misses it,
+                # so the state was never re-persisted and the fired latch was
+                # lost on every reload. Value equality also skips pointless
+                # writes when nothing actually changed.
+                if new_ep != state.get(name):
                     changed = True
                     if new_ep is None:
                         state.pop(name, None)
