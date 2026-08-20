@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -34,7 +34,7 @@ from backend.app.persistence.models.pnl import PortfolioState
 from backend.app.persistence.models.positions import PerpPosition, SpotPosition
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
 from backend.app.persistence.repositories.trades import PerpTradeRepository, SpotTradeRepository
-from backend.app.persistence.runtime_state import set_runtime_value
+from backend.app.persistence.runtime_state import get_runtime_value, set_runtime_value
 from backend.app.schemas.mobile_agent import AgentMobileSettings
 from backend.app.persistence.sync_database import (
     create_all_sync,
@@ -2759,3 +2759,132 @@ async def test_one_broken_asset_does_not_stop_the_scan_of_the_others(db, monkeyp
     # Without the rollback these two die with PendingRollbackError.
     assert persisted == ["BBB", "CCC"]
     assert [item["asset"] for item in result["scanner_results"]] == ["BBB", "CCC"]
+
+
+async def test_scan_cycle_snapshot_tells_no_edge_from_real_block(db, monkeypatch) -> None:
+    """David's question via chat C: "is perp idle because it found nothing, or
+    because something is blocking it?" - previously unanswerable, because a skip
+    for low quality left no trace beyond a free-text reasoning string nobody
+    aggregates. This is the case that should read as "just searching": every
+    asset skipped for the same no-edge reason, nothing blocked.
+    """
+
+    svc = AgentService(
+        settings(eligible_tokens=["AAA", "BBB", "CCC"] + [f"TOKEN_{i}" for i in range(147)]),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    monkeypatch.setattr("backend.app.agent.service.selected_spot_watchlist", lambda _s: [])
+    monkeypatch.setattr(
+        "backend.app.agent.service.selected_perp_watchlist", lambda _s: ["AAA", "BBB", "CCC"]
+    )
+
+    async def fake_evaluate_perp(payload, session):
+        asset = payload["asset"]
+        return {
+            "signal": {"asset": asset, "market": "perp", "action": "skip", "reason": "perp_filters_not_satisfied"},
+            "risk": {},
+            "execution": {"status": "skipped", "reason": "perp_filters_not_satisfied"},
+        }
+
+    monkeypatch.setattr(svc, "evaluate_perp", fake_evaluate_perp)
+
+    async with get_session_factory()() as session:
+        await svc.slow_tick(session, now=datetime(2026, 8, 20, 12, 0, tzinfo=UTC))
+
+    raw = get_runtime_value(str(USER_ID), "last_scan_cycle")
+    assert raw is not None
+    snapshot = json.loads(raw)
+    perp = snapshot["markets"]["perp"]
+    assert perp["scanned"] == 3
+    assert perp["no_edge"] == 3
+    assert perp["filter"] == 0
+    assert perp["error"] == 0
+    assert perp["reasons"] == {"perp_filters_not_satisfied": 3}
+
+
+async def test_scan_cycle_snapshot_tells_real_block_from_no_edge(db, monkeypatch) -> None:
+    """Mirror case: something IS actually blocking - the guardian's red state -
+    and a data error on top. The distribution must make that visible instead of
+    collapsing everything into an undifferentiated "skip"."""
+
+    svc = AgentService(
+        settings(eligible_tokens=["AAA", "BBB", "CCC", "DDD"] + [f"TOKEN_{i}" for i in range(146)]),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    monkeypatch.setattr("backend.app.agent.service.selected_spot_watchlist", lambda _s: [])
+    monkeypatch.setattr(
+        "backend.app.agent.service.selected_perp_watchlist",
+        lambda _s: ["AAA", "BBB", "CCC", "DDD"],
+    )
+
+    async def fake_evaluate_perp(payload, session):
+        asset = payload["asset"]
+        if asset == "DDD":
+            raise RuntimeError("simulated data-feed failure")
+        return {
+            "signal": {
+                "asset": asset, "market": "perp", "action": "skip",
+                "reason": "guardian_red_capital_preservation",
+            },
+            "risk": {},
+            "execution": {"status": "skipped", "reason": "guardian_red_capital_preservation"},
+        }
+
+    monkeypatch.setattr(svc, "evaluate_perp", fake_evaluate_perp)
+
+    async with get_session_factory()() as session:
+        await svc.slow_tick(session, now=datetime(2026, 8, 20, 12, 0, tzinfo=UTC))
+
+    snapshot = json.loads(get_runtime_value(str(USER_ID), "last_scan_cycle"))
+    perp = snapshot["markets"]["perp"]
+    assert perp["scanned"] == 4
+    assert perp["filter"] == 3
+    assert perp["no_edge"] == 0
+    assert perp["error"] == 1
+    assert perp["reasons"]["guardian_red_capital_preservation"] == 3
+
+
+async def test_scanner_status_endpoint_reports_no_cycle_yet(db) -> None:
+    """Before the first slow_tick has ever run (or on a fresh user), the
+    endpoint must say so plainly rather than returning an empty/misleading
+    snapshot."""
+
+    result = await view_routes.scanner_status(settings(default_user_id=uuid4()), None)
+    assert result == {"available": False, "reason": "no_cycle_recorded_yet"}
+
+
+async def test_scanner_status_endpoint_flags_stale_snapshot(db) -> None:
+    """A snapshot far older than the scan cadence means the loop itself may be
+    stuck - a different problem than "no edge found this cycle" - so `stale`
+    must say so instead of quietly reporting old numbers as current."""
+
+    user_id = uuid4()
+    old_snapshot = {
+        "timestamp_utc": datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+        "markets": {"spot": {"scanned": 0}, "perp": {"scanned": 0}},
+    }
+    set_runtime_value(str(user_id), "last_scan_cycle", json.dumps(old_snapshot))
+
+    result = await view_routes.scanner_status(settings(default_user_id=user_id), None)
+    assert result["available"] is True
+    assert result["stale"] is True
+    assert result["age_seconds"] > 900
+
+
+async def test_scanner_status_endpoint_fresh_snapshot_not_stale(db) -> None:
+    user_id = uuid4()
+    snapshot = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "markets": {
+            "spot": {"scanned": 11, "entered": 1, "no_edge": 10, "filter": 0, "error": 0, "other": 0, "reasons": {}},
+            "perp": {"scanned": 3, "entered": 0, "no_edge": 3, "filter": 0, "error": 0, "other": 0, "reasons": {}},
+        },
+    }
+    set_runtime_value(str(user_id), "last_scan_cycle", json.dumps(snapshot))
+
+    result = await view_routes.scanner_status(settings(default_user_id=user_id), None)
+    assert result["available"] is True
+    assert result["stale"] is False
+    assert result["markets"]["perp"]["no_edge"] == 3

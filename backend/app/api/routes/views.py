@@ -16,6 +16,7 @@ from backend.app.persistence.models.positions import PerpPosition, SpotPosition
 from backend.app.persistence.models.trade_charts import TradeChartSnapshot
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
 from backend.app.persistence.repositories.pnl import PnlRepository
+from backend.app.persistence.runtime_state import get_runtime_value
 from backend.app.persistence.repositories.trade_charts import TradeChartRepository
 from backend.app.persistence.views import ViewService, _close_reason
 from backend.app.schemas.views import GlobalView, PerpView, SpotView
@@ -670,6 +671,49 @@ async def operational_stats(
         "degraded_count": 0,
         "degraded_reasons": [],
         "last_kill_switch": None,
+    }
+
+
+@router.get("/scanner-status")
+async def scanner_status(
+    settings: SettingsDep,
+    _: ReadAccessDep,
+) -> dict:
+    """Last slow_tick cycle, per market: is it alive, and what did it decide.
+
+    Answers "is the bot just searching and finding no edge, or is something
+    actually blocking it" - requested by David via chat C after perp went idle
+    with no way to tell the two apart. `scanned == entered + no_edge + filter +
+    error + other` for each market; `reasons` breaks filter/error/other down by
+    the discrete code (e.g. guardian_red_capital_preservation, market_risk_off).
+    """
+
+    raw = get_runtime_value(str(settings.default_user_id), "last_scan_cycle")
+    if not raw:
+        return {"available": False, "reason": "no_cycle_recorded_yet"}
+    try:
+        snapshot = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "snapshot_unreadable"}
+
+    timestamp = snapshot.get("timestamp_utc")
+    age_seconds: float | None = None
+    stale = True
+    if timestamp:
+        try:
+            age_seconds = (datetime.now(UTC) - datetime.fromisoformat(timestamp)).total_seconds()
+            # Cadence is perp_volume_profile_candle_minutes (default 5m); stale
+            # after 3 missed cycles + margin, not after one slow cycle.
+            stale = age_seconds > max(3 * settings.perp_volume_profile_candle_minutes * 60, 900)
+        except ValueError:
+            age_seconds = None
+
+    return {
+        "available": True,
+        "timestamp_utc": timestamp,
+        "age_seconds": age_seconds,
+        "stale": stale,
+        "markets": snapshot.get("markets", {}),
     }
 
 
