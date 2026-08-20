@@ -52,6 +52,7 @@ import { defaultSettings } from './agentDefaults';
 import { GuardianBanner } from './GuardianBanner';
 import { ScannerStatusPanel } from './ScannerStatusPanel';
 import { DEV_PIN } from '../utils/devPin';
+import { traduciErroreSalvataggio } from '../services/settingsErrorLabels';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -716,9 +717,15 @@ const NumberInput: FC<{
   value: number;
   step?: number;
   help?: string;
+  /** Limiti dichiarati dal backend (Field ge/le in mobile_agent.py). Se presenti,
+   * il valore viene riportato dentro il limite quando si esce dal campo, invece
+   * di scoprirlo solo al salvataggio con un 422 che non dice quale campo aprire. */
+  min?: number;
+  max?: number;
   onChange: (value: number) => void;
-}> = ({ label, value, step = 1, help, onChange }) => {
+}> = ({ label, value, step = 1, help, min, max, onChange }) => {
   const [raw, setRaw] = useState(String(value));
+  const [limitato, setLimitato] = useState(false);
   useEffect(() => { setRaw(String(value)); }, [value]);
   return (
     <label className="block">
@@ -727,16 +734,36 @@ const NumberInput: FC<{
       <input
         type="number"
         step={step}
+        min={min}
+        max={max}
         value={raw}
         onChange={(e) => {
           const s = e.target.value;
           setRaw(s);
+          setLimitato(false);
           const n = parseFloat(s);
           if (!Number.isNaN(n)) onChange(n);
         }}
-        onBlur={() => setRaw(String(value))}
+        onBlur={() => {
+          const n = parseFloat(raw);
+          if (!Number.isNaN(n)) {
+            const clamped = Math.min(max ?? n, Math.max(min ?? n, n));
+            if (clamped !== n) {
+              setLimitato(true);
+              onChange(clamped);
+              setRaw(String(clamped));
+              return;
+            }
+          }
+          setRaw(String(value));
+        }}
         className="mt-1 w-full rounded-lg border border-dark-600 bg-dark-800 px-3 py-2 text-sm text-white outline-none focus:border-accent-blue"
       />
+      {limitato && (
+        <span className="mt-0.5 block text-[11px] text-accent-yellow">
+          Riportato al {raw === String(max) ? 'massimo' : 'minimo'} consentito ({raw})
+        </span>
+      )}
     </label>
   );
 };
@@ -1934,8 +1961,8 @@ export const SetupPane: FC<{
       <section className="space-y-3">
         <SectionTitle>Grafico trade</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
-          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde. Massimo 288 (24 ore a 5 minuti).'} value={settings.post_close_candles} step={1} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
-          <NumberInput label="Candele prima dell'apertura" help={'Quante candele di contesto mostrare prima dell\'ingresso del trade. Massimo 288 (24 ore a 5 minuti). Non tocca il calcolo dello stop, solo il grafico.'} value={settings.chart_pre_open_candles} step={1} onChange={(chart_pre_open_candles) => patch({ chart_pre_open_candles: Math.round(chart_pre_open_candles) })} />
+          <NumberInput label="Candele post-chiusura (0=off)" help={'Quante candele mostrare nel grafico dopo la chiusura di un trade, per vedere com\'è andata dopo l\'uscita. Zero le nasconde. Massimo 288 (24 ore a 5 minuti).'} value={settings.post_close_candles} step={1} min={0} max={288} onChange={(post_close_candles) => patch({ post_close_candles: Math.round(post_close_candles) })} />
+          <NumberInput label="Candele prima dell'apertura" help={'Quante candele di contesto mostrare prima dell\'ingresso del trade. Massimo 288 (24 ore a 5 minuti). Non tocca il calcolo dello stop, solo il grafico.'} value={settings.chart_pre_open_candles} step={1} min={1} max={288} onChange={(chart_pre_open_candles) => patch({ chart_pre_open_candles: Math.round(chart_pre_open_candles) })} />
         </div>
       </section>
         </>
@@ -2768,7 +2795,7 @@ const AgentTab: FC<AgentTabProps> = ({
       setSettingsDirty(false);
       setSettings(response.settings);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Save failed');
+      setActionError(err instanceof Error ? traduciErroreSalvataggio(err.message) : 'Save failed');
     } finally {
       setSaving(false);
     }
