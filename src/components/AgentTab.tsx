@@ -11,6 +11,8 @@ import {
   fetchExecutionWallets,
   fetchGlobalView,
   fetchPerpView,
+  fetchScannerStatus,
+  type ScannerStatusResponse,
   fetchSpotView,
   fetchTradeDetail,
   saveAgentSettings,
@@ -48,6 +50,7 @@ import { TradeCandleChartLW } from './TradeCandleChartLW';
 import { LEVEL_COLORS } from './tradeChartModel';
 import { defaultSettings } from './agentDefaults';
 import { GuardianBanner } from './GuardianBanner';
+import { ScannerStatusPanel } from './ScannerStatusPanel';
 import { DEV_PIN } from '../utils/devPin';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
@@ -2487,6 +2490,7 @@ const agentCache: {
   status: AgentStatus | null;
   spot: SpotView | null;
   perp: PerpView | null;
+  scannerStatus: ScannerStatusResponse | null;
   global: GlobalView | null;
   equity: EquityCurveResponse | null;
   equityRange: EquityRange;
@@ -2502,7 +2506,7 @@ const agentCache: {
   setupTab: SetupTab;
   openBlocks: string[];
 } = {
-  pane: 'spot', status: null, spot: null, perp: null, global: null, equity: null,
+  pane: 'spot', status: null, spot: null, perp: null, scannerStatus: null, global: null, equity: null,
   equityRange: '24h', decisions: null, assetBreakdown: null, settings: null,
   execWallets: null, claudeUsage: null, loaded: false,
   setupTab: 'generale', openBlocks: [],
@@ -2521,6 +2525,7 @@ const AgentTab: FC<AgentTabProps> = ({
   const [status, setStatus] = useState<AgentStatus | null>(agentCache.status);
   const [spot, setSpot] = useState<SpotView | null>(agentCache.spot);
   const [perp, setPerp] = useState<PerpView | null>(agentCache.perp);
+  const [scannerStatus, setScannerStatus] = useState<ScannerStatusResponse | null>(agentCache.scannerStatus);
   const [global, setGlobal] = useState<GlobalView | null>(agentCache.global);
   const [equity, setEquity] = useState<EquityCurveResponse | null>(agentCache.equity);
   const [equityRange, setEquityRange] = useState<EquityRange>(agentCache.equityRange);
@@ -2623,6 +2628,7 @@ const AgentTab: FC<AgentTabProps> = ({
         fetchSpotView().then(setSpot),
         fetchPerpView().then(setPerp),
         fetchGlobalView().then(setGlobal),
+        fetchScannerStatus().then(setScannerStatus),
         fetchAgentSettings().then((r) => {
           // Con modifiche in corso non salvate, la copia locale ha precedenza.
           if (!settingsDirtyRef.current) setSettings(r.settings);
@@ -2651,6 +2657,7 @@ const AgentTab: FC<AgentTabProps> = ({
     agentCache.status = status;
     agentCache.spot = spot;
     agentCache.perp = perp;
+    agentCache.scannerStatus = scannerStatus;
     agentCache.global = global;
     agentCache.equity = equity;
     agentCache.equityRange = equityRange;
@@ -2660,7 +2667,7 @@ const AgentTab: FC<AgentTabProps> = ({
     agentCache.execWallets = execWallets;
     agentCache.claudeUsage = claudeUsage;
     if (status || spot || perp || global || equity) agentCache.loaded = true;
-  }, [pane, status, spot, perp, global, equity, equityRange, decisions, assetBreakdown, settings, execWallets, claudeUsage]);
+  }, [pane, status, spot, perp, scannerStatus, global, equity, equityRange, decisions, assetBreakdown, settings, execWallets, claudeUsage]);
 
   useEffect(() => {
     // Al primo mount in assoluto mostra l'indicatore; ai rientri (cache popolata)
@@ -2695,6 +2702,7 @@ const AgentTab: FC<AgentTabProps> = ({
         fetchSpotView().then(setSpot),
         fetchPerpView().then(setPerp),
         fetchGlobalView().then(setGlobal),
+        fetchScannerStatus().then(setScannerStatus),
       ]).finally(() => {
         fastRefreshInFlightRef.current = false;
       });
@@ -2921,6 +2929,8 @@ const AgentTab: FC<AgentTabProps> = ({
         onPause={() => void handleKill('soft_stop')}
         onCloseAll={() => void handleCloseAll()}
       />
+
+      <ScannerStatusPanel status={scannerStatus} />
 
       <div className="grid grid-cols-3 gap-1.5">
         <SegmentButton id="spot" label="Spot" active={pane === 'spot'} onClick={setPane} />

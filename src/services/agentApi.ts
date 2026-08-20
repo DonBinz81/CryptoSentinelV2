@@ -17,6 +17,32 @@ export interface GuardianStatus {
   explained_at: string | null;
 }
 
+/** Esito dell'ultimo ciclo di scansione per un mercato: quanti asset in ognuna delle
+ * cinque uscite possibili. scanned = entered + no_edge + filter + error + other. */
+export interface ScannerMarketStatus {
+  scanned: number;
+  entered: number;
+  no_edge: number;
+  filter: number;
+  error: number;
+  other: number;
+  /** Codice del motore -> quanti asset. Solo per le uscite diverse da "entered". */
+  reasons: Record<string, number>;
+}
+
+export interface ScannerStatusResponse {
+  /** false quando il backend non ha ancora registrato nessun ciclo (es. appena riavviato). */
+  available: boolean;
+  timestamp_utc: string | null;
+  age_seconds: number | null;
+  /** true = il ciclo non gira piu' da un pezzo: e' un problema, non "nessun segnale". */
+  stale: boolean;
+  markets: {
+    spot: ScannerMarketStatus | null;
+    perp: ScannerMarketStatus | null;
+  };
+}
+
 export interface AgentStatus {
   mode: string;
   markets_enabled: string;
@@ -589,6 +615,10 @@ export function fetchPerpView(): Promise<PerpView> {
 
 export function fetchGlobalView(): Promise<GlobalView> {
   return request<GlobalView>('/api/v1/views/global');
+}
+
+export function fetchScannerStatus(): Promise<ScannerStatusResponse> {
+  return request<ScannerStatusResponse>('/api/v1/views/scanner-status');
 }
 
 export function fetchEquityCurve(range: EquityRange = '24h'): Promise<EquityCurveResponse> {
