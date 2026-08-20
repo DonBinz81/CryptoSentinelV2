@@ -2504,6 +2504,8 @@ class AgentService:
         scanner_results = []
         scanned = 0
         scan_errors: list[str] = []
+        spot_scan_errors = 0
+        perp_scan_errors = 0
         for asset in spot_assets:
             if asset.upper() not in SPOT_EXCLUDED_STABLECOINS:
                 scanned += 1
@@ -2512,6 +2514,7 @@ class AgentService:
                 except Exception as exc:
                     await _rollback_failed_scan_session(session)
                     scan_errors.append(str(exc))
+                    spot_scan_errors += 1
                     logger.warning("scanner_spot_asset_error", asset=asset, error=str(exc))
         for asset in perp_assets:
             scanned += 1
@@ -2520,11 +2523,24 @@ class AgentService:
             except Exception as exc:
                 await _rollback_failed_scan_session(session)
                 scan_errors.append(str(exc))
+                perp_scan_errors += 1
                 logger.warning("scanner_perp_asset_error", asset=asset, error=str(exc))
         try:
             await self._maybe_alert_engine_health(scanned, scan_errors, _now)
         except Exception as exc:
             logger.warning("engine_health_alert_failed", error=str(exc))
+        # Persist what this cycle actually decided, not just the two hard blocks
+        # that perp_entry_rejected already covers. Without this, "no edge found"
+        # and "something is silently blocking" look identical from the outside -
+        # requested by David via chat C after asking why perp had been idle since
+        # yesterday and getting no way to tell which one it was.
+        try:
+            snapshot = _build_scan_cycle_snapshot(
+                scanner_results, spot_errors=spot_scan_errors, perp_errors=perp_scan_errors, now=_now
+            )
+            set_runtime_value(str(self.settings.default_user_id), "last_scan_cycle", json.dumps(snapshot))
+        except Exception as exc:
+            logger.warning("scan_cycle_snapshot_failed", error=str(exc))
         try:
             await self._snapshot_portfolio_hourly(session, _now)
         except Exception as exc:
@@ -3599,6 +3615,81 @@ def _scanner_summary(result: dict) -> dict:
         "risk_allowed": risk.get("allowed"),
         "execution_status": execution.get("status"),
     }
+
+
+# Every discrete skip/block reason the signal and risk layers can produce today,
+# sorted into the three buckets the app needs to tell apart. Deliberately a
+# closed list rather than a heuristic (e.g. "contains 'filter'"): an unmapped
+# reason falls into "other" and stays visible instead of being silently
+# miscategorised as one of the two that matter most to distinguish.
+_SCAN_NO_EDGE_REASONS = frozenset({
+    "spot_filters_not_satisfied",
+    "perp_filters_not_satisfied",
+    "rr_below_minimum",
+})
+_SCAN_FILTER_REASONS = frozenset({
+    "volatility_spike",
+    "market_risk_off",
+    "market_reversal_waiting",
+    "market_reversal_short_blocked",
+    "market_reversal_long_blocked",
+    "btc_trend_shock_blocked",
+    "guardian_red_capital_preservation",
+    "guardian_yellow_below_min_size",
+    "volume_profile_liquidity_filter",
+    "cooldown_active",
+})
+_SCAN_ERROR_REASONS = frozenset({
+    "insufficient_binance_klines",
+    "insufficient_ohlcv_history",
+    "insufficient_btc_klines",
+    "spot_token_not_mapped",
+})
+
+
+def _classify_scan_reason(action: str | None, reason: str | None) -> str:
+    """Bucket one scanner_results entry: entered / no_edge / filter / error / other."""
+
+    if action and str(action).startswith("enter_"):
+        return "entered"
+    if reason in _SCAN_NO_EDGE_REASONS:
+        return "no_edge"
+    if reason in _SCAN_FILTER_REASONS:
+        return "filter"
+    if reason in _SCAN_ERROR_REASONS:
+        return "error"
+    return "other"
+
+
+def _build_scan_cycle_snapshot(
+    scanner_results: list[dict], *, spot_errors: int, perp_errors: int, now: datetime
+) -> dict:
+    """Distil one slow_tick cycle into what the app needs to answer "is it just
+    searching, or is something actually blocking it?" per market.
+
+    spot_errors/perp_errors come from the per-asset exception path (service.py's
+    scan loop): those assets never reach evaluate_spot/evaluate_perp's return, so
+    they never produce a scanner_results entry and would otherwise be invisible
+    here - counted directly instead of inferred.
+    """
+
+    markets = {
+        "spot": {"entered": 0, "no_edge": 0, "filter": 0, "error": spot_errors, "other": 0, "reasons": {}},
+        "perp": {"entered": 0, "no_edge": 0, "filter": 0, "error": perp_errors, "other": 0, "reasons": {}},
+    }
+    for result in scanner_results:
+        summary = _scanner_summary(result)
+        bucket = markets.get(summary.get("market"))
+        if bucket is None:
+            continue
+        category = _classify_scan_reason(summary.get("action"), summary.get("reason"))
+        bucket[category] = bucket.get(category, 0) + 1
+        reason = summary.get("reason")
+        if reason and category != "entered":
+            bucket["reasons"][reason] = bucket["reasons"].get(reason, 0) + 1
+    for bucket in markets.values():
+        bucket["scanned"] = bucket["entered"] + bucket["no_edge"] + bucket["filter"] + bucket["error"] + bucket["other"]
+    return {"timestamp_utc": now.isoformat(), "markets": markets}
 
 
 def _build_skip_reasoning(signal: dict, settings) -> str:
