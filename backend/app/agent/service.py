@@ -22,6 +22,7 @@ from backend.app.agent.guardian import (
     RegimeGuardian,
 )
 from backend.app.agent.heartbeat import heartbeat
+from backend.app.agent.telemetry import capture_entry_telemetry, snapshot_open_position
 from backend.app.agent.risk import KillSwitchState, RiskDecision, RiskManager, SignalIntent
 from backend.app.agent.signals.perp.binance_klines import BinanceKlineFeed, BinanceMarket, get_kline_cache_entry
 from backend.app.agent.signals.perp.volume_profile import VolumeProfileSignal, _atr_range_leverage as _perp_atr_range_leverage
@@ -2526,6 +2527,19 @@ class AgentService:
                     await self._notify_guardian_change(session, change, _now)
             except Exception as exc:
                 logger.warning("guardian_evaluate_error", error=str(exc))
+            # In-trade telemetry (NOTE/81): one OI + adverse-depth snapshot per
+            # open perp position per slow tick. Diagnostics only, never raises.
+            if getattr(self.settings, "perp_telemetry_enabled", True):
+                try:
+                    open_perp = await PerpPositionRepository(session).open_for_user(
+                        str(self.settings.default_user_id)
+                    )
+                    for pos in open_perp:
+                        if pos.status == "open":
+                            await snapshot_open_position(session, pos, _now)
+                    await session.commit()
+                except Exception as exc:
+                    logger.warning("position_telemetry_tick_failed", error=str(exc))
         spot_assets = selected_spot_watchlist(self.settings) if "spot" in markets else []
         perp_assets = selected_perp_watchlist(self.settings) if "perp" in markets else []
         selected_assets = list(dict.fromkeys([*spot_assets, *perp_assets]))
@@ -2770,6 +2784,25 @@ class AgentService:
             decision.execution_result = execution["status"]
             decision.trade_id = execution.get("trade_id")
             await session.commit()
+            # Entry telemetry (NOTE/81): archive pair positioning + Brain
+            # confidence before Binance's 30-day retention erases it.
+            # Fire-and-forget with its own session: must never delay a trade.
+            if (
+                getattr(self.settings, "perp_telemetry_enabled", True)
+                and str(signal.get("market")) == "perp"
+                and execution.get("position_id")
+            ):
+                try:
+                    conf = getattr(brain_decision, "confidence", None)
+                    asyncio.create_task(capture_entry_telemetry(
+                        position_id=str(execution["position_id"]),
+                        user_id=user_id,
+                        asset=str(signal.get("asset")),
+                        side=str(signal.get("side") or ""),
+                        brain_confidence=float(conf) if conf is not None else None,
+                    ))
+                except Exception as exc:
+                    logger.warning("entry_telemetry_spawn_failed", error=str(exc))
         return {
             "signal": signal,
             "risk": risk_decision.__dict__,
@@ -3033,7 +3066,10 @@ class AgentService:
                     updated_at=now,
                 )
             )
-            return {"status": "prepared", "mode": "dry_run", "trade_id": trade_id}
+            # position_id in the payload: the entry-telemetry hook needs it
+            # (NOTE/81) and future consumers get the real key, not a parse.
+            return {"status": "prepared", "mode": "dry_run", "trade_id": trade_id,
+                    "position_id": perp_position_id}
 
         spot_fee_mode = self._ms.spot_fee_mode
         spot_costs = compute_spot_costs(size_quote, spot_fee_mode)
