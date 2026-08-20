@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
@@ -101,6 +102,28 @@ class _CapitalPreservationView:
 def _ensure_utc(dt: datetime) -> datetime:
     """SQLite hands back naive datetimes; they are stored as UTC, mark them so."""
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def _apply_guardian_yellow(
+    risk_decision: RiskDecision, *, factor: Decimal, min_trade_size: Decimal
+) -> RiskDecision:
+    """Scale an approved perp decision for the guardian's YELLOW state.
+
+    RiskDecision is a FROZEN dataclass: it must be rebuilt, never mutated.
+    The first version assigned to its fields and raised FrozenInstanceError
+    on every YELLOW approval — meaning YELLOW blocked entries entirely
+    instead of halving them (latent: no approval ever happened in YELLOW).
+    Extracted so the test exercises the real frozen class.
+    """
+    scaled = risk_decision.size_quote * factor
+    if scaled < min_trade_size:
+        return RiskDecision(False, "guardian_yellow_below_min_size", size_quote=scaled)
+    return dataclasses.replace(
+        risk_decision,
+        size_quote=scaled,
+        risk_amount_quote=risk_decision.risk_amount_quote * factor,
+        reason="risk_approved_guardian_yellow",
+    )
 
 
 def _estimate_liquidation_price(entry: Decimal, leverage: int, side: str) -> Decimal | None:
@@ -2734,16 +2757,11 @@ class AgentService:
             g_ms = self._ms
             g_cfg = self._guardian_cfg(g_ms)
             if g_cfg.enabled and self.guardian.state == GUARDIAN_YELLOW:
-                factor = Decimal(str(getattr(g_ms, "perp_guardian_yellow_size_factor", 0.5)))
-                scaled = risk_decision.size_quote * factor
-                if scaled < Decimal(str(self.settings.min_trade_size_usd)):
-                    risk_decision = RiskDecision(
-                        False, "guardian_yellow_below_min_size", size_quote=scaled
-                    )
-                else:
-                    risk_decision.size_quote = scaled
-                    risk_decision.risk_amount_quote = risk_decision.risk_amount_quote * factor
-                    risk_decision.reason = "risk_approved_guardian_yellow"
+                risk_decision = _apply_guardian_yellow(
+                    risk_decision,
+                    factor=Decimal(str(getattr(g_ms, "perp_guardian_yellow_size_factor", 0.5))),
+                    min_trade_size=Decimal(str(self.settings.min_trade_size_usd)),
+                )
         brain_decision = await self._brain_decision(session, signal, risk_decision)
         decision = await self._record_decision(session, signal, risk_decision, brain_decision)
         execution = {"status": "skipped", "reason": "brain_or_risk_blocked"}
