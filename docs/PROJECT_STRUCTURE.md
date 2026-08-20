@@ -224,12 +224,14 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |-- notify_alert.sh - punto unico di consegna degli allarmi: FCM piu' Telegram come canale d'emergenza indipendente da backend e database. Esce 0 se almeno un canale accetta; non stampa mai i segreti.
 |   |   |-- db_watchdog.sh - controllo ogni minuto su descrittori orfani e firme di corruzione nel journal; non apre mai il DB.
 |   |   |-- backup_alert.sh - notifica push critica quando il backup fallisce o la copia del DB non passa `integrity_check`. Riceve il token admin da EnvironmentFile e non lo stampa mai.
+|   |   |-- backup_freshness_watchdog.sh - copre il caso che `backup_alert.sh` non vede: il timer di backup che smette di partire del tutto (nessun fallimento da segnalare). Due segnali: il timer non e' `active`, o l'ultimo esito e' piu' vecchio della cadenza attesa oltre margine. Throttle proprio, consegna via `notify_alert.sh`.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
 |       |-- cryptosentinelv2-backend.service - backend Uvicorn con restart automatico e hardening base.
 |       |-- cryptosentinelv2-backup.service / cryptosentinelv2-backup.timer - backup periodico ogni 6 ore, con `OnFailure=` verso l'unit di allarme.
 |       |-- cryptosentinelv2-backup-alert.service - allarme push sul fallimento del backup e sulla corruzione del database.
 |       |-- cryptosentinelv2-db-watchdog.service / .timer - rilevamento guasti del database ogni 60 secondi, con throttle di 30 minuti sulla notifica.
+|       |-- cryptosentinelv2-backup-freshness.service / .timer - watchdog di freschezza del backup ogni ora (NOTE/54 SS10.2).
 |       `-- cryptosentinelv2-healthcheck.service / cryptosentinelv2-healthcheck.timer - liveness periodica ogni 60 secondi.
 |-- docs/ - documentazione progetto e review.
 |   |-- CURRENT_STRUCTURE.md - baseline pre-integrazione backend.

@@ -1,0 +1,22 @@
+[Unit]
+Description=CryptoSentinelV2 backup freshness watchdog
+
+[Service]
+Type=oneshot
+User=cryptosentinelv2
+Group=cryptosentinelv2
+# Same order as the backend unit: a variable defined in both files is decided by
+# the second one. Needed here for API_ADMIN_TOKEN, TELEGRAM_BOT_TOKEN and
+# TELEGRAM_CHAT_ID, which notify_alert.sh reads from the environment.
+EnvironmentFile=-/etc/cryptosentinelv2/backend.env
+EnvironmentFile=/opt/cryptosentinelv2/app/.env
+ExecStart=/opt/cryptosentinelv2/app/deploy/scripts/backup_freshness_watchdog.sh
+StateDirectory=cryptosentinelv2-backup-freshness
+UMask=0077
+Nice=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/cryptosentinelv2/app /var/backups/cryptosentinelv2
