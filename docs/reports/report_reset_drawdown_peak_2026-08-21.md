@@ -71,6 +71,11 @@ perché lì il punto di partenza È lo stato funzionale.
 ## 6. STATO DELIVERABLE
 
 Completo lato backend. Deploy su VPS con backup freddo del DB (migrazione
-schema), servizio riavviato, hash verificati. Il reset in sé NON è stato
-eseguito: è una decisione dell'owner, David lo lancia dall'app (o su sua
-richiesta esplicita via endpoint). Merge in main e push eseguiti.
+schema), servizio riavviato, hash verificati. Merge in main e push eseguiti.
+
+Primo uso in produzione il 21/08 alle 09:47 UTC, su ok esplicito di David e con
+il cap già riportato a −10% (guardrail `blocked: true`, blocco attivo davvero):
+picco 1103.53 → 974.58 $ (equity corrente), drawdown 11.69% → 0.00%,
+`max_drawdown_pct` invariato a 12.40%, `blocked` → false, traccia registrata
+(`drawdown_peak_resets_today: 1`) e log `drawdown_peak_reset` presente. Il bot
+è ripartito con la protezione al 10% attiva sul nuovo tratto.
