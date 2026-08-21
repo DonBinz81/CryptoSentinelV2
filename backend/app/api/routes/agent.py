@@ -286,6 +286,22 @@ async def reset_daily_counter(
     return await get_agent_service().reset_daily_loss_counter(session, note=request.note)
 
 
+@router.post("/risk/reset-drawdown-peak")
+async def reset_drawdown_peak(
+    request: ResetDailyCounterRequest, session: SessionDep, _: AdminAccessDep
+) -> dict:
+    """Re-base the drawdown peak at the current equity (admin only, NOTE/83).
+
+    Twin of reset-daily-counter for the drawdown cap: the peak reference never
+    decreases on its own, so a fired cap has no natural exit path. The reset
+    sets peak_equity_usd to the current equity; the cap percentage and
+    max_drawdown_pct (historical record) are untouched. Every reset is
+    counted, timestamped and logged; the app shows it next to the risk banner.
+    """
+
+    return await get_agent_service().reset_drawdown_peak(session, note=request.note)
+
+
 class ResetDbRequest(BaseModel):
     backup_name: str | None = Field(default=None, max_length=120)
 

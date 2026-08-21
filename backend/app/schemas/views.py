@@ -147,6 +147,9 @@ class RiskGuardrailView(BaseModel):
     # an admin, but never silently — the app shows when and how many times.
     daily_counter_resets_today: int = 0
     daily_counter_reset_at: str | None = None
+    # Twin trail for the drawdown-peak reset (NOTE/83), same visibility rule.
+    drawdown_peak_resets_today: int = 0
+    drawdown_peak_reset_at: str | None = None
 
 
 class GlobalView(BaseModel):

@@ -52,6 +52,13 @@ class PortfolioState(Base):
     daily_counter_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     daily_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     daily_counter_resets_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Twin of the daily-counter reset, on the drawdown reference (NOTE/83):
+    # peak_equity_usd never comes down on its own, so a stale all-time peak can
+    # keep drawdown_cap_guard latched for days with no natural way out. The
+    # admin reset moves the peak to the CURRENT equity; the cap stays fully
+    # armed on the new stretch. Trail mirrors the twin: counted, timestamped.
+    drawdown_peak_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    drawdown_peak_resets_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_status: Mapped[str] = mapped_column(String(16), nullable=False, default="idle")
     trades_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     extra_json: Mapped[str | None] = mapped_column(Text, nullable=True)
