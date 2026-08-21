@@ -433,6 +433,69 @@ class AgentService:
             "note": note,
         }
 
+    async def reset_drawdown_peak(self, session: AsyncSession, *, note: str | None = None) -> dict:
+        """Move the drawdown peak reference to the CURRENT equity (admin, NOTE/83).
+
+        Twin of ``reset_daily_loss_counter``. ``peak_equity_usd`` only ever
+        grows (``peak = max(peak, total)``), so once the drawdown cap fires the
+        guard stays latched with no natural way out — unlike the daily counter,
+        which rolls over at midnight. The reset re-bases the peak at the current
+        equity; ``max_drawdown_pct`` (the historical record) and the cap itself
+        are untouched, so the same limit keeps applying from the new base.
+        Every reset is counted per day, timestamped and logged with the
+        drawdown it wiped, so bypassing the cap is always on the record.
+        """
+        user_id = str(self.settings.default_user_id)
+        pnl_repo = PnlRepository(session)
+        portfolio = await pnl_repo.get_portfolio(user_id)
+        if portfolio is None:
+            return {"status": "error", "reason": "portfolio_not_initialised"}
+
+        now = datetime.now(UTC)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        peak_before = portfolio.peak_equity_usd
+        drawdown_before_pct = portfolio.drawdown_pct
+        last_reset = getattr(portfolio, "drawdown_peak_reset_at", None)
+        same_day = last_reset is not None and _ensure_utc(last_reset) >= day_start
+        resets_today = (int(getattr(portfolio, "drawdown_peak_resets_today", 0) or 0) + 1) if same_day else 1
+
+        portfolio.peak_equity_usd = portfolio.total_equity_usd
+        portfolio.drawdown_peak_reset_at = now
+        portfolio.drawdown_peak_resets_today = resets_today
+        portfolio.updated_at = now
+        session.add(portfolio)
+        await session.commit()
+        logger.info(
+            "drawdown_peak_reset",
+            peak_before_usd=float(peak_before),
+            drawdown_before_pct=float(drawdown_before_pct),
+            equity_usd=float(portfolio.total_equity_usd),
+            resets_today=resets_today,
+            note=note,
+        )
+
+        # Recompute the portfolio right away so /views/global shows the new
+        # drawdown on the next read, not after the next 5s tick.
+        spot_positions = await SpotPositionRepository(session).open_for_user(user_id)
+        perp_positions = await PerpPositionRepository(session).open_for_user(user_id)
+        open_spot = [p for p in spot_positions if p.status == "open"]
+        open_perp = [p for p in perp_positions if p.status == "open"]
+        try:
+            await self._refresh_position_prices(session, open_spot, open_perp)
+        except Exception:
+            pass  # best effort: the stored current_price is good enough here
+        await self._update_portfolio_state(session, open_spot, open_perp, now)
+        refreshed = await pnl_repo.get_portfolio(user_id)
+        return {
+            "status": "ok",
+            "reset_at": now.isoformat(),
+            "resets_today": resets_today,
+            "peak_before_usd": float(peak_before),
+            "drawdown_before_pct": float(drawdown_before_pct),
+            "drawdown_pct_now": float(refreshed.drawdown_pct) if refreshed else None,
+            "note": note,
+        }
+
     async def close_all_and_pause(self, session: AsyncSession, *, reason: str = "manual_risk") -> dict:
         """Chiude TUTTE le posizioni aperte (spot + perp) al prezzo di mercato e
         mette l'agente in pausa (hard_stop). Usato dal pulsante Risk dell'app.
@@ -2423,6 +2486,13 @@ class AgentService:
             portfolio.daily_counter_reset_at = None
             portfolio.daily_counter_resets_today = 0
             counter_since = None
+        # Same day-rollover for the drawdown-peak reset trail (NOTE/83). Only
+        # the "today" counter and its timestamp are display state — the peak
+        # itself was re-based at reset time and needs no rollover.
+        peak_reset_at = getattr(portfolio, "drawdown_peak_reset_at", None)
+        if peak_reset_at is not None and _ensure_utc(peak_reset_at) <= day_start:
+            portfolio.drawdown_peak_reset_at = None
+            portfolio.drawdown_peak_resets_today = 0
         effective_start = _ensure_utc(counter_since) if counter_since is not None else day_start
         daily_realized_spot = await spot_repo.sum_realized_pnl(user_id, since=effective_start)
         daily_realized_perp = await perp_repo.sum_realized_pnl(user_id, since=effective_start)
