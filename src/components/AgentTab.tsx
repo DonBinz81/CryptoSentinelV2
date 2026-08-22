@@ -18,6 +18,7 @@ import {
   saveAgentSettings,
   setKillSwitch,
   resetDailyCounter,
+  resetDrawdownPeak,
   riskCloseAll,
   adjustEquity,
   validateOnboarding,
@@ -217,8 +218,38 @@ const EmptyState: FC<{ title: string; detail: string }> = ({ title, detail }) =>
   </div>
 );
 
+/** Le due grandezze che il reset scelto azzera, coi rispettivi testi (NOTE/63, NOTE/83). */
+type ResetKind = 'daily_loss' | 'drawdown_peak';
+
+const RESET_COPY: Record<ResetKind, {
+  domanda: string;
+  spiegazione: string;
+  avviso: string;
+}> = {
+  daily_loss: {
+    domanda: 'Azzerare il conteggio di oggi?',
+    spiegazione:
+      'Il conteggio riparte da adesso. Il limite non cambia e continua a valere sul nuovo ' +
+      'tratto: puoi perdere di nuovo fino alla stessa soglia prima che il blocco torni.',
+    avviso:
+      'Le perdite delle posizioni ancora aperte continuano a contare: l\'azzeramento riguarda ' +
+      'solo quelle già chiuse.',
+  },
+  drawdown_peak: {
+    domanda: 'Azzerare il picco del drawdown?',
+    spiegazione:
+      'Il picco di riferimento diventa l\'equity di adesso. Il cap non cambia e continua a ' +
+      'valere sul nuovo tratto: puoi perdere di nuovo fino alla stessa soglia prima che il ' +
+      'blocco torni.',
+    avviso:
+      'Le posizioni ancora aperte non scompaiono: qualunque calo, da adesso, torna a contare ' +
+      'come nuovo drawdown dal nuovo riferimento.',
+  },
+};
+
 /**
- * Conferma per azzerare il conteggio della perdita giornaliera (NOTE/63).
+ * Conferma per azzerare un riferimento di rischio (NOTE/63 daily loss, NOTE/83
+ * picco drawdown) — stessa cornice, testi diversi secondo `kind`.
  *
  * Tre livelli di attrito, voluti da David: l'admin token (verificato dal backend),
  * il PIN, e questi numeri davanti agli occhi. Quel limite serve proprio nel momento
@@ -226,35 +257,43 @@ const EmptyState: FC<{ title: string; detail: string }> = ({ title, detail }) =>
  * costare qualcosa.
  */
 const ResetCounterDialog: FC<{
+  kind: ResetKind;
   guardrail: NonNullable<GlobalView['risk_guardrail']>;
   busy: boolean;
   error: string;
   onConfirm: () => void;
   onCancel: () => void;
-}> = ({ guardrail, busy, error, onConfirm, onCancel }) => {
+}> = ({ kind, guardrail, busy, error, onConfirm, onCancel }) => {
   const [pin, setPin] = useState('');
   const pinOk = pin === DEV_PIN;
+  const copy = RESET_COPY[kind];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-5">
       <div className="w-full max-w-sm rounded-xl border border-dark-600 bg-dark-800 p-4 space-y-3">
-        <p className="text-sm font-bold text-white">Azzerare il conteggio di oggi?</p>
-        <p className="text-xs leading-5 text-gray-300">
-          Il conteggio riparte da adesso. Il limite <b className="text-white">non cambia</b> e continua
-          a valere sul nuovo tratto: puoi perdere di nuovo fino alla stessa soglia prima che il
-          blocco torni.
-        </p>
+        <p className="text-sm font-bold text-white">{copy.domanda}</p>
+        <p className="text-xs leading-5 text-gray-300">{copy.spiegazione}</p>
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
-            Perdita oggi <b className="text-accent-red">{fmtPct(guardrail.daily_loss_used_pct)}</b>
-          </span>
-          <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
-            Limite <b className="text-white">{fmtPct(guardrail.daily_loss_limit_pct)}</b>
-          </span>
+          {kind === 'daily_loss' ? (
+            <>
+              <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+                Perdita oggi <b className="text-accent-red">{fmtPct(guardrail.daily_loss_used_pct)}</b>
+              </span>
+              <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+                Limite <b className="text-white">{fmtPct(guardrail.daily_loss_limit_pct)}</b>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+                Drawdown <b className="text-accent-red">{fmtPct(guardrail.drawdown_pct)}</b>
+              </span>
+              <span className="rounded-lg bg-dark-900/70 px-3 py-2 text-gray-400">
+                Cap <b className="text-white">{fmtPct(Math.abs(guardrail.drawdown_cap_pct))}</b>
+              </span>
+            </>
+          )}
         </div>
-        <p className="text-[11px] leading-4 text-gray-500">
-          Le perdite delle posizioni ancora aperte continuano a contare: l&apos;azzeramento
-          riguarda solo quelle gia&apos; chiuse.
-        </p>
+        <p className="text-[11px] leading-4 text-gray-500">{copy.avviso}</p>
         <div>
           <label className="text-[11px] text-gray-500">PIN</label>
           <input
@@ -288,7 +327,7 @@ const ResetCounterDialog: FC<{
   );
 };
 
-const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void; onResetCounter?: () => void }> = ({ guardrail, onOpenSetup, onResetCounter }) => {
+const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void; onResetCounter?: (kind: ResetKind) => void }> = ({ guardrail, onOpenSetup, onResetCounter }) => {
   if (!guardrail?.blocked) return null;
   const copy = guardrail.reason ? riskGuardrailText[guardrail.reason] : undefined;
   return (
@@ -320,13 +359,20 @@ const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenS
           </>
         )}
       </div>
-      {/* Quante volte il conteggio e' stato azzerato oggi. Il limite resta
+      {/* Quante volte il conteggio/picco e' stato azzerato oggi. Il limite resta
           aggirabile — e' una scelta di David — ma non silenziosamente. */}
       {(guardrail.daily_counter_resets_today ?? 0) > 0 && (
         <p className="mt-2 text-[11px] text-accent-yellow">
           Conteggio azzerato {guardrail.daily_counter_resets_today}
           {guardrail.daily_counter_resets_today === 1 ? ' volta' : ' volte'} oggi
           {guardrail.daily_counter_reset_at && ` · ultimo alle ${new Date(guardrail.daily_counter_reset_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
+        </p>
+      )}
+      {(guardrail.drawdown_peak_resets_today ?? 0) > 0 && (
+        <p className="mt-2 text-[11px] text-accent-yellow">
+          Picco azzerato {guardrail.drawdown_peak_resets_today}
+          {guardrail.drawdown_peak_resets_today === 1 ? ' volta' : ' volte'} oggi
+          {guardrail.drawdown_peak_reset_at && ` · ultimo alle ${new Date(guardrail.drawdown_peak_reset_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
         </p>
       )}
       <div className="mt-3 space-y-2">
@@ -341,14 +387,22 @@ const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenS
             {guardrail.reason === 'daily_loss_limit_guard' ? 'Rivedi il limite giornaliero' : 'Rivedi i limiti di rischio'}
           </button>
         )}
-        {/* Azzerare il conteggio scavalca una protezione del capitale: tre livelli
+        {/* Azzerare il riferimento scavalca una protezione del capitale: tre livelli
             di attrito voluti da David — admin token, PIN, e la conferma coi numeri. */}
         {guardrail.reason === 'daily_loss_limit_guard' && onResetCounter && (
           <button
-            onClick={onResetCounter}
+            onClick={() => onResetCounter('daily_loss')}
             className="w-full rounded-lg bg-dark-700 px-3 py-2 text-xs font-semibold text-gray-300"
           >
             Azzera il conteggio di oggi
+          </button>
+        )}
+        {guardrail.reason === 'drawdown_cap_guard' && onResetCounter && (
+          <button
+            onClick={() => onResetCounter('drawdown_peak')}
+            className="w-full rounded-lg bg-dark-700 px-3 py-2 text-xs font-semibold text-gray-300"
+          >
+            Azzera il picco del drawdown
           </button>
         )}
       </div>
@@ -1104,7 +1158,7 @@ const PerpPane: FC<{ data: PerpView | null; onTrade: (tradeId: string) => void }
   );
 };
 
-const GlobalPane: FC<{
+export const GlobalPane: FC<{
   data: GlobalView | null;
   status: AgentStatus | null;
   equity: EquityCurveResponse | null;
@@ -1117,21 +1171,24 @@ const GlobalPane: FC<{
   adminToken?: string;
   onCounterReset?: () => void;
 }> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup, adminToken, onCounterReset }) => {
-  const [resetOpen, setResetOpen] = useState(false);
+  const [resetKind, setResetKind] = useState<ResetKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState('');
 
   const confirmReset = async () => {
+    if (!resetKind) return;
     if (!adminToken) { setResetError("Serve l'admin token: salvalo nel setup."); return; }
     setResetBusy(true);
     setResetError('');
     try {
-      const esito = await resetDailyCounter(adminToken, 'da app');
+      const esito = resetKind === 'daily_loss'
+        ? await resetDailyCounter(adminToken, 'da app')
+        : await resetDrawdownPeak(adminToken, 'da app');
       if (esito.status !== 'ok' && esito.status !== 'success') {
         setResetError(esito.reason ?? 'Il backend ha rifiutato la richiesta.');
         return;
       }
-      setResetOpen(false);
+      setResetKind(null);
       onCounterReset?.();
     } catch (e) {
       setResetError(e instanceof Error ? e.message : 'Errore di rete.');
@@ -1151,15 +1208,16 @@ const GlobalPane: FC<{
       <RiskGuardrailBanner
         guardrail={data?.risk_guardrail}
         onOpenSetup={onOpenSetup}
-        onResetCounter={() => { setResetError(''); setResetOpen(true); }}
+        onResetCounter={(kind) => { setResetError(''); setResetKind(kind); }}
       />
-      {resetOpen && data?.risk_guardrail && (
+      {resetKind && data?.risk_guardrail && (
         <ResetCounterDialog
+          kind={resetKind}
           guardrail={data.risk_guardrail}
           busy={resetBusy}
           error={resetError}
           onConfirm={() => void confirmReset()}
-          onCancel={() => setResetOpen(false)}
+          onCancel={() => setResetKind(null)}
         />
       )}
       <div className="grid grid-cols-2 gap-2">
