@@ -57,6 +57,10 @@ async def _apply_column_migrations(conn) -> None:
         ("perp_positions", "breach_state", "TEXT"),
         ("portfolio_state", "drawdown_peak_reset_at", "DATETIME"),
         ("portfolio_state", "drawdown_peak_resets_today", "INTEGER NOT NULL DEFAULT 0"),
+        # Strategy tag (NOTE/85 constraint 1, NOTE/87): SQLite applies the constant
+        # DEFAULT to pre-existing rows on read, so historical rows are never NULL.
+        ("perp_positions", "strategy", "VARCHAR(32) NOT NULL DEFAULT 'volume_profile_v1'"),
+        ("perp_trades", "strategy", "VARCHAR(32) NOT NULL DEFAULT 'volume_profile_v1'"),
     ]
     for table, column, col_type in new_columns:
         try:

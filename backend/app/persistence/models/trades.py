@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
+from .positions import DEFAULT_PERP_STRATEGY
 
 PRICE_NUMERIC = Numeric(30, 18)
 
@@ -57,6 +58,9 @@ class PerpTrade(Base):
     asset: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)  # long / short
     direction: Mapped[str] = mapped_column(String(8), nullable=False)  # open / close
+    strategy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=DEFAULT_PERP_STRATEGY, server_default=DEFAULT_PERP_STRATEGY
+    )
     size: Mapped[Decimal] = mapped_column(Numeric(30, 18), nullable=False)
     price: Mapped[Decimal] = mapped_column(PRICE_NUMERIC, nullable=False)
     leverage: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
