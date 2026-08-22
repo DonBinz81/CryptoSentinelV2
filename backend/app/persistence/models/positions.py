@@ -10,6 +10,11 @@ from .base import Base
 
 PRICE_NUMERIC = Numeric(30, 18)
 
+# Strategy tag shared by perp positions and trades (NOTE/85 constraint 1): every
+# row records the engine that opened it; close/rebuy legs inherit it from the
+# position. The DB-level default also covers rows that predate the column.
+DEFAULT_PERP_STRATEGY = "volume_profile_v1"
+
 
 class SpotPosition(Base):
     """Active spot holding with live stop/TP levels."""
@@ -57,6 +62,9 @@ class PerpPosition(Base):
     user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     asset: Mapped[str] = mapped_column(String(32), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)  # long / short
+    strategy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=DEFAULT_PERP_STRATEGY, server_default=DEFAULT_PERP_STRATEGY
+    )
     size: Mapped[Decimal] = mapped_column(Numeric(30, 18), nullable=False)
     entry_price: Mapped[Decimal] = mapped_column(PRICE_NUMERIC, nullable=False)
     current_price: Mapped[Decimal] = mapped_column(PRICE_NUMERIC, nullable=False)

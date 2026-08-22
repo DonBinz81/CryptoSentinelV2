@@ -40,7 +40,7 @@ from backend.app.notifications.agent_notifier import get_agent_notifier
 from backend.app.persistence.database import get_session_factory
 from backend.app.persistence.models.decisions import AgentDecision
 from backend.app.persistence.models.pnl import PnlSnapshot
-from backend.app.persistence.models.positions import PerpPosition, SpotPosition
+from backend.app.persistence.models.positions import DEFAULT_PERP_STRATEGY, PerpPosition, SpotPosition
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
 from backend.app.persistence.repositories.api_usage import ApiUsageRepository
 from backend.app.persistence.repositories.decisions import AgentDecisionRepository
@@ -1537,6 +1537,7 @@ class AgentService:
             asset=pos.asset,
             side=pos.side,
             direction="close",
+            strategy=pos.strategy,
             size=close_size,
             price=exit_price,
             leverage=pos.leverage,
@@ -1693,7 +1694,7 @@ class AgentService:
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                         position_id=pos.position_id,
                         user_id=pos.user_id, asset=pos.asset, side=pos.side,
-                        direction="close", size=split_size, price=sell_price,
+                        direction="close", strategy=pos.strategy, size=split_size, price=sell_price,
                         leverage=pos.leverage, status="confirmed",
                         venue=pos.venue or "agent", timestamp_utc=now,
                         notes=f"auto_close:smart_sl_sell_l{i+1}", pnl_usd=pnl,
@@ -1767,7 +1768,7 @@ class AgentService:
                         trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                         position_id=pos.position_id,
                         user_id=pos.user_id, asset=pos.asset, side=pos.side,
-                        direction="open", size=split_size, price=price,
+                        direction="open", strategy=pos.strategy, size=split_size, price=price,
                         leverage=pos.leverage, status="confirmed",
                         venue=pos.venue or "agent", timestamp_utc=now,
                         notes=f"auto_close:smart_sl_rebuy_l{i+1}", pnl_usd=Decimal("0"),
@@ -1841,7 +1842,7 @@ class AgentService:
                                 trade_id=f"ssl_{pos.position_id}_{uuid4().hex[:8]}",
                                 position_id=pos.position_id,
                                 user_id=pos.user_id, asset=pos.asset, side=pos.side,
-                                direction="open", size=total_rebuy_size, price=price,
+                                direction="open", strategy=pos.strategy, size=total_rebuy_size, price=price,
                                 leverage=pos.leverage, status="confirmed",
                                 venue=pos.venue or "agent", timestamp_utc=now,
                                 notes="auto_close:smart_sl_rebuy_all", pnl_usd=Decimal("0"),
@@ -3083,6 +3084,7 @@ class AgentService:
                     asset=str(signal.get("asset")),
                     side=side,
                     direction="open",
+                    strategy=DEFAULT_PERP_STRATEGY,
                     size=leveraged_size,
                     price=effective_price,
                     leverage=leverage,
@@ -3106,6 +3108,7 @@ class AgentService:
                     user_id=str(self.settings.default_user_id),
                     asset=str(signal.get("asset")),
                     side=side,
+                    strategy=DEFAULT_PERP_STRATEGY,
                     size=leveraged_size,
                     entry_price=effective_price,
                     current_price=effective_price,
