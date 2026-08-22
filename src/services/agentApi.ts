@@ -238,6 +238,9 @@ export interface GlobalView {
     /** Quante volte il conteggio giornaliero e' stato azzerato oggi (NOTE/63). */
     daily_counter_resets_today?: number;
     daily_counter_reset_at?: string | null;
+    /** Quante volte il picco del drawdown e' stato azzerato oggi (NOTE/83). */
+    drawdown_peak_resets_today?: number;
+    drawdown_peak_reset_at?: string | null;
   } | null;
   pnl_history: PnlPoint[];
 }
@@ -707,6 +710,31 @@ export interface ResetDailyCounterResponse {
  */
 export function resetDailyCounter(adminToken: string, note?: string): Promise<ResetDailyCounterResponse> {
   return request<ResetDailyCounterResponse>('/api/v1/agent/risk/reset-daily-counter', {
+    method: 'POST',
+    body: { note: note ?? null },
+    token: adminToken,
+  });
+}
+
+export interface ResetDrawdownPeakResponse {
+  status: string;
+  reason?: string;
+  reset_at?: string;
+  resets_today?: number;
+  peak_before_usd?: number;
+  drawdown_before_pct?: number;
+  drawdown_pct_now?: number | null;
+}
+
+/**
+ * Riporta il picco del drawdown all'equity attuale (NOTE/83, gemello del reset
+ * giornaliero). Il picco storico non scende mai da solo: senza questo, un
+ * drawdown_cap_guard scattato può restare agganciato per settimane anche a
+ * mercato tranquillo. Il cap in percentuale non cambia, resta pienamente
+ * attivo sul nuovo tratto.
+ */
+export function resetDrawdownPeak(adminToken: string, note?: string): Promise<ResetDrawdownPeakResponse> {
+  return request<ResetDrawdownPeakResponse>('/api/v1/agent/risk/reset-drawdown-peak', {
     method: 'POST',
     body: { note: note ?? null },
     token: adminToken,
