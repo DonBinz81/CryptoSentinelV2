@@ -7,22 +7,26 @@ import type { GuardianStatus } from '../services/agentApi';
 // I comandi di emergenza stanno DENTRO il banner, non tre tocchi piu' in la': quando
 // serve fermare il bot, cercarli nel setup e' esattamente il momento sbagliato.
 
+// Il guardiano e' perp-only per costruzione (record_stop alimentato solo dagli
+// stop pieni perp, blocco RED e scaling YELLOW dentro evaluate_perp): letto dal
+// pannello Spot, il vecchio testo senza "perp" affermava un blocco che non c'era
+// (segnalazione di David, 22/08, girata dalla chat E — NOTE/88).
 const TONI = {
   red: {
     bordo: 'border-accent-red/50',
     fondo: 'bg-accent-red/10',
     testo: 'text-accent-red',
     puntino: 'bg-accent-red',
-    titolo: 'PROTEZIONE ATTIVA',
-    sottotitolo: 'Nessuna nuova posizione finche\' il mercato non si calma',
+    titolo: 'PROTEZIONE PERP ATTIVA',
+    sottotitolo: 'Nessuna nuova posizione PERP finche\' il mercato non si calma',
   },
   yellow: {
     bordo: 'border-accent-yellow/50',
     fondo: 'bg-accent-yellow/10',
     testo: 'text-accent-yellow',
     puntino: 'bg-accent-yellow',
-    titolo: 'PRUDENZA',
-    sottotitolo: 'Posizioni dimezzate: il mercato ha fatto scattare degli stop',
+    titolo: 'PRUDENZA PERP',
+    sottotitolo: 'Posizioni perp dimezzate: gli stop perp hanno fatto scattare il guardiano',
   },
   green: {
     bordo: 'border-accent-green/30',
@@ -82,7 +86,7 @@ export const GuardianBanner: FC<{
     return (
       <div className="flex items-center gap-2 px-1">
         <span className={`h-1.5 w-1.5 rounded-full ${tono.puntino}`} />
-        <span className="text-[11px] text-gray-500">Regime normale</span>
+        <span className="text-[11px] text-gray-500">Regime normale (perp)</span>
       </div>
     );
   }
@@ -107,6 +111,10 @@ export const GuardianBanner: FC<{
             {daQuando && <span className="flex-shrink-0 text-[11px] text-gray-500">da {daQuando}</span>}
           </div>
           <p className="mt-0.5 text-xs leading-5 text-gray-300">{tono.sottotitolo}</p>
+          {/* Il banner sta sopra i selettori Spot/Perp/Global, identico su entrambi i
+              pannelli: senza questa riga, letto dallo Spot sembra dire che anche
+              li' le entrate siano bloccate. Non lo sono mai. */}
+          <p className="mt-1 text-[11px] text-gray-500">Lo spot non e&apos; toccato: entra normalmente.</p>
         </div>
       </div>
 
