@@ -67,6 +67,10 @@ pacchetto `backend + configs + pytest.ini` in `/tmp/chat_e_test`:
 
 ## STATO DELIVERABLE
 
-Completo sul branch `chat-e/fase0-strategy-column`, testato su VPS, non ancora
-committato/deployato (in attesa dell'ok esplicito per commit e deploy, regola
-resume).
+**Completo e in produzione.** Commit `355910a` sul branch, merge su `main` =
+`563dd13`, entrambi pushati. Deploy sulla VPS il 2026-08-22 ~14:40 UTC: backup
+pre-deploy in `/opt/cryptosentinelv2/backups/fase0_strategy_20260822_142848`,
+4 file copiati con hash SHA256 verificati identici al commit, servizio
+riavviato e `active`, `database_initialised` nei log, **0** occorrenze di
+`no such column` dopo 5 minuti di fast loop attivo (che legge la colonna nuova
+a ogni tick: verifica funzionale della migrazione senza toccare il DB).
