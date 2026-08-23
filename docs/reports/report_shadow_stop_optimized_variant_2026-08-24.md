@@ -65,11 +65,37 @@ fra 2-3 settimane — non dipende da periodi diversi di mercato.
 
 ## 4. SCOSTAMENTI DAL PIANO
 
-Nessuno rispetto a quanto descritto a David. Una precisazione emersa
-scrivendo i test: il "2/3" che avevo ipotizzato a voce per il conteggio delle
-candele di conferma nel caso di test non teneva conto che una candela con il
-minimo sotto l'entry AZZERA il contatore, non lo lascia fermo — corretto nel
-commento del test, comportamento del codice sempre stato quello inteso.
+Una precisazione emersa scrivendo i test: il "2/3" che avevo ipotizzato a
+voce per il conteggio delle candele di conferma nel caso di test non teneva
+conto che una candela con il minimo sotto l'entry AZZERA il contatore, non lo
+lascia fermo — corretto nel commento del test, comportamento del codice
+sempre stato quello inteso.
+
+**Bug trovato e corretto prima che avesse effetto**: la tabella
+`shadow_stop_runs` NON era vuota come nel deploy del 23/08 — al momento del
+deploy risultavano **2 posizioni perp reali già aperte**, con run shadow
+`baseline` già in corso nelle fasi `waiting_confirm`/`waiting_reclaim`. Il
+loro `state_json`, scritto dalla versione precedente di `new_run_state()`,
+non conteneva le chiavi nuove (`confirm_candles`, `reentry_offset_pct`,
+`confirm_count`). La lettura diretta con `st["..."]` in quelle due fasi
+avrebbe sollevato `KeyError` al primo tick successivo al deploy — catturato
+da `advance_active_runs` (che non propaga mai un'eccezione), quindi senza
+crashare il bot, ma **quei due run sarebbero rimasti bloccati per sempre**,
+persi in modo silenzioso: esattamente il tipo di errore che la regola di
+rigore vieta di lasciar passare. Trovato ispezionando `state_json` delle
+righe reali PRIMA del tick successivo (mancavano ~4 minuti), corretto
+sostituendo le letture dirette con `st.get(..., default)` (stesso pattern
+difensivo già usato nel progetto per i settings), coperto da 2 test di
+regressione dedicati che riproducono esattamente la forma dei due
+`state_json` reali, e ridistribuito con un secondo deploy mirato (solo
+`shadow_stop.py`) prima che il tick scattasse. Verificato nei log: nessun
+`shadow_stop_advance_failed` prima della correzione.
+
+Anche la sezione "6. Stato deliverable" del piano andava corretta: avevo
+scritto a David che la tabella sarebbe stata vuota, sulla base del deploy
+del giorno prima — non ho ricontrollato lo stato attuale prima di scrivere
+il resume. Lezione: verificare lo stato live subito prima del deploy, non
+fidarsi dello stato dell'ultima verifica.
 
 ## 5. QUESTIONI APERTE
 
@@ -88,7 +114,13 @@ commento del test, comportamento del codice sempre stato quello inteso.
 
 Completo. Deploy su VPS con backup freddo del vero DB di produzione
 (`backend/local.db`), servizio fermato prima di ogni modifica. La tabella
-`shadow_stop_runs` era vuota (0 posizioni aperte dal deploy di ieri): niente
-dati persi nel cambio di schema. File deployati, hash confrontati e
-coincidenti, servizio riavviato, nessun errore nei log. Merge in main e push
-eseguiti.
+`shadow_stop_runs` conteneva 2 righe reali (posizioni aperte, vedi §4):
+migrazione applicata in `database.py` (ADD COLUMN `variant` con default
+`'baseline'`, sostituzione dell'indice unico da `position_id` a
+`(position_id, variant)`), idempotente e automatica a ogni avvio — non un
+intervento manuale una tantum. Verificato dopo il riavvio: schema corretto,
+le 2 righe preesistenti backfillate a `variant='baseline'` con `outcome`
+ancora NULL (run in corso, intatti). File deployati, hash confrontati e
+coincidenti. Il bug di §4 è stato corretto con un secondo deploy mirato
+prima che causasse danno. Merge in main e push eseguiti (commit `2f216d5`
+incluso).
