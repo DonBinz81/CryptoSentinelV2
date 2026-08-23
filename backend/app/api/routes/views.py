@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SessionDep, SettingsDep
+from backend.app.core.logging import get_logger
 from backend.app.persistence.archive import list_archived_runs
 from backend.app.persistence.models.decisions import AgentDecision
 from backend.app.persistence.models.pnl import PnlSnapshot
@@ -22,6 +23,7 @@ from backend.app.persistence.views import ViewService, _close_reason
 from backend.app.schemas.views import GlobalView, PerpView, SpotView
 
 router = APIRouter(prefix="/api/v1/views", tags=["views"])
+logger = get_logger("api.views")
 
 
 @router.get("/spot")
@@ -283,8 +285,13 @@ _INTERVAL_MINUTES: dict[str, int] = {
     "1h": 60, "2h": 120, "4h": 240, "6h": 360, "12h": 720, "1d": 1440,
 }
 POST_CLOSE_CANDLES = 10
-TRADE_DETAIL_CHART_TIMEOUT_SECONDS = 4.0
-TRADE_DETAIL_FEED_TIMEOUT_SECONDS = 1.5
+TRADE_DETAIL_CHART_TIMEOUT_SECONDS = 12.0
+# NOTE/93 parte 2: 1.5s era irrealistico per una chiamata di rete esterna --
+# sotto il carico reale del server (fast tick, slow tick, telemetria, shadow
+# stop) falliva quasi sempre, in silenzio, mentre la stessa chiamata isolata
+# fuori dal processo funzionava sempre. 5s lascia margine reale senza rendere
+# l'attesa percepibile: e' un dettaglio aperto su richiesta, non un ciclo caldo.
+TRADE_DETAIL_FEED_TIMEOUT_SECONDS = 5.0
 TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS = 180
 
 
@@ -594,6 +601,10 @@ async def _build_live_chart(position, market: str, *, settings=None, timeout_sec
                     symbol=symbol, interval=interval, limit=limit, market=feed_market
                 )
         if not candles:
+            logger.warning(
+                "live_chart_no_candles", asset=position.asset, market=market,
+                symbol=symbol, interval=interval,
+            )
             return None
         tp2 = getattr(position, "take_profit_2", None)
         stop_reference_price = getattr(position, "stop_reference_price", None)
@@ -633,7 +644,14 @@ async def _build_live_chart(position, market: str, *, settings=None, timeout_sec
         }
         chart = _ensure_stop_reference(chart, market, chart["side"], lookback)
         return _apply_display_stop_to_chart(chart, position, settings, market, chart["side"])
-    except Exception:
+    except Exception as exc:
+        # NOTE/93 parte 2: era un ritorno None completamente silenzioso -- un
+        # timeout o un guasto del feed spariva senza lasciare traccia, e la
+        # scheda in app mostrava (o non mostrava) un grafico senza spiegazione.
+        logger.warning(
+            "live_chart_build_failed", asset=getattr(position, "asset", "?"),
+            market=market, error=str(exc), error_type=type(exc).__name__,
+        )
         return None
 
 
