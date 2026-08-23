@@ -42,12 +42,14 @@ async def create_shadow_stop_run(
     tp1: Decimal,
     entry_ts: datetime,
     cfg: ShadowStopConfig,
+    variant: str = "baseline",
 ) -> None:
     """Fired-and-forgotten at position opening, alongside entry telemetry.
 
     Opens its own session (it outlives the request's one when scheduled via
     ``asyncio.create_task``) and never raises — a broken run must never delay
-    or fail a real trade.
+    or fail a real trade. Called once per variant (NOTE/92): each position
+    gets one row per rule tested, keyed by (position_id, variant).
     """
     try:
         state = new_run_state(
@@ -59,16 +61,16 @@ async def create_shadow_stop_run(
 
         async with get_session_factory()() as session:
             session.add(ShadowStopRun(
-                position_id=position_id, user_id=user_id, asset=asset, side=side,
+                position_id=position_id, variant=variant, user_id=user_id, asset=asset, side=side,
                 entry_price=entry_price, tp1=tp1, entry_ts=entry_ts,
                 buffer_pct=Decimal(str(cfg.buffer_pct)), max_reentries=cfg.max_reentries,
                 state_json=json.dumps(state), events_json="[]",
                 created_at=now, updated_at=now,
             ))
             await session.commit()
-        logger.info("shadow_stop_run_created", position_id=position_id, asset=asset, side=side)
+        logger.info("shadow_stop_run_created", position_id=position_id, variant=variant, asset=asset, side=side)
     except Exception as exc:
-        logger.warning("shadow_stop_run_create_failed", position_id=position_id, error=str(exc))
+        logger.warning("shadow_stop_run_create_failed", position_id=position_id, variant=variant, error=str(exc))
 
 
 async def advance_active_runs(session, price_feed, *, now: datetime | None = None) -> None:

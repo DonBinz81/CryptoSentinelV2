@@ -292,6 +292,9 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "shadow_stop_enabled": "perp_shadow_stop_enabled",
         "shadow_stop_buffer_pct": "perp_shadow_stop_buffer_pct",
         "shadow_stop_max_reentries": "perp_shadow_stop_max_reentries",
+        "shadow_stop_optimized_enabled": "perp_shadow_stop_optimized_enabled",
+        "shadow_stop_optimized_confirm_candles": "perp_shadow_stop_optimized_confirm_candles",
+        "shadow_stop_optimized_reentry_offset_pct": "perp_shadow_stop_optimized_reentry_offset_pct",
         "guardian_enabled": "perp_guardian_enabled",
         "guardian_window_hours": "perp_guardian_window_hours",
         "guardian_yellow_stops": "perp_guardian_yellow_stops",
@@ -785,6 +788,15 @@ class Settings(BaseSettings):
     perp_shadow_stop_enabled: bool = Field(default=True, alias="PERP_SHADOW_STOP_ENABLED")
     perp_shadow_stop_buffer_pct: float = Field(default=0.1, alias="PERP_SHADOW_STOP_BUFFER_PCT")
     perp_shadow_stop_max_reentries: int = Field(default=1, alias="PERP_SHADOW_STOP_MAX_REENTRIES")
+    # Second variant (NOTE/92): 3 confirmation candles + a 0.2%-cheaper
+    # re-entry level, found by out-of-sample grid search on 198 real trades
+    # (V1 in-sample, V2 held out). Runs SIDE BY SIDE with the variant above
+    # (same buffer/max_reentries, same real position) so the comparison
+    # happens on live prices. confirm_candles=1/offset=0.0 above stays the
+    # "baseline" variant, unchanged.
+    perp_shadow_stop_optimized_enabled: bool = Field(default=True, alias="PERP_SHADOW_STOP_OPTIMIZED_ENABLED")
+    perp_shadow_stop_optimized_confirm_candles: int = Field(default=3, alias="PERP_SHADOW_STOP_OPTIMIZED_CONFIRM_CANDLES")
+    perp_shadow_stop_optimized_reentry_offset_pct: float = Field(default=0.2, alias="PERP_SHADOW_STOP_OPTIMIZED_REENTRY_OFFSET_PCT")
     perp_guardian_enabled: bool = Field(default=True, alias="PERP_GUARDIAN_ENABLED")
     perp_guardian_window_hours: float = Field(default=6.0, alias="PERP_GUARDIAN_WINDOW_HOURS")
     perp_guardian_yellow_stops: int = Field(default=1, alias="PERP_GUARDIAN_YELLOW_STOPS")
