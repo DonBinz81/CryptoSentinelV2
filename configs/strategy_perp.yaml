@@ -85,6 +85,11 @@ perp:
   # on a rolling window. YELLOW scales new entries, RED blocks them; open positions
   # stay managed. See NOTE/61 for the study behind defaults.
   telemetry_enabled: true       # archivia posizionamento pair a ogni ingresso (NOTE/81)
+  # Shadow-mode: simula la regola stop-stretto + rientro sul reclaim (NOTE/91)
+  # su ogni posizione reale, senza mai toccare un ordine. Solo diagnostica.
+  shadow_stop_enabled: true
+  shadow_stop_buffer_pct: 0.1        # % sotto il minimo/massimo della candela del segnale
+  shadow_stop_max_reentries: 1       # rientri massimi sul reclaim confermato
   guardian_enabled: true
   guardian_window_hours: 6.0         # rolling window for counting full stops
   guardian_yellow_stops: 1           # stops in window -> YELLOW
