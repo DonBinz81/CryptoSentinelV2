@@ -13,6 +13,7 @@ from .device_tokens import DeviceToken
 from .pnl import PnlSnapshot, PortfolioState
 from .positions import PerpPosition, SpotPosition
 from .runtime_state import RuntimeState
+from .shadow_stop import ShadowStopRun
 from .support import SupportMessage, SupportTicket
 from .trade_charts import TradeChartSnapshot
 from .telemetry import EntryTelemetry, PositionTelemetry
@@ -35,6 +36,7 @@ __all__ = [
     "PerpPosition",
     "SpotPosition",
     "RuntimeState",
+    "ShadowStopRun",
     "SupportMessage",
     "SupportTicket",
     "TradeChartSnapshot",

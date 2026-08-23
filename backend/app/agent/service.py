@@ -22,6 +22,8 @@ from backend.app.agent.guardian import (
     RegimeGuardian,
 )
 from backend.app.agent.heartbeat import heartbeat
+from backend.app.agent.shadow_stop import ShadowStopConfig
+from backend.app.agent.shadow_stop_runner import advance_active_runs, create_shadow_stop_run
 from backend.app.agent.telemetry import capture_entry_telemetry, snapshot_open_position
 from backend.app.agent.risk import KillSwitchState, RiskDecision, RiskManager, SignalIntent
 from backend.app.agent.signals.perp.binance_klines import BinanceKlineFeed, BinanceMarket, get_kline_cache_entry
@@ -2611,6 +2613,14 @@ class AgentService:
                     await session.commit()
                 except Exception as exc:
                     logger.warning("position_telemetry_tick_failed", error=str(exc))
+            # Shadow-stop advance (NOTE/91): keeps running for a position even
+            # after it closes for real — the point is comparing outcomes.
+            # Diagnostics only, never raises, never touches a real order.
+            if getattr(self.settings, "perp_shadow_stop_enabled", True):
+                try:
+                    await advance_active_runs(session, self.price_feed, now=_now)
+                except Exception as exc:
+                    logger.warning("shadow_stop_advance_tick_failed", error=str(exc))
         spot_assets = selected_spot_watchlist(self.settings) if "spot" in markets else []
         perp_assets = selected_perp_watchlist(self.settings) if "perp" in markets else []
         selected_assets = list(dict.fromkeys([*spot_assets, *perp_assets]))
@@ -2874,6 +2884,34 @@ class AgentService:
                     ))
                 except Exception as exc:
                     logger.warning("entry_telemetry_spawn_failed", error=str(exc))
+            # Shadow-stop simulation (NOTE/91): logs what David's tight-stop +
+            # confirmed-reclaim rule would have done on this real position,
+            # never touches the real order. Same fire-and-forget contract as
+            # entry telemetry above.
+            if (
+                getattr(self.settings, "perp_shadow_stop_enabled", True)
+                and str(signal.get("market")) == "perp"
+                and execution.get("position_id")
+                and signal.get("price") is not None
+                and signal.get("take_profit_1") is not None
+            ):
+                try:
+                    shadow_cfg = ShadowStopConfig(
+                        buffer_pct=float(getattr(self.settings, "perp_shadow_stop_buffer_pct", 0.1)),
+                        max_reentries=int(getattr(self.settings, "perp_shadow_stop_max_reentries", 1)),
+                    )
+                    asyncio.create_task(create_shadow_stop_run(
+                        position_id=str(execution["position_id"]),
+                        user_id=user_id,
+                        asset=str(signal.get("asset")),
+                        side=str(signal.get("side") or ""),
+                        entry_price=Decimal(str(signal["price"])),
+                        tp1=Decimal(str(signal["take_profit_1"])),
+                        entry_ts=now,
+                        cfg=shadow_cfg,
+                    ))
+                except Exception as exc:
+                    logger.warning("shadow_stop_run_spawn_failed", error=str(exc))
         return {
             "signal": signal,
             "risk": risk_decision.__dict__,

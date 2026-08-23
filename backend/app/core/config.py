@@ -289,6 +289,9 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "smart_sl_confirmation_candles": "perp_smart_sl_confirmation_candles",
         "smart_sl_max_reentries": "perp_smart_sl_max_reentries",
         "telemetry_enabled": "perp_telemetry_enabled",
+        "shadow_stop_enabled": "perp_shadow_stop_enabled",
+        "shadow_stop_buffer_pct": "perp_shadow_stop_buffer_pct",
+        "shadow_stop_max_reentries": "perp_shadow_stop_max_reentries",
         "guardian_enabled": "perp_guardian_enabled",
         "guardian_window_hours": "perp_guardian_window_hours",
         "guardian_yellow_stops": "perp_guardian_yellow_stops",
@@ -774,6 +777,14 @@ class Settings(BaseSettings):
     # and OI snapshots on open positions, before Binance's 30-day retention
     # erases the history. Diagnostics only; trading never reads it back.
     perp_telemetry_enabled: bool = Field(default=True, alias="PERP_TELEMETRY_ENABLED")
+    # Shadow-mode simulation of David's tight-stop + confirmed-reclaim rule
+    # (NOTE/91): logs what the rule would have done on real positions, never
+    # touches a real order. buffer_pct/max_reentries match the backtest's
+    # best config (0.1% / 1 re-entry) — changing them here does not require
+    # code changes, only re-reading the shadow runs with the new baseline.
+    perp_shadow_stop_enabled: bool = Field(default=True, alias="PERP_SHADOW_STOP_ENABLED")
+    perp_shadow_stop_buffer_pct: float = Field(default=0.1, alias="PERP_SHADOW_STOP_BUFFER_PCT")
+    perp_shadow_stop_max_reentries: int = Field(default=1, alias="PERP_SHADOW_STOP_MAX_REENTRIES")
     perp_guardian_enabled: bool = Field(default=True, alias="PERP_GUARDIAN_ENABLED")
     perp_guardian_window_hours: float = Field(default=6.0, alias="PERP_GUARDIAN_WINDOW_HOURS")
     perp_guardian_yellow_stops: int = Field(default=1, alias="PERP_GUARDIAN_YELLOW_STOPS")
