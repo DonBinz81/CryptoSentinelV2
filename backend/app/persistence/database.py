@@ -61,12 +61,30 @@ async def _apply_column_migrations(conn) -> None:
         # DEFAULT to pre-existing rows on read, so historical rows are never NULL.
         ("perp_positions", "strategy", "VARCHAR(32) NOT NULL DEFAULT 'volume_profile_v1'"),
         ("perp_trades", "strategy", "VARCHAR(32) NOT NULL DEFAULT 'volume_profile_v1'"),
+        # Second shadow-stop variant (NOTE/92): existing rows backfill to
+        # 'baseline', the rule they were already running.
+        ("shadow_stop_runs", "variant", "VARCHAR(24) NOT NULL DEFAULT 'baseline'"),
     ]
     for table, column, col_type in new_columns:
         try:
             await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
         except Exception:
             pass  # column already exists
+
+    # shadow_stop_runs' uniqueness moves from position_id alone to
+    # (position_id, variant) so two rule variants can run on the same
+    # position (NOTE/92). Swap the index; both statements are idempotent.
+    try:
+        await conn.execute(text("DROP INDEX IF EXISTS ix_shadow_stop_runs_position_id"))
+    except Exception:
+        pass
+    try:
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_shadow_stop_position_variant "
+            "ON shadow_stop_runs (position_id, variant)"
+        ))
+    except Exception:
+        pass
 
     await _backfill_perp_trade_position_id(conn)
 
