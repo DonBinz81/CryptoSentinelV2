@@ -1746,6 +1746,16 @@ class AgentService:
                         notes=f"auto_close:smart_sl_sell_l{i+1}", pnl_usd=pnl,
                     )
                     await PerpTradeRepository(session).save(close_trade)
+                    # NOTE/93 parte 2: la vendita Smart SL crea il trade di
+                    # chiusura per conto proprio (non passa da
+                    # _close_perp_position) e finora saltava lo snapshot del
+                    # grafico -- il dettaglio dipendeva interamente dal
+                    # fallback live, spesso vuoto sotto carico reale (vedi
+                    # sotto). Stesso trattamento delle chiusure normali.
+                    await self._snapshot_closed_trade(
+                        session, pos, market="perp", exit_price=sell_price,
+                        close_trade_id=close_trade.trade_id, now=now,
+                    )
 
                     lv["pre_sell_opening_fee"] = str(pos.opening_fee_usd or Decimal("0"))
                     lv["pre_sell_slippage"] = str(pos.slippage_usd or Decimal("0"))
