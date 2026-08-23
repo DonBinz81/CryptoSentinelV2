@@ -140,8 +140,12 @@ def advance(state: dict, candle: Candle) -> tuple[dict, list[ShadowStopEvent]]:
     if phase == "waiting_confirm":
         entry_ref = st["entry_price"]  # reclaim reference is always the ORIGINAL entry
         full_candle_beyond = candle.low > entry_ref if is_long else candle.high < entry_ref
-        st["confirm_count"] = st["confirm_count"] + 1 if full_candle_beyond else 0
-        if st["confirm_count"] >= st["confirm_candles"]:
+        # .get() with the pre-NOTE/92 default (1 candle): a run created before
+        # this field existed has neither key in its persisted state_json —
+        # without the fallback this would KeyError and strand the run.
+        confirm_count = st.get("confirm_count", 0)
+        st["confirm_count"] = confirm_count + 1 if full_candle_beyond else 0
+        if st["confirm_count"] >= st.get("confirm_candles", 1):
             st["confirmed"] = True
             st["phase"] = "waiting_reclaim"
             events.append(ShadowStopEvent("confirmed", entry_ref))
@@ -149,7 +153,7 @@ def advance(state: dict, candle: Candle) -> tuple[dict, list[ShadowStopEvent]]:
 
     if phase == "waiting_reclaim":
         entry_ref, tp1 = st["entry_price"], st["tp1"]
-        offset = st["reentry_offset_pct"]
+        offset = st.get("reentry_offset_pct", 0.0)  # pre-NOTE/92 runs: exact-entry reclaim
         reentry_level = entry_ref * (1 - offset / 100) if is_long else entry_ref * (1 + offset / 100)
         reclaimed = candle.low <= reentry_level if is_long else candle.high >= reentry_level
         missed = candle.high >= tp1 if is_long else candle.low <= tp1

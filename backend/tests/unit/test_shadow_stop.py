@@ -134,6 +134,43 @@ class TestHorizon:
         assert state == original
 
 
+class TestPreNote92StateCompatibility:
+    """Runs created before NOTE/92 have state_json blobs with no
+    confirm_candles/reentry_offset_pct/confirm_count keys at all (two real
+    open positions in production had exactly this shape when this landed).
+    advance() must keep working on them, not KeyError and strand the run.
+    """
+
+    def _old_state(self, phase, **overrides):
+        # Deliberately built WITHOUT calling new_run_state(), to reproduce a
+        # pre-NOTE/92 persisted blob missing the newer keys entirely.
+        state = {
+            "phase": phase, "side": "short", "entry_price": 1.5108, "tp1": 1.4942,
+            "buffer_pct": 0.1, "max_reentries": 1, "candles_seen": 7,
+            "candle_budget": 288, "sig_extreme": 1.5174, "stop_price": 1.5189174,
+            "entry_ref": 1.5108, "reentries": 0, "confirmed": phase == "waiting_reclaim",
+            "pnl_virtual_pct": -0.537, "outcome": None,
+        }
+        state.update(overrides)
+        return state
+
+    def test_waiting_confirm_without_confirm_count_key_does_not_raise(self):
+        state = self._old_state("waiting_confirm")
+        assert "confirm_count" not in state and "confirm_candles" not in state
+        # short: high < entry_ref confirms (mirrors the live pos_0e8a... row)
+        state, events = advance(state, _c(1.51, 1.505, 1.5, 1.502))
+        assert [e.kind for e in events] == ["confirmed"]
+        assert state["phase"] == "waiting_reclaim"
+
+    def test_waiting_reclaim_without_offset_key_reclaims_at_exact_entry(self):
+        state = self._old_state("waiting_reclaim")
+        assert "reentry_offset_pct" not in state
+        # short: high >= entry_ref(1.5108) reclaims (mirrors pos_f44b... row)
+        state, events = advance(state, _c(1.505, 1.512, 1.503, 1.51))
+        assert events[0].kind == "reentered"
+        assert events[0].price == 1.5108  # exact entry: missing key defaults to offset 0.0
+
+
 class TestConfirmCandlesAndReentryOffset:
     """NOTE/92: the 'optimized' variant needs N consecutive confirmation
     candles (not just one) and a cheaper re-entry level (not exactly entry).
