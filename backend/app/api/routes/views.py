@@ -271,12 +271,23 @@ async def _live_chart_if_open(snapshot, position, market: str, settings) -> dict
     """
     if position is None or position.status == "closed":
         return None
+    started = datetime.now(UTC)
     try:
         return await asyncio.wait_for(
             _build_live_chart(position, market, settings=settings, timeout_seconds=TRADE_DETAIL_FEED_TIMEOUT_SECONDS),
             timeout=TRADE_DETAIL_CHART_TIMEOUT_SECONDS,
         )
-    except Exception:
+    except Exception as exc:
+        # NOTE/93 parte 2: il logging dentro _build_live_chart non basta --
+        # se il budget esterno scade PRIMA che quella coroutine faccia
+        # progresso, riceve CancelledError (non una Exception in Python 3.8+,
+        # non catturata dal suo except) e non arriva mai a loggare nulla.
+        # Questo e' il punto che vede davvero ogni fallimento, timeout incluso.
+        elapsed = (datetime.now(UTC) - started).total_seconds()
+        logger.warning(
+            "live_chart_if_open_failed", asset=getattr(position, "asset", "?"),
+            market=market, elapsed_s=round(elapsed, 2), error=str(exc), error_type=type(exc).__name__,
+        )
         return None
 
 

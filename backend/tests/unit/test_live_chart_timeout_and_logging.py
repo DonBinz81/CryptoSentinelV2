@@ -6,10 +6,21 @@ the running server) plus zero logging on failure meant a broken chart looked
 identical to a working one from the outside -- no error, just a missing or
 stale rendering. This checks the widened budget and that a failure now
 leaves a trace.
+
+Two layers matter here, not one: `_build_live_chart`'s own try/except, AND
+the OUTER `asyncio.wait_for` wrapper in `_live_chart_if_open`. A timeout that
+fires at the outer layer cancels the inner coroutine with CancelledError --
+which does NOT subclass Exception since Python 3.8, so the inner function's
+own except never runs and never logs. Only the outer wrapper sees it. Missed
+this on the first pass of the fix: verifying the deploy against the real
+server, curl calls kept coming back "chart: null" instantly with zero log
+lines even from the inner logging just added -- exactly the symptom of a
+failure happening one layer higher than where the log was.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -23,7 +34,7 @@ from backend.tests.unit.test_agent_step6 import settings
 
 def _position(**overrides):
     base = dict(
-        asset="BNB", side="short",
+        asset="BNB", side="short", status="open",
         entry_price=Decimal("700"), current_price=Decimal("705"),
         stop_loss=Decimal("710"), initial_stop_loss=Decimal("708.48"),
         take_profit_1=Decimal("697"), take_profit_2=Decimal("683"),
@@ -111,4 +122,44 @@ class TestFailureIsLogged:
                 chart = await view_routes._build_live_chart(_position(), "perp", settings=settings())
 
         assert chart is not None
+        assert not mock_logger.warning.called
+
+
+@pytest.mark.asyncio
+class TestWrapperTimeoutIsLogged:
+    """_live_chart_if_open: il livello che vede DAVVERO ogni fallimento --
+    incluso un timeout che scade PRIMA che la coroutine interna faccia
+    progresso, che arriva come CancelledError e non passa mai dal logging
+    interno di _build_live_chart."""
+
+    async def test_outer_timeout_is_logged_even_when_inner_never_gets_to_log(self, monkeypatch):
+        async def _hangs_forever(*args, **kwargs):
+            await asyncio.sleep(10)
+            return {"candles": []}
+
+        monkeypatch.setattr(view_routes, "_build_live_chart", _hangs_forever)
+        monkeypatch.setattr(view_routes, "TRADE_DETAIL_CHART_TIMEOUT_SECONDS", 0.05)
+
+        with patch.object(view_routes, "logger") as mock_logger:
+            result = await view_routes._live_chart_if_open(
+                None, _position(), "perp", settings()
+            )
+
+        assert result is None
+        assert mock_logger.warning.called
+        event_names = [call.args[0] for call in mock_logger.warning.call_args_list]
+        assert "live_chart_if_open_failed" in event_names
+
+    async def test_no_warning_when_the_wrapper_succeeds_quickly(self, monkeypatch):
+        async def _fast_chart(*args, **kwargs):
+            return {"candles": [{"t": "x"}], "live": True}
+
+        monkeypatch.setattr(view_routes, "_build_live_chart", _fast_chart)
+
+        with patch.object(view_routes, "logger") as mock_logger:
+            result = await view_routes._live_chart_if_open(
+                None, _position(), "perp", settings()
+            )
+
+        assert result is not None
         assert not mock_logger.warning.called
