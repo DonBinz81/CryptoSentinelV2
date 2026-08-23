@@ -131,3 +131,39 @@ async def test_fetch_failure_never_raises_and_leaves_run_untouched(db):
         await advance_active_runs(session, _BrokenPriceFeed(), now=T0 + timedelta(minutes=30))
         row = (await session.execute(select(ShadowStopRun))).scalar_one()
         assert row.outcome is None  # untouched, not crashed
+
+
+@pytest.mark.asyncio
+async def test_two_variants_coexist_and_advance_independently_on_same_position(db):
+    # NOTE/92: baseline (confirm=1, offset=0.0) and optimized (confirm=3,
+    # offset=0.2) run on the SAME position_id. They must not collide on the
+    # unique constraint and must reach different outcomes when the price path
+    # would resolve them differently.
+    baseline_cfg = CFG
+    optimized_cfg = ShadowStopConfig(buffer_pct=0.1, max_reentries=1, confirm_candles=3, reentry_offset_pct=0.2)
+    await create_shadow_stop_run(
+        position_id="pos_5", user_id="u", asset="LINK", side="long",
+        entry_price=Decimal("10"), tp1=Decimal("10.5"), entry_ts=T0, cfg=baseline_cfg, variant="baseline",
+    )
+    await create_shadow_stop_run(
+        position_id="pos_5", user_id="u", asset="LINK", side="long",
+        entry_price=Decimal("10"), tp1=Decimal("10.5"), entry_ts=T0, cfg=optimized_cfg, variant="optimized",
+    )
+    async with get_session_factory()() as session:
+        rows = (await session.execute(select(ShadowStopRun))).scalars().all()
+        assert {r.variant for r in rows} == {"baseline", "optimized"}
+        assert len({r.id for r in rows}) == 2  # two distinct rows, same position_id
+
+    candles = [
+        _candle(0, 9.9, 10.1, 9.8, 10.0),        # signal candle, stop ~9.79
+        _candle(5, 9.9, 9.92, 9.7, 9.75),        # sweeps below stop for both
+        _candle(10, 9.9, 10.15, 10.05, 10.1),    # 1 candle beyond entry: confirms baseline (needs 1); optimized needs 3, still counting (1/3)
+        _candle(15, 10.1, 10.6, 9.9, 10.55),     # baseline: reclaims @10 then TP1. optimized: low back under entry resets its confirm count to 0 -- still waiting.
+    ]
+    feed = _FakePriceFeed(candles)
+    async with get_session_factory()() as session:
+        await advance_active_runs(session, feed, now=T0 + timedelta(minutes=21))
+        rows = {r.variant: r for r in (await session.execute(select(ShadowStopRun))).scalars().all()}
+        assert rows["baseline"].outcome == "tp1"
+        # optimized needed 3 confirmation candles: only 2 arrived, still open.
+        assert rows["optimized"].outcome is None

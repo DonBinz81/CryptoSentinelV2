@@ -2884,10 +2884,14 @@ class AgentService:
                     ))
                 except Exception as exc:
                     logger.warning("entry_telemetry_spawn_failed", error=str(exc))
-            # Shadow-stop simulation (NOTE/91): logs what David's tight-stop +
-            # confirmed-reclaim rule would have done on this real position,
-            # never touches the real order. Same fire-and-forget contract as
-            # entry telemetry above.
+            # Shadow-stop simulation (NOTE/91-92): logs what David's tight-stop
+            # + confirmed-reclaim rule would have done on this real position,
+            # never touches the real order. Two variants run side by side —
+            # "baseline" (1 confirmation candle, exact-entry re-entry, the
+            # original rule) and "optimized" (3 candles, 0.2%-cheaper
+            # re-entry, found by out-of-sample grid search) — so the
+            # comparison happens on the SAME real prices. Same fire-and-forget
+            # contract as entry telemetry above.
             if (
                 getattr(self.settings, "perp_shadow_stop_enabled", True)
                 and str(signal.get("market")) == "perp"
@@ -2895,23 +2899,32 @@ class AgentService:
                 and signal.get("price") is not None
                 and signal.get("take_profit_1") is not None
             ):
-                try:
-                    shadow_cfg = ShadowStopConfig(
-                        buffer_pct=float(getattr(self.settings, "perp_shadow_stop_buffer_pct", 0.1)),
-                        max_reentries=int(getattr(self.settings, "perp_shadow_stop_max_reentries", 1)),
-                    )
-                    asyncio.create_task(create_shadow_stop_run(
-                        position_id=str(execution["position_id"]),
-                        user_id=user_id,
-                        asset=str(signal.get("asset")),
-                        side=str(signal.get("side") or ""),
-                        entry_price=Decimal(str(signal["price"])),
-                        tp1=Decimal(str(signal["take_profit_1"])),
-                        entry_ts=now,
-                        cfg=shadow_cfg,
-                    ))
-                except Exception as exc:
-                    logger.warning("shadow_stop_run_spawn_failed", error=str(exc))
+                buffer_pct = float(getattr(self.settings, "perp_shadow_stop_buffer_pct", 0.1))
+                max_reentries = int(getattr(self.settings, "perp_shadow_stop_max_reentries", 1))
+                shadow_variants = [("baseline", ShadowStopConfig(
+                    buffer_pct=buffer_pct, max_reentries=max_reentries,
+                ))]
+                if getattr(self.settings, "perp_shadow_stop_optimized_enabled", True):
+                    shadow_variants.append(("optimized", ShadowStopConfig(
+                        buffer_pct=buffer_pct, max_reentries=max_reentries,
+                        confirm_candles=int(getattr(self.settings, "perp_shadow_stop_optimized_confirm_candles", 3)),
+                        reentry_offset_pct=float(getattr(self.settings, "perp_shadow_stop_optimized_reentry_offset_pct", 0.2)),
+                    )))
+                for variant_name, shadow_cfg in shadow_variants:
+                    try:
+                        asyncio.create_task(create_shadow_stop_run(
+                            position_id=str(execution["position_id"]),
+                            user_id=user_id,
+                            asset=str(signal.get("asset")),
+                            side=str(signal.get("side") or ""),
+                            entry_price=Decimal(str(signal["price"])),
+                            tp1=Decimal(str(signal["take_profit_1"])),
+                            entry_ts=now,
+                            cfg=shadow_cfg,
+                            variant=variant_name,
+                        ))
+                    except Exception as exc:
+                        logger.warning("shadow_stop_run_spawn_failed", variant=variant_name, error=str(exc))
         return {
             "signal": signal,
             "risk": risk_decision.__dict__,

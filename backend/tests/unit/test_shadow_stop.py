@@ -134,6 +134,102 @@ class TestHorizon:
         assert state == original
 
 
+class TestPreNote92StateCompatibility:
+    """Runs created before NOTE/92 have state_json blobs with no
+    confirm_candles/reentry_offset_pct/confirm_count keys at all (two real
+    open positions in production had exactly this shape when this landed).
+    advance() must keep working on them, not KeyError and strand the run.
+    """
+
+    def _old_state(self, phase, **overrides):
+        # Deliberately built WITHOUT calling new_run_state(), to reproduce a
+        # pre-NOTE/92 persisted blob missing the newer keys entirely.
+        state = {
+            "phase": phase, "side": "short", "entry_price": 1.5108, "tp1": 1.4942,
+            "buffer_pct": 0.1, "max_reentries": 1, "candles_seen": 7,
+            "candle_budget": 288, "sig_extreme": 1.5174, "stop_price": 1.5189174,
+            "entry_ref": 1.5108, "reentries": 0, "confirmed": phase == "waiting_reclaim",
+            "pnl_virtual_pct": -0.537, "outcome": None,
+        }
+        state.update(overrides)
+        return state
+
+    def test_waiting_confirm_without_confirm_count_key_does_not_raise(self):
+        state = self._old_state("waiting_confirm")
+        assert "confirm_count" not in state and "confirm_candles" not in state
+        # short: high < entry_ref confirms (mirrors the live pos_0e8a... row)
+        state, events = advance(state, _c(1.51, 1.505, 1.5, 1.502))
+        assert [e.kind for e in events] == ["confirmed"]
+        assert state["phase"] == "waiting_reclaim"
+
+    def test_waiting_reclaim_without_offset_key_reclaims_at_exact_entry(self):
+        state = self._old_state("waiting_reclaim")
+        assert "reentry_offset_pct" not in state
+        # short: high >= entry_ref(1.5108) reclaims (mirrors pos_f44b... row)
+        state, events = advance(state, _c(1.505, 1.512, 1.503, 1.51))
+        assert events[0].kind == "reentered"
+        assert events[0].price == 1.5108  # exact entry: missing key defaults to offset 0.0
+
+
+class TestConfirmCandlesAndReentryOffset:
+    """NOTE/92: the 'optimized' variant needs N consecutive confirmation
+    candles (not just one) and a cheaper re-entry level (not exactly entry).
+    confirm_candles=1/offset=0.0 (the CFG default above) must keep behaving
+    exactly like before — every other test in this file proves that already.
+    """
+
+    def test_confirm_count_resets_when_a_candle_falls_back_inside(self):
+        cfg = ShadowStopConfig(buffer_pct=0.1, max_reentries=1, confirm_candles=2)
+        state = _start(cfg=cfg, entry=100.0, tp1=105.0)
+        state, _ = advance(state, _c(99, 101, 98, 100.5))         # signal candle
+        state, ev = advance(state, _c(99, 99.2, 97.5, 98))        # stop
+        assert ev[0].kind == "stopped"
+
+        state, ev = advance(state, _c(99.5, 100.8, 100.5, 100.7))  # beyond: count=1
+        assert ev == []
+        state, ev = advance(state, _c(100.7, 100.9, 99.9, 100.2))  # NOT beyond: resets to 0
+        assert ev == []
+        assert state["confirm_count"] == 0
+        state, ev = advance(state, _c(100.2, 100.5, 100.3, 100.4))  # beyond: count=1
+        assert ev == []
+        state, ev = advance(state, _c(100.4, 100.6, 100.35, 100.5))  # beyond: count=2 -> confirmed
+        assert ev[0].kind == "confirmed"
+
+    def test_reentry_offset_requires_a_cheaper_price_than_exact_entry(self):
+        cfg = ShadowStopConfig(buffer_pct=0.1, max_reentries=1, reentry_offset_pct=0.2)
+        state = _start(cfg=cfg, entry=100.0, tp1=105.0)
+        state, _ = advance(state, _c(99, 101, 98, 100.5))
+        state, _ = advance(state, _c(99, 99.2, 97.5, 98))          # stop
+        state, ev = advance(state, _c(99, 100.3, 100.1, 100.2))    # confirmed
+        assert ev[0].kind == "confirmed"
+
+        # low=99.9 does NOT reach the offset level (99.8): no reclaim yet,
+        # whereas offset=0.0 (exact entry) would already have reclaimed here.
+        state, ev = advance(state, _c(100.2, 100.4, 99.9, 100.0))
+        assert ev == []
+        assert state["phase"] == "waiting_reclaim"
+
+        state, ev = advance(state, _c(100.0, 100.5, 99.7, 100.0))  # low=99.7 <= 99.8
+        assert ev[0].kind == "reentered"
+        assert abs(ev[0].price - 99.8) < 1e-6
+        assert state["entry_ref"] == ev[0].price
+
+    def test_default_config_confirm_1_offset_0_matches_original_behavior(self):
+        # Explicit regression guard: the new fields must not change anything
+        # for confirm_candles=1/reentry_offset_pct=0.0 (the deployed baseline).
+        default_cfg = ShadowStopConfig(buffer_pct=0.1, max_reentries=1)
+        assert default_cfg.confirm_candles == 1
+        assert default_cfg.reentry_offset_pct == 0.0
+        state = _start(cfg=default_cfg, entry=100.0, tp1=105.0)
+        state, _ = advance(state, _c(99, 101, 98, 100.5))
+        state, _ = advance(state, _c(99, 99.2, 97.5, 98))
+        state, ev = advance(state, _c(99, 100.3, 100.1, 100.2))  # one candle: confirmed
+        assert ev[0].kind == "confirmed"
+        state, ev = advance(state, _c(100.2, 100.5, 99.8, 100.0))  # low<=100: reclaim at exact entry
+        assert ev[0].kind == "reentered"
+        assert ev[0].price == 100.0
+
+
 class TestShortSide:
     def test_short_sweep_and_reclaim_mirrors_long(self):
         state = _start(side="short", entry=100.0, tp1=95.0)

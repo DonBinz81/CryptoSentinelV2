@@ -8,10 +8,21 @@ position. It only measures what would have happened.
 
 Rule under test: stop at a small buffer beyond the signal candle's extreme
 (the candle whose close fixed entry) instead of the structural stop; on stop,
-wait for one full candle beyond the ORIGINAL entry (confirmation), then arm a
-limit at that same entry price; if price retraces there, re-enter with the
-same TP1, same rule. Bounded by ``max_reentries`` and a 24h horizon (288 5m
-candles) to match the backtest that validated it.
+wait for ``confirm_candles`` consecutive full candles beyond the ORIGINAL
+entry (confirmation), then arm a limit at ``reentry_offset_pct`` away from
+that entry; if price retraces there, re-enter with the same TP1, same rule.
+Bounded by ``max_reentries`` and a 24h horizon (288 5m candles) to match the
+backtest that validated it.
+
+NOTE/92 (24/08) found, on a grid search over confirm_candles x reentry offset
+x max_reentries validated out-of-sample, that 3 confirmation candles + a
+0.2%-cheaper re-entry level beats the original 1-candle/exact-entry rule on
+both the in-sample (V1, Marco's trades) and out-of-sample (V2, ours) data,
+with a bootstrap confidence interval on V2 that excludes zero. Two variants
+now run side by side on every real position (see shadow_stop_runner.py and
+service.py) so the comparison happens on live prices, not just backtests.
+confirm_candles=1 and reentry_offset_pct=0.0 reproduce the original rule
+exactly — this is a strict extension, not a behavior change for that variant.
 
 Pure state machine: one call to ``advance`` per newly-closed 5m candle, no I/O,
 no DB, mirrors breach.py's purity for the same reason (NOTE/73) — an in-place
@@ -30,6 +41,8 @@ from backend.app.agent.signals.common.indicators import Candle
 class ShadowStopConfig:
     buffer_pct: float
     max_reentries: int
+    confirm_candles: int = 1        # consecutive full candles beyond entry to confirm reclaim
+    reentry_offset_pct: float = 0.0  # 0 = exact entry; >0 = cheaper level below entry (long)
     horizon_candles: int = 288  # 24h of 5m candles, matches the backtest
 
 
@@ -50,6 +63,8 @@ def new_run_state(*, side: str, entry_price: float, tp1: float, cfg: ShadowStopC
         "tp1": tp1,
         "buffer_pct": cfg.buffer_pct,
         "max_reentries": cfg.max_reentries,
+        "confirm_candles": max(1, cfg.confirm_candles),
+        "reentry_offset_pct": cfg.reentry_offset_pct,
         "candles_seen": 0,
         "candle_budget": candle_count_budget,
         "sig_extreme": None,
@@ -57,6 +72,7 @@ def new_run_state(*, side: str, entry_price: float, tp1: float, cfg: ShadowStopC
         "entry_ref": entry_price,
         "reentries": 0,
         "confirmed": False,
+        "confirm_count": 0,
         "pnl_virtual_pct": 0.0,
         "outcome": None,
     }
@@ -124,7 +140,12 @@ def advance(state: dict, candle: Candle) -> tuple[dict, list[ShadowStopEvent]]:
     if phase == "waiting_confirm":
         entry_ref = st["entry_price"]  # reclaim reference is always the ORIGINAL entry
         full_candle_beyond = candle.low > entry_ref if is_long else candle.high < entry_ref
-        if full_candle_beyond:
+        # .get() with the pre-NOTE/92 default (1 candle): a run created before
+        # this field existed has neither key in its persisted state_json —
+        # without the fallback this would KeyError and strand the run.
+        confirm_count = st.get("confirm_count", 0)
+        st["confirm_count"] = confirm_count + 1 if full_candle_beyond else 0
+        if st["confirm_count"] >= st.get("confirm_candles", 1):
             st["confirmed"] = True
             st["phase"] = "waiting_reclaim"
             events.append(ShadowStopEvent("confirmed", entry_ref))
@@ -132,13 +153,15 @@ def advance(state: dict, candle: Candle) -> tuple[dict, list[ShadowStopEvent]]:
 
     if phase == "waiting_reclaim":
         entry_ref, tp1 = st["entry_price"], st["tp1"]
-        reclaimed = candle.low <= entry_ref if is_long else candle.high >= entry_ref
+        offset = st.get("reentry_offset_pct", 0.0)  # pre-NOTE/92 runs: exact-entry reclaim
+        reentry_level = entry_ref * (1 - offset / 100) if is_long else entry_ref * (1 + offset / 100)
+        reclaimed = candle.low <= reentry_level if is_long else candle.high >= reentry_level
         missed = candle.high >= tp1 if is_long else candle.low <= tp1
         if reclaimed:
-            st["entry_ref"] = entry_ref
+            st["entry_ref"] = reentry_level
             st["reentries"] += 1
             st["phase"] = "in"
-            events.append(ShadowStopEvent("reentered", entry_ref))
+            events.append(ShadowStopEvent("reentered", reentry_level))
             # Same candle can already stop or win the re-entry (conservative:
             # stop checked first, matching the backtest's tie-breaking rule).
             st, ev = _evaluate_in(st, candle, is_long)
@@ -167,6 +190,7 @@ def _evaluate_in(st: dict, candle: Candle, is_long: bool) -> tuple[dict, list[Sh
         if st["reentries"] < st["max_reentries"]:
             st["phase"] = "waiting_confirm"
             st["confirmed"] = False
+            st["confirm_count"] = 0
         else:
             st["outcome"] = "final_stop"
             st["phase"] = "done"

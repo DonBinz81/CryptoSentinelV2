@@ -90,6 +90,13 @@ perp:
   shadow_stop_enabled: true
   shadow_stop_buffer_pct: 0.1        # % sotto il minimo/massimo della candela del segnale
   shadow_stop_max_reentries: 1       # rientri massimi sul reclaim confermato
+  # Seconda variante (NOTE/92): 3 candele di conferma + rientro 0.2% piu'
+  # conveniente, trovata con grid search fuori campione (V1 ricerca, V2
+  # validazione). Gira IN PARALLELO alla variante sopra sulla stessa
+  # posizione reale, cosi' il confronto avviene sugli stessi prezzi veri.
+  shadow_stop_optimized_enabled: true
+  shadow_stop_optimized_confirm_candles: 3
+  shadow_stop_optimized_reentry_offset_pct: 0.2
   guardian_enabled: true
   guardian_window_hours: 6.0         # rolling window for counting full stops
   guardian_yellow_stops: 1           # stops in window -> YELLOW
