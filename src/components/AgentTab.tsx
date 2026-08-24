@@ -14,7 +14,6 @@ import {
   fetchScannerStatus,
   type ScannerStatusResponse,
   fetchSpotView,
-  fetchTradeDetail,
   saveAgentSettings,
   setKillSwitch,
   resetDailyCounter,
@@ -54,6 +53,13 @@ import { GuardianBanner } from './GuardianBanner';
 import { ScannerStatusPanel } from './ScannerStatusPanel';
 import { DEV_PIN } from '../utils/devPin';
 import { traduciErroreSalvataggio } from '../services/settingsErrorLabels';
+import {
+  getCachedTradeDetail,
+  hasCompleteCachedTradeDetail,
+  shouldPrefetchTradeDetail,
+  schedulePrefetchRetry,
+  fetchTradeDetailDeduped,
+} from '../services/tradeDetailCache';
 
 type AgentPane = 'spot' | 'perp' | 'global' | 'coins' | 'wallet' | 'setup';
 
@@ -122,94 +128,11 @@ const riskGuardrailText: Record<string, { title: string; detail: string }> = {
 const AGENT_REFRESH_MS = 45_000;
 // Refresh leggero (solo posizioni/PnL). 15s evita accavallamenti quando provider esterni rallentano.
 const AGENT_FAST_REFRESH_MS = 15_000;
-const TRADE_DETAIL_CACHE_TTL_MS = 10 * 60_000;
 const TRADE_DETAIL_BASE_TIMEOUT_MS = 20_000;
 const TRADE_DETAIL_ENRICH_TIMEOUT_MS = 25_000;
-const TRADE_DETAIL_CACHE_MAX = 80;
 // Matches the mobile history page size: open positions are always added on top.
 const TRADE_DETAIL_PREFETCH_LIMIT = 8;
 const TRADE_DETAIL_PREFETCH_CONCURRENCY = 2;
-const TRADE_DETAIL_PREFETCH_RETRY_MS = 60_000;
-
-const tradeDetailCache = new Map<string, { detail: TradeDetail; updatedAt: number }>();
-const tradeDetailInflight = new Map<string, Promise<TradeDetail>>();
-const tradeDetailPrefetchRetryAt = new Map<string, number>();
-
-const hasBaseTradeChart = (detail: TradeDetail): boolean =>
-  (detail.chart?.candles?.length ?? 0) > 1;
-
-const needsPostCloseCandles = (detail: TradeDetail): boolean =>
-  Boolean(detail.chart && !detail.chart.live && detail.chart.closed_at);
-
-const hasCompleteTradeChart = (detail: TradeDetail): boolean => {
-  if (!hasBaseTradeChart(detail)) return false;
-  if (!detail.chart?.stop_reference) return false;
-  if (!needsPostCloseCandles(detail)) return true;
-  return (detail.chart?.post_close_candles?.length ?? 0) > 0;
-};
-
-const getCachedTradeDetail = (tradeId: string): TradeDetail | null => {
-  const cached = tradeDetailCache.get(tradeId);
-  if (!cached) return null;
-  if (hasCompleteTradeChart(cached.detail)) return cached.detail;
-  if (Date.now() - cached.updatedAt > TRADE_DETAIL_CACHE_TTL_MS) {
-    tradeDetailCache.delete(tradeId);
-    return null;
-  }
-  return cached.detail;
-};
-
-const hasCompleteCachedTradeDetail = (tradeId: string): boolean => {
-  const cached = getCachedTradeDetail(tradeId);
-  return cached != null && hasCompleteTradeChart(cached);
-};
-
-const isTradeDetailInflight = (tradeId: string): boolean =>
-  tradeDetailInflight.has(`${tradeId}:base`) || tradeDetailInflight.has(`${tradeId}:chart`);
-
-const shouldPrefetchTradeDetail = (tradeId: string): boolean => {
-  if (hasCompleteCachedTradeDetail(tradeId) || isTradeDetailInflight(tradeId)) return false;
-  return Date.now() >= (tradeDetailPrefetchRetryAt.get(tradeId) ?? 0);
-};
-
-const cacheTradeDetail = (tradeId: string, detail: TradeDetail) => {
-  const existing = tradeDetailCache.get(tradeId)?.detail;
-  if (existing && hasCompleteTradeChart(existing) && !hasCompleteTradeChart(detail)) {
-    return;
-  }
-  if (existing && hasBaseTradeChart(existing) && !hasBaseTradeChart(detail)) {
-    return;
-  }
-  if (tradeDetailCache.has(tradeId)) tradeDetailCache.delete(tradeId);
-  tradeDetailCache.set(tradeId, { detail, updatedAt: Date.now() });
-  if (hasCompleteTradeChart(detail)) {
-    tradeDetailPrefetchRetryAt.delete(tradeId);
-  }
-  while (tradeDetailCache.size > TRADE_DETAIL_CACHE_MAX) {
-    const oldest = tradeDetailCache.keys().next().value;
-    if (!oldest) break;
-    tradeDetailCache.delete(oldest);
-  }
-};
-
-const fetchTradeDetailDeduped = (
-  tradeId: string,
-  options: { enrichChart?: boolean; timeoutMs?: number } = {},
-): Promise<TradeDetail> => {
-  const key = `${tradeId}:${options.enrichChart ? 'chart' : 'base'}`;
-  const existing = tradeDetailInflight.get(key);
-  if (existing) return existing;
-  const request = fetchTradeDetail(tradeId, options)
-    .then((detail) => {
-      cacheTradeDetail(tradeId, detail);
-      return detail;
-    })
-    .finally(() => {
-      tradeDetailInflight.delete(key);
-    });
-  tradeDetailInflight.set(key, request);
-  return request;
-};
 
 const EmptyState: FC<{ title: string; detail: string }> = ({ title, detail }) => (
   <div className="rounded-xl border border-dashed border-dark-600 bg-dark-800/60 px-4 py-8 text-center">
@@ -2651,7 +2574,9 @@ const AgentTab: FC<AgentTabProps> = ({
 
   const loadActiveTradeDetail = useCallback(async (tradeId: string, enrichChart = false) => {
     const cached = getCachedTradeDetail(tradeId);
-    if (cached && (!enrichChart || hasCompleteTradeChart(cached))) {
+    // hasCompleteCachedTradeDetail (non hasCompleteTradeChart sul solo dato) tiene
+    // conto anche dell'eta': su un trade live "completo una volta" non basta piu'.
+    if (cached && (!enrichChart || hasCompleteCachedTradeDetail(tradeId))) {
       if (detailTradeIdRef.current === tradeId) setTradeDetail(cached);
       return cached;
     }
@@ -2672,8 +2597,7 @@ const AgentTab: FC<AgentTabProps> = ({
     if (ids.length === 0) return;
 
     const queue = [...ids];
-    const nextRetryAt = Date.now() + TRADE_DETAIL_PREFETCH_RETRY_MS;
-    ids.forEach((tradeId) => tradeDetailPrefetchRetryAt.set(tradeId, nextRetryAt));
+    schedulePrefetchRetry(ids);
 
     const workers = Array.from(
       { length: Math.min(TRADE_DETAIL_PREFETCH_CONCURRENCY, queue.length) },
@@ -2928,7 +2852,7 @@ const AgentTab: FC<AgentTabProps> = ({
     if (cached) {
       setTradeDetail(cached);
       setLoadingDetail(false);
-      if (!hasCompleteTradeChart(cached)) {
+      if (!hasCompleteCachedTradeDetail(tradeId)) {
         loadActiveTradeDetail(tradeId, true).catch(() => {});
       }
       return;
