@@ -10,6 +10,9 @@ export interface GuardianStatus {
   enabled: boolean;
   stops_in_window: number;
   window_hours: number;
+  /** Ore pulite (senza nuovo stop pieno) per un passo di de-escalation: RED->YELLOW,
+   * poi YELLOW->GREEN separatamente. L'ancora si sposta a ogni nuovo stop (NOTE/95). */
+  reentry_hours: number;
   last_stop_at: string | null;
   changed_at: string | null;
   /** Spiegazione del Brain sull'ultima transizione. null quando non disponibile. */
