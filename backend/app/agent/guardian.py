@@ -145,6 +145,12 @@ class RegimeGuardian:
             "enabled": cfg.enabled,
             "stops_in_window": self.stops_in_window(now, cfg),
             "window_hours": cfg.window_hours,
+            # De-escalation pace, for the app's countdown (NOTE/95): one step
+            # per clean reentry_hours, counted from max(last_stop_at,
+            # changed_at) -- both already exposed below. Every new full stop
+            # moves that anchor forward, so any client countdown is a
+            # projection, not a promise.
+            "reentry_hours": cfg.reentry_hours,
             "last_stop_at": last.isoformat() if last else None,
             "changed_at": self._changed_at.isoformat() if self._changed_at else None,
             "explanation": self._explanation,
