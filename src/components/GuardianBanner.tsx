@@ -1,5 +1,5 @@
-import type { FC } from 'react';
-import type { GuardianStatus } from '../services/agentApi';
+import { useEffect, useState, type FC } from 'react';
+import type { GuardianState, GuardianStatus } from '../services/agentApi';
 
 // Banner del guardiano di regime. Deve essere impossibile da non vedere quando il bot
 // si sta proteggendo, e quasi invisibile quando va tutto bene: in VERDE resta un chip.
@@ -50,6 +50,68 @@ const quantoFa = (iso: string | null): string | null => {
   if (ore < 24) return `${ore} ${ore === 1 ? 'ora' : 'ore'} fa`;
   const gg = Math.floor(ore / 24);
   return `${gg} ${gg === 1 ? 'giorno' : 'giorni'} fa`;
+};
+
+/**
+ * Prossimo passo di de-escalation (NOTE/95): un passo alla volta, RED->YELLOW poi
+ * YELLOW->GREEN, dopo `reentry_hours` ore pulite dall'ancora — la piu' recente fra
+ * l'ultimo stop e l'ultimo cambio di stato. Ogni nuovo stop sposta l'ancora avanti:
+ * questo e' un CALCOLO LOCALE, non un valore che il backend garantisce — e' una
+ * proiezione sul presente, non una promessa sul futuro (David, 25/08).
+ */
+const prossimoStato = (stato: GuardianState): GuardianState | null =>
+  stato === 'red' ? 'yellow' : stato === 'yellow' ? 'green' : null;
+
+const NOME_STATO: Record<GuardianState, string> = { red: 'ROSSO', yellow: 'GIALLO', green: 'VERDE' };
+
+/** "1h 59m" quando resta piu' di un minuto, "42s" sotto — la resa piu' viva vicino
+ * allo scatto, che e' anche il momento in cui conta di piu' guardare il telefono. */
+const formattaResto = (ms: number): string => {
+  const tot = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(tot / 3600);
+  const m = Math.floor((tot % 3600) / 60);
+  const s = tot % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+};
+
+/**
+ * Countdown live verso il prossimo passo di de-escalation. Nullo su GREEN (non c'e'
+ * un "prossimo passo") o se mancano i dati per calcolarlo.
+ */
+const CountdownRiattivazione: FC<{ guardian: GuardianStatus }> = ({ guardian }) => {
+  const [ora, setOra] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setOra(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const prossimo = prossimoStato(guardian.state);
+  if (!prossimo) return null;
+  const ancoraCandidati = [guardian.last_stop_at, guardian.changed_at]
+    .map((iso) => (iso ? new Date(iso).getTime() : NaN))
+    .filter((t) => !Number.isNaN(t));
+  if (ancoraCandidati.length === 0 || !guardian.reentry_hours) return null;
+  const ancora = Math.max(...ancoraCandidati);
+  const bersaglio = ancora + guardian.reentry_hours * 3600_000;
+  const resto = bersaglio - ora;
+
+  return (
+    <div className="rounded-lg border border-dark-700 bg-dark-900/40 px-3 py-2">
+      <p className="text-xs leading-5 text-gray-300">
+        {resto > 0 ? (
+          <>Prossimo passo: <b className="text-white">{NOME_STATO[prossimo]}</b> tra{' '}
+            <b className="text-white">{formattaResto(resto)}</b></>
+        ) : (
+          <>In attesa che il ciclo registri il passaggio a <b className="text-white">{NOME_STATO[prossimo]}</b>…</>
+        )}
+      </p>
+      <p className="mt-0.5 text-[11px] text-gray-500">
+        Si azzera a ogni nuovo stop pieno perp: è una proiezione, non una promessa.
+      </p>
+    </div>
+  );
 };
 
 /**
@@ -117,6 +179,8 @@ export const GuardianBanner: FC<{
           <p className="mt-1 text-[11px] text-gray-500">Lo spot non e&apos; toccato: entra normalmente.</p>
         </div>
       </div>
+
+      <CountdownRiattivazione guardian={guardian} />
 
       {/* La spiegazione del Brain se c'e'; altrimenti i fatti concreti, che restano utili. */}
       <div className="rounded-lg bg-dark-900/60 px-3 py-2">
