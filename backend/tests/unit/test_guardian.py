@@ -138,6 +138,31 @@ class TestDisabled:
         assert g.snapshot(T0 + _h(0.1), off)["state"] == GREEN
 
 
+class TestSnapshotCountdownFields:
+    """NOTE/95: the app's re-activation countdown needs reentry_hours in the
+    snapshot next to the anchor timestamps it already had (last_stop_at,
+    changed_at). The countdown is client-side arithmetic over these three."""
+
+    def test_snapshot_exposes_reentry_hours(self):
+        snap = _guardian().snapshot(T0, CFG)
+        assert snap["reentry_hours"] == 6.0
+
+    def test_reentry_hours_follows_the_config_not_a_constant(self):
+        cfg = GuardianConfig(enabled=True, window_hours=6.0, yellow_stops=1, red_stops=2, reentry_hours=2.5)
+        snap = _guardian().snapshot(T0, cfg)
+        assert snap["reentry_hours"] == 2.5
+
+    def test_anchor_fields_still_present_alongside(self):
+        # The client computes: next step at max(last_stop_at, changed_at)
+        # + reentry_hours. All three inputs must live in the same snapshot.
+        g = _guardian()
+        g.record_stop(asset="A", pnl_usd=-1, now=T0, cfg=CFG)
+        snap = g.snapshot(T0 + _h(0.1), CFG)
+        assert snap["last_stop_at"] is not None
+        assert snap["changed_at"] is not None
+        assert snap["reentry_hours"] == CFG.reentry_hours
+
+
 class TestExplanationPersistence:
     """Chat C (NOTE/61 §6-bis) needs the Brain's explanation available for the
     app banner whenever it is opened, not just alive in a single push."""
