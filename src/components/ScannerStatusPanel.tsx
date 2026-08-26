@@ -36,10 +36,26 @@ const quantoFa = (iso: string | null): string | null => {
 /** Un solo asset filtrato su un'ampia lista e' rumore statistico, non un blocco da
  * segnalare: coi dati reali del primo deploy (1 filtrato su 28 perp) un banner
  * "filtri attivi" avrebbe contraddetto la lettura corretta — "sta cercando e non
- * trova" — fatta sugli stessi identici numeri. Un errore invece conta sempre: non
- * e' rumore, e' qualcosa che si e' rotto. */
-const marcatoBloccato = (m: ScannerMarketStatus): boolean =>
-  m.error > 0 || m.filter >= Math.max(2, Math.ceil(m.scanned * 0.2));
+ * trova" — fatta sugli stessi identici numeri. */
+const filtriBloccano = (m: ScannerMarketStatus): boolean =>
+  m.filter >= Math.max(2, Math.ceil(m.scanned * 0.2));
+
+/** ⚠️ "un errore conta sempre" (versione precedente) era sbagliato nella pratica:
+ * un pair morto che non ha mai klines su nessun exchange (es. HTX) fallisce a OGNI
+ * ciclo, per sempre — non un guasto del sistema, un dato del catalogo. Con la soglia
+ * a 0 il banner giallo restava acceso in eterno anche a filtri zero (segnalato da
+ * David, girato dalla chat B il 26/08). Stessa logica dei filtri ma piu' severa
+ * (10% invece di 20%): un errore isolato e' rumore noto, tanti insieme sono un
+ * guasto vero. */
+const erroriRotti = (m: ScannerMarketStatus): boolean =>
+  m.error >= Math.max(2, Math.ceil(m.scanned * 0.1));
+
+const marcatoBloccato = (m: ScannerMarketStatus): boolean => filtriBloccano(m) || erroriRotti(m);
+
+/** Errori presenti ma sotto soglia: non meritano l'allarme, ma sparire del tutto
+ * nasconderebbe che qualcosa non torna. Vanno nella nota discreta del chip verde. */
+const erroriLievi = (m: ScannerMarketStatus | null): number =>
+  m && !erroriRotti(m) ? m.error : 0;
 
 /** Il motivo che spiega meglio un mercato fermo: il piu' frequente fra quelli che
  * non sono "nessun segnale valido" — quello e' il caso normale, non la notizia. */
@@ -117,11 +133,20 @@ export const ScannerStatusPanel: FC<{ status: ScannerStatusResponse | null | und
   // Tutto normale su entrambi i mercati: un chip, come il guardiano in verde.
   // Nei giorni tranquilli lo scanner non deve fare rumore.
   if (spotOk && perpOk) {
+    // Errori isolati (es. un pair senza klines su nessun exchange): non bloccano,
+    // ma sparire del tutto nasconderebbe un dato reale. Nota discreta, non allarme.
+    const noteErrori = ([
+      ['Spot', erroriLievi(status.markets.spot)],
+      ['Perp', erroriLievi(status.markets.perp)],
+    ] as const)
+      .filter(([, n]) => n > 0)
+      .map(([label, n]) => `${n} ${label.toLowerCase()} non scansionabil${n === 1 ? 'e' : 'i'}`);
     return (
       <div className="flex items-center gap-2 px-1">
         <span className="h-1.5 w-1.5 rounded-full bg-accent-green" />
         <span className="text-[11px] text-gray-500">
           Scanner attivo: in cerca di un segnale{status.age_seconds != null && status.age_seconds < 60 ? ' · ultimo ciclo ora' : ''}
+          {noteErrori.length > 0 && ` · ${noteErrori.join(', ')}`}
         </span>
       </div>
     );
