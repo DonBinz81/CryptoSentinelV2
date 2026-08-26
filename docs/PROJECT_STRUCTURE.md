@@ -224,6 +224,8 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |-- notify_alert.sh - punto unico di consegna degli allarmi: FCM piu' Telegram come canale d'emergenza indipendente da backend e database. Esce 0 se almeno un canale accetta; non stampa mai i segreti.
 |   |   |-- db_watchdog.sh - controllo ogni minuto su descrittori orfani e firme di corruzione nel journal; non apre mai il DB.
 |   |   |-- backup_alert.sh - notifica push critica quando il backup fallisce o la copia del DB non passa `integrity_check`. Riceve il token admin da EnvironmentFile e non lo stampa mai.
+|   |   |-- db_query.sh - interroga il DB di produzione SENZA aprirlo: copia file e sidecar in /tmp e legge la copia. Installato come `/usr/local/bin/csv2-db`. Opzioni: --backup (usa l'ultimo backup), --keep, --shell.
+|   |   |-- sqlite3_guard.sh - installato come `/usr/local/bin/sqlite3`: rifiuta l'apertura del DB di produzione a servizio attivo e indica csv2-db. Fail-open per costruzione; non tocca backup_sqlite.sh, che lavora sulla copia in staging.
 |   |   |-- backup_freshness_watchdog.sh - copre il caso che `backup_alert.sh` non vede: il timer di backup che smette di partire del tutto (nessun fallimento da segnalare). Due segnali: il timer non e' `active`, o l'ultimo esito e' piu' vecchio della cadenza attesa oltre margine. Throttle proprio, consegna via `notify_alert.sh`.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
