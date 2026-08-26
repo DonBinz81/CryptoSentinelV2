@@ -288,6 +288,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "smart_sl_delta_l2": "perp_smart_sl_delta_l2",
         "smart_sl_confirmation_candles": "perp_smart_sl_confirmation_candles",
         "smart_sl_max_reentries": "perp_smart_sl_max_reentries",
+        "smart_sl_min_gap_from_ref_pct": "perp_smart_sl_min_gap_from_ref_pct",
         "telemetry_enabled": "perp_telemetry_enabled",
         "shadow_stop_enabled": "perp_shadow_stop_enabled",
         "shadow_stop_buffer_pct": "perp_shadow_stop_buffer_pct",
@@ -788,6 +789,12 @@ class Settings(BaseSettings):
     perp_shadow_stop_enabled: bool = Field(default=True, alias="PERP_SHADOW_STOP_ENABLED")
     perp_shadow_stop_buffer_pct: float = Field(default=0.1, alias="PERP_SHADOW_STOP_BUFFER_PCT")
     perp_shadow_stop_max_reentries: int = Field(default=1, alias="PERP_SHADOW_STOP_MAX_REENTRIES")
+    # Smart SL L1 geometric constraint (NOTE/97, David's rule): L1 must sit at
+    # least this % beyond the reference candle's extreme, never inside the
+    # range it already swept. 0.15% ≈ the median observed overshoot and the
+    # breach monitor's bypass threshold. If pushing L1 past the candle lands
+    # it at/past L2, L1 is skipped for that position (never reordered levels).
+    perp_smart_sl_min_gap_from_ref_pct: float = Field(default=0.15, alias="PERP_SMART_SL_MIN_GAP_FROM_REF_PCT")
     # Second variant (NOTE/92): 3 confirmation candles + a 0.2%-cheaper
     # re-entry level, found by out-of-sample grid search on 198 real trades
     # (V1 in-sample, V2 held out). Runs SIDE BY SIDE with the variant above

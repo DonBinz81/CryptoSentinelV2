@@ -1696,12 +1696,38 @@ class AgentService:
         else:
             levels = [orig_entry + Decimal(str(f)) * dist for f in fracs]
 
+        # NOTE/97: L1 must never sit INSIDE the range the reference candle
+        # already swept -- a level there is liquidity handed to any wick
+        # retest (21% of historical positions had this geometry; David's
+        # rule). Push L1 at least ``gap`` beyond the candle's extreme; if
+        # that lands it at/past L2, skip L1 entirely for this position
+        # (its share stays in the position, managed by L2 and the stop) --
+        # never out-of-order levels. Fraction-based L2 and everything else
+        # stay untouched. No reference price (e.g. ATR stop mode) -> rule
+        # not applicable, fraction level kept as-is.
+        l1_skipped = False
+        ref_price = getattr(pos, "stop_reference_price", None)
+        if ref_price:
+            gap = Decimal(str(getattr(self.settings, "perp_smart_sl_min_gap_from_ref_pct", 0.15))) / Decimal("100")
+            if is_long:
+                l1_cap = ref_price * (Decimal("1") - gap)
+                if levels[0] > l1_cap:
+                    levels[0] = l1_cap
+                l1_skipped = levels[0] <= levels[1]
+            else:
+                l1_cap = ref_price * (Decimal("1") + gap)
+                if levels[0] < l1_cap:
+                    levels[0] = l1_cap
+                l1_skipped = levels[0] >= levels[1]
+
         rebuy_mode = ms.perp_smart_sl_rebuy_mode
         global_reentries = state.get("global_reentries", 0)
         splits_r2 = [ms.perp_smart_sl_split_l1_r2, ms.perp_smart_sl_split_l2_r2]
 
         changed = False
         for i in range(2):
+            if i == 0 and l1_skipped:
+                continue  # NOTE/97: degenerate geometry, L1 disabled for this position
             lv = state["levels"][i]
             level_price = levels[i]
             use_r2 = rebuy_mode == "above_entry" and lv["status"] == "rebought"
