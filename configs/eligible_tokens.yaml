@@ -1,5 +1,5 @@
 # Competition eligible-token universe.
-# This list contains 150 unique entries.
+# This list contains 151 unique entries.
 # Divergence from upstream (149): added BTC, BNB, SOL, NEAR for volatility and liquidity
 # optimization of the VP mean-reversion strategy; removed XAUt and XAUM (illiquid on perp);
 # ATOM and INJ restored on 2026-08-17 to mirror the V1 perp watchlist for A/B comparison.
@@ -16,6 +16,17 @@
 # two (Aster USDF: 18k daily volume, a stablecoin pegged at 1.00, therefore worthless to
 # a mean-reversion strategy) and added SUI (rank 34, 2.67B cap, 248M daily volume,
 # TRADING on Aster). Count stays at 150, and now unique symbols are 150 as well.
+
+# PAXG (PAX Gold) added on 2026-08-26, raising the count from 150 to 151. Requested by
+# the repository owner after noticing gold was missing. The stated reason for removing the
+# other two gold tokens on 2026-08-17 - "illiquid on perp" - does not hold for PAXG today:
+# Aster lists PAXGUSDT as TRADING with 254k of 24h quote volume over 1717 trades, which is
+# ~10x CAKE (27k), ~2x TRX (138k) and above INJ (194k), all three of which are in the live
+# perp watchlist. Its 24h range (1.92%) is in line with BTC (2.07%). Note that XAUUSDT is
+# far more liquid still (9.9M) and remains excluded - revisit if gold proves useful here.
+# Known caveat, not a blocker: on a low-ATR asset the fixed costs can exceed a TP1 move,
+# which is what NOTE/26 documented on XAUT. That is a sizing-vs-costs problem, not liquidity,
+# and it applies to any low-volatility symbol.
 
 eligible_tokens:
   - BTC
@@ -168,3 +179,4 @@ eligible_tokens:
   - PEAQ
   - COAI
   - BDCA
+  - PAXG
