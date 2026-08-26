@@ -81,6 +81,11 @@ perp:
   smart_sl_tp_recovery_delta_pct: 7    # delta extra % oltre copertura perdite (guadagno minimo)
   smart_sl_confirmation_candles: 2   # candele 5min di conferma (sell e rebuy above_entry)
   smart_sl_max_reentries: 1          # max cicli sell→rebuy
+  # NOTE/97 (regola di David): L1 mai DENTRO il range gia' battuto dalla
+  # candela di riferimento — deve stare almeno questo % oltre il suo
+  # minimo/massimo. Se lo spostamento lo porta a ridosso di L2, L1 viene
+  # saltato per quella posizione (mai livelli fuori ordine).
+  smart_sl_min_gap_from_ref_pct: 0.15
   # Regime guardian (VERDE/GIALLO/ROSSO) driven by the bot's own full stop-losses
   # on a rolling window. YELLOW scales new entries, RED blocks them; open positions
   # stay managed. See NOTE/61 for the study behind defaults.
