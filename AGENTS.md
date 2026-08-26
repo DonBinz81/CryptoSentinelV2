@@ -65,11 +65,17 @@ Operational rules for AI agents working on CryptoSentinelHackathon.
 - Portfolio value floor must stay above 1 USD.
 - Minimum trade frequency must be at least 1 trade per day.
 - Drawdown cap default is the prudent plan value, `-15%`, until official clarification.
-- The eligible-token universe must contain exactly 150 entries in this fork.
+- The eligible-token universe must contain exactly 151 entries in this fork.
   Fork divergence, decided by the repository owner on 2026-08-17: upstream requires 149.
   Added BTC, BNB, SOL, NEAR; removed XAUt, XAUM; ATOM and INJ restored to mirror the V1
-  perp watchlist for comparison. Keep the count and the rationale in
+  perp watchlist for comparison. Raised to 151 on 2026-08-26, adding `PAXG` (PAX Gold):
+  the "illiquid on perp" reason recorded for the other gold tokens does not hold for it -
+  Aster lists PAXGUSDT as TRADING with more 24h volume than CAKE, TRX and INJ, all three
+  of which are traded here. Keep the count and the rationale in
   `configs/eligible_tokens.yaml` in sync with this rule.
+  The hard bound enforced in code is 100-200 (`config.py`
+  `HARD_ELIGIBLE_TOKEN_MIN_COUNT`/`MAX_COUNT`); the exact figure above is this fork's own
+  convention, so changing it is a decision, not a technical constraint.
 - Entries must also be unique **after upper-case normalisation**, because the risk guard
   compares normalised symbols: two entries differing only by case are one symbol to it.
   Decided by the repository owner on 2026-08-18, replacing `USDF` (Aster USDF) with `SUI`
