@@ -82,8 +82,20 @@ sudo chown "$(id -u):$(id -g)" "$WORK_DIR"/db.sqlite* 2>/dev/null
 SQLITE="/usr/bin/sqlite3"
 [ -x "$SQLITE" ] || SQLITE="sqlite3"
 
+# sqlite3 wants its own flags BEFORE the database name and the SQL after it.
+# Passing everything after the filename silently produced no output for
+# `csv2-db -header "SELECT ..."`, which is how this was found.
+sqlite_opts=()
+sql_args=()
+for a in ${args[@]+"${args[@]}"}; do
+    case "$a" in
+        -*) sqlite_opts+=("$a") ;;
+        *)  sql_args+=("$a") ;;
+    esac
+done
+
 if [ "$shell_mode" -eq 1 ]; then
-    "$SQLITE" "$WORK_DIR/db.sqlite"
+    "$SQLITE" ${sqlite_opts[@]+"${sqlite_opts[@]}"} "$WORK_DIR/db.sqlite"
 else
-    "$SQLITE" "$WORK_DIR/db.sqlite" "${args[@]}"
+    "$SQLITE" ${sqlite_opts[@]+"${sqlite_opts[@]}"} "$WORK_DIR/db.sqlite" ${sql_args[@]+"${sql_args[@]}"}
 fi
