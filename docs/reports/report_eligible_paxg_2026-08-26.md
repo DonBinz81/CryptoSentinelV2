@@ -96,12 +96,25 @@ variabile sbagliata: il collo di bottiglia non e' il volume, e' la **volatilita'
 |---|---|
 | NATR mediano PAXG (14, 5m, 12 mesi) | **0,086%** |
 | TP1 tipico (2,5 x ATR) | **0,215%** |
-| Costo di un giro completo (maker) | **0,28%** |
 | Backtest 12 mesi, senza filtri | 1.396 trade, **PF 0,001**, -8.337 $ |
 | TP1 raggiunto | **5%** delle volte (paniere: ~78%) |
+| PF di PAXG contro i pair sani | **0,33** contro 0,48-0,67 |
+| Con `min_rr` a 1,2 | **0 trade**: si auto-esclude |
 
-Il bersaglio sta **sotto il costo**: si perde anche vincendo il 100% dei trade. E' la stessa
-diagnosi della nota 26 su XAUT, e vale anche per XAUUSDT nonostante i suoi 9,9 M$ di volume.
+⚠️ **RETTIFICA del 2026-08-27, segnalata dalla chat B.** La prima stesura di questa sezione
+diceva che il TP1 (0,215%) sta **sotto il costo di un giro maker (0,28%)**, quindi
+"si perde anche vincendo il 100% dei trade". **E' sbagliato**: lo 0,28% della nota 77 e' il
+**deficit residuo del paniere a fee circa zero**, non il costo di un giro - i costi reali
+sono ~0,05-0,1%. L'affermazione "matematicamente perdente" non regge e va cancellata.
+
+**Il verdetto su PAXG resta valido**, ma per le ragioni corrette: profit factor **0,33**
+contro lo 0,48-0,67 dei pair sani nello stesso setup (quindi il peggiore del gruppo, non
+semplicemente negativo), negativo in **entrambe** le meta' del periodo, driver macro
+estranei al paniere, e con il `min_rr` a 1,2 previsto dalla configurazione studiata
+produce **zero trade** - si esclude da solo. Nessun rollback necessario.
+
+E' comunque la stessa famiglia di problema della nota 26 su XAUT, e vale anche per
+XAUUSDT nonostante i suoi 9,9 M$ di volume.
 
 **Cosa e' stato fatto**: PAXG rimossa dalla **watchlist perp** via API (38 -> 37 simboli),
 su decisione di David. Resta nell'universo eligible (151 voci, `AGENTS.md` invariato) e
@@ -119,7 +132,23 @@ anticorrelata: l'ipotesi avanzata in questo report - che i filtri tarati su BTC 
 bloccare PAXG proprio nei momenti utili - **non e' confermata dai dati**. La questione e'
 comunque irrilevante, dato che l'asset non e' tradabile con questa geometria.
 
-**Scoperta collaterale, piu' importante di PAXG**: la chat B ha rilevato che **TRX ha lo
-stesso difetto** (TP1 tipico 0,205% contro 0,28% di costi) ed e' in watchlist perp **dal
-principio**, con perdite ricorrenti. David ha autorizzato uno studio dedicato con il metodo
-usato per ZEC (nota 77).
+**Scoperta collaterale**: la chat B aveva rilevato che **TRX** sembrava avere lo stesso
+difetto ed e' in watchlist perp dal principio. David ha autorizzato uno studio dedicato con
+il metodo usato per ZEC (nota 77).
+
+✅ **Esito (27/08): TRX NON va rimossa.** Lo studio ha mostrato che nello stesso setup
+(senza filtri, fee circa zero) **tutto il paniere risulta negativo in entrambe le meta'**,
+quindi il criterio da solo non discrimina: LINK 0,628, INJ 0,673, XRP 0,476, DOGE 0,513.
+L'expectancy di TRX (-0,70/-0,88 $) sta **dentro la banda dei sani** ed e' migliore di XRP e
+DOGE; ZEC era invece un outlier vero (-2,83/-3,11 $, circa quattro volte peggio). Sui dati
+reali TRX e' **in utile**: +4,39 $ su 10 trade, mentre INJ (-36 $), CAKE (-30 $) e BNB
+(-23 $) fanno molto peggio.
+
+> 🔑 **E' questo controllo incrociato ad aver trovato l'errore rettificato sopra.** Applicando
+> il criterio alla lettera si sarebbe rimossa anche TRX, ingiustificatamente. Vale come
+> promemoria: un criterio che boccia un candidato va provato sui casi che si ritengono sani,
+> prima di fidarsene.
+
+Punto d'attenzione, non azione: i TP1 di TRX sono i piu' stretti del paniere (~0,205%),
+quindi il margine sui costi reali e' sottile. Da ricontrollare quando il modello dei costi
+del backtest sara' finalizzato.
