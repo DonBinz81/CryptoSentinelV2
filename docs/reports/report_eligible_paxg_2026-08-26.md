@@ -83,3 +83,43 @@ Nessuno sul risultato. Due passaggi non previsti, entrambi risolti:
 - `AGENTS.md` — regola aggiornata a 151 con la distinzione limite/convenzione.
 - Watchlist master e perp aggiornate via API (nessun accesso diretto al database).
 - `docs/reports/report_eligible_paxg_2026-08-26.md` — questo report.
+
+---
+
+## AGGIORNAMENTO 2026-08-27 - PAXG RITIRATA DALLA WATCHLIST
+
+Il perimetro strategia (chat B) ha risposto alla domanda che questo report lasciava aperta,
+e la risposta e' **no**. La verifica sulla liquidita' fatta qui era corretta ma misurava la
+variabile sbagliata: il collo di bottiglia non e' il volume, e' la **volatilita'**.
+
+| misura | valore |
+|---|---|
+| NATR mediano PAXG (14, 5m, 12 mesi) | **0,086%** |
+| TP1 tipico (2,5 x ATR) | **0,215%** |
+| Costo di un giro completo (maker) | **0,28%** |
+| Backtest 12 mesi, senza filtri | 1.396 trade, **PF 0,001**, -8.337 $ |
+| TP1 raggiunto | **5%** delle volte (paniere: ~78%) |
+
+Il bersaglio sta **sotto il costo**: si perde anche vincendo il 100% dei trade. E' la stessa
+diagnosi della nota 26 su XAUT, e vale anche per XAUUSDT nonostante i suoi 9,9 M$ di volume.
+
+**Cosa e' stato fatto**: PAXG rimossa dalla **watchlist perp** via API (38 -> 37 simboli),
+su decisione di David. Resta nell'universo eligible (151 voci, `AGENTS.md` invariato) e
+nella master watchlist, quindi e' riattivabile dall'app senza altre modifiche. Watchlist
+spot invariata (39). Verificato sul ciclo successivo: **37 asset scansionati, 0 errori**.
+
+**L'unico trade prodotto**, per memoria: uno short aperto il 27/08 alle 02:17 e chiuso alle
+03:04 in tre pezzi (TP1 +1,29 $, ratchet +0,41 $, breakeven +0,35 $) per **+2,05 $**. E' in
+utile, ma non smentisce il verdetto: il movimento fino al TP1 e' stato dello 0,241%, appena
+sopra i costi, e il risultato lo ha prodotto il **ratchet** incassando in fretta - non il
+segnale. E' il meccanismo gia' descritto nelle note 14 e 20.
+
+**Correlazione misurata dalla chat B**: +0,249 su base oraria contro BTC. Bassa, ma **non**
+anticorrelata: l'ipotesi avanzata in questo report - che i filtri tarati su BTC potessero
+bloccare PAXG proprio nei momenti utili - **non e' confermata dai dati**. La questione e'
+comunque irrilevante, dato che l'asset non e' tradabile con questa geometria.
+
+**Scoperta collaterale, piu' importante di PAXG**: la chat B ha rilevato che **TRX ha lo
+stesso difetto** (TP1 tipico 0,205% contro 0,28% di costi) ed e' in watchlist perp **dal
+principio**, con perdite ricorrenti. David ha autorizzato uno studio dedicato con il metodo
+usato per ZEC (nota 77).
