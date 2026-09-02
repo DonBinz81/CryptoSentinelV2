@@ -250,6 +250,36 @@ const ResetCounterDialog: FC<{
   );
 };
 
+/**
+ * Il comando che ferma tutto (⛔ Chiudi tutto, nel banner del guardiano) e' sempre a
+ * portata di mano. Quello che RIPARTE viveva solo dentro Setup: chi premeva
+ * l'emergenza restava bloccato senza sapere dove andare a sbloccarsi (segnalato da
+ * David, 02/09). Ora sta nella card "Runtime" in cima, lo stesso punto sempre
+ * visibile su ogni scheda — non serve navigare per uscirne.
+ */
+export const ResumeAgentButton: FC<{
+  killSwitch: KillSwitchState | undefined;
+  adminToken: string;
+  saving: boolean;
+  onResume: () => void;
+}> = ({ killSwitch, adminToken, saving, onResume }) => {
+  if (!killSwitch || killSwitch === 'running') return null;
+  return (
+    <>
+      <button
+        onClick={onResume}
+        disabled={!adminToken || saving}
+        className="mt-2 w-full rounded-lg bg-accent-green/20 px-3 py-2.5 text-sm font-semibold text-accent-green disabled:opacity-40"
+      >
+        {saving ? 'Attendi…' : '▶ Riprendi agente'}
+      </button>
+      {!adminToken && (
+        <p className="mt-1 text-[11px] text-gray-600">Per riprendere serve l&apos;admin token nel setup.</p>
+      )}
+    </>
+  );
+};
+
 const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenSetup?: () => void; onResetCounter?: (kind: ResetKind) => void }> = ({ guardrail, onOpenSetup, onResetCounter }) => {
   if (!guardrail?.blocked) return null;
   const copy = guardrail.reason ? riskGuardrailText[guardrail.reason] : undefined;
@@ -2934,6 +2964,12 @@ const AgentTab: FC<AgentTabProps> = ({
           <span className="text-xs text-gray-500">Runtime</span>
           <span className={`text-xs font-semibold ${statusTone}`}>{status?.kill_switch ?? 'loading'}</span>
         </div>
+        <ResumeAgentButton
+          killSwitch={status?.kill_switch}
+          adminToken={adminToken}
+          saving={saving}
+          onResume={() => void handleKill('running')}
+        />
       </div>
 
       <GuardianBanner
