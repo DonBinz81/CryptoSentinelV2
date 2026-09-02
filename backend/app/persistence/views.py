@@ -521,8 +521,14 @@ def _close_reason(trade) -> str | None:
 
     Le chiusure automatiche salvano notes='auto_close:<reason>' (con '_partial'
     per le chiusure parziali). I trade Smart SL usano 'smart_sl:<action>'.
+    Le chiusure decise dall'utente usano 'manual_close:<reason>' e il motivo
+    resta integro: distingue chi ha deciso, e '_partial' non va rimosso perche'
+    fa parte del nome stesso del motivo (manual_partial_close).
     """
     notes = trade.notes or ""
+    manual_prefix = "manual_close:"
+    if notes.startswith(manual_prefix):
+        return notes[len(manual_prefix):] or None
     prefix = "auto_close:"
     if notes.startswith(prefix):
         reason = notes[len(prefix):].replace("_partial", "")

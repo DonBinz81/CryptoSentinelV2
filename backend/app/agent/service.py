@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
+from contextlib import aclosing
 from functools import lru_cache
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agent.brain import ClaudeMetaController, MetaControllerError
@@ -22,6 +25,16 @@ from backend.app.agent.guardian import (
     RegimeGuardian,
 )
 from backend.app.agent.heartbeat import heartbeat
+from backend.app.agent.manual_close import (
+    MANUAL_CLOSE_PURPOSE,
+    MANUAL_FULL_CLOSE,
+    MANUAL_PARTIAL_CLOSE,
+    ManualCloseError,
+    build_close_plan,
+    renormalize_states_json,
+    sizes_match,
+)
+from backend.app.agent.perp_position_lock import get_perp_position_locks
 from backend.app.agent.shadow_stop import ShadowStopConfig
 from backend.app.agent.shadow_stop_runner import advance_active_runs, create_shadow_stop_run
 from backend.app.agent.telemetry import capture_entry_telemetry, snapshot_open_position
@@ -41,6 +54,12 @@ from backend.app.execution.venue_router import VENUE_UNAVAILABLE, get_perp_venue
 from backend.app.notifications.agent_notifier import get_agent_notifier
 from backend.app.persistence.database import get_session_factory
 from backend.app.persistence.models.decisions import AgentDecision
+from backend.app.persistence.models.manual_close import (
+    STATUS_CONFIRMED as MC_STATUS_CONFIRMED,
+    STATUS_FAILED as MC_STATUS_FAILED,
+    STATUS_IN_PROGRESS as MC_STATUS_IN_PROGRESS,
+    ManualCloseRequest,
+)
 from backend.app.persistence.models.pnl import PnlSnapshot
 from backend.app.persistence.models.positions import DEFAULT_PERP_STRATEGY, PerpPosition, SpotPosition
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
@@ -528,11 +547,14 @@ class AgentService:
             closed_spot += 1
 
         closed_perp = 0
-        for pos in perp_positions:
-            if pos.status != "open":
-                continue
-            await self._close_perp_position(session, pos, pos.current_price, reason, now)
-            closed_perp += 1
+        # Same lock as the fast tick and the manual close: the emergency button
+        # must not race with a position the engine is already closing.
+        async with aclosing(_iter_locked_perp(perp_positions)) as _locked_perp:
+            async for pos in _locked_perp:
+                if pos.status != "open":
+                    continue
+                await self._close_perp_position(session, pos, pos.current_price, reason, now)
+                closed_perp += 1
 
         # Pausa l'agente: nessuna nuova entrata fino al resume.
         self.risk.set_kill_switch(KillSwitchState.HARD_STOP)
@@ -548,6 +570,248 @@ class AgentService:
             "closed_perp": closed_perp,
             **self.status(),
         }
+
+    async def manual_close_perp_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_id: str,
+        percentage: object,
+        expected_size: Decimal | str | None,
+        idempotency_key: str,
+        note: str | None = None,
+    ) -> dict:
+        """Close a slice (or all) of ONE perp position on human command.
+
+        This is the coordinator for the manual path: it owns the position lock,
+        re-reads the position inside it, checks the request against the state the
+        user actually saw, executes through the same venue contract as every
+        other exit, and records the outcome so a retry replays it instead of
+        closing a second slice.
+
+        Two distinct protections, because they cover different accidents:
+
+        * the **idempotency key** covers a REPLAY of the same request -- an HTTP
+          timeout and retry, a reconnecting client;
+        * **expected_size** covers a SECOND, genuinely new request -- the double
+          tap, where the client would send a fresh key. The size the user saw no
+          longer matches, so the request is refused instead of closing twice.
+
+        Never sets ``tp1_reached``: a human reduction is not the TP1 event.
+        """
+        user_id = str(self.settings.default_user_id)
+        locks = get_perp_position_locks()
+        fingerprint = _manual_close_fingerprint(position_id, percentage, expected_size)
+
+        # Refresh the price BEFORE acquiring the lock, never while holding it.
+        # The feed has a 10s timeout per call and this path makes two of them
+        # (prices, funding) plus a possible fallback to another exchange: held
+        # inside the lock, a slow feed would suspend the fast tick's handling of
+        # every position queued behind this one -- in a system whose costliest
+        # known defect is already that stops are only evaluated every ~5s
+        # (NOTE/59, NOTE/64). Best-effort, exactly like close-all: if the feed
+        # does not answer, the last sampled price is used rather than refusing.
+        # It writes and commits on its own, so the re-read inside the lock sees
+        # the fresh value.
+        preview = await session.scalar(
+            select(PerpPosition).where(
+                PerpPosition.position_id == position_id,
+                PerpPosition.user_id == user_id,
+            )
+        )
+        if preview is not None and preview.status == "open":
+            try:
+                await self._refresh_position_prices(session, [], [preview])
+            except Exception:
+                pass
+
+        # The lock is taken first and held for the whole operation: it serialises
+        # this request against the fast tick (ratchet, Smart SL, TP/SL) and
+        # against any other manual request on the same position. Everything
+        # below runs on state that cannot change underneath it.
+        async with locks.get(position_id):
+            ledger = await session.scalar(
+                select(ManualCloseRequest).where(
+                    ManualCloseRequest.idempotency_key == idempotency_key
+                )
+            )
+            if ledger is not None:
+                if ledger.payload_fingerprint != fingerprint:
+                    # Same key, different request: refusing is the only safe
+                    # answer -- replaying the stored outcome would confirm an
+                    # operation the caller did not ask for.
+                    return {
+                        "status": "rejected",
+                        "outcome": "key_reused_with_different_payload",
+                        "position_id": position_id,
+                    }
+                if ledger.status == MC_STATUS_IN_PROGRESS:
+                    # Only reachable if a previous attempt died mid-flight: the
+                    # lock guarantees no second attempt runs concurrently.
+                    return {
+                        "status": "in_progress",
+                        "outcome": "in_progress",
+                        "position_id": position_id,
+                    }
+                if ledger.response_json:
+                    return json.loads(ledger.response_json)
+
+            now = datetime.now(UTC)
+            if ledger is None:
+                ledger = ManualCloseRequest(
+                    idempotency_key=idempotency_key,
+                    position_id=position_id,
+                    user_id=user_id,
+                    market="perp",
+                    requested_percentage=int(percentage) if str(percentage).isdigit() else 0,
+                    expected_size=Decimal(str(expected_size)) if expected_size is not None else None,
+                    payload_fingerprint=fingerprint,
+                    status=MC_STATUS_IN_PROGRESS,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(ledger)
+                # Committed before executing: a retry that arrives after a crash
+                # must find the attempt recorded, not a clean slate.
+                await session.commit()
+
+            async def _finish(payload: dict, *, ok: bool) -> dict:
+                ledger.status = MC_STATUS_CONFIRMED if ok else MC_STATUS_FAILED
+                ledger.outcome = str(payload.get("outcome") or payload.get("status"))
+                ledger.response_json = json.dumps(payload, default=str)
+                ledger.close_trade_id = payload.get("close_trade_id")
+                ledger.venue_order_id = payload.get("venue_order_id")
+                ledger.updated_at = datetime.now(UTC)
+                session.add(ledger)
+                await session.commit()
+                return payload
+
+            # Re-read inside the lock: the position the client described may have
+            # moved between rendering and confirming.
+            pos = await session.scalar(
+                select(PerpPosition).where(
+                    PerpPosition.position_id == position_id,
+                    PerpPosition.user_id == user_id,
+                )
+            )
+            if pos is None:
+                return await _finish(
+                    {"status": "rejected", "outcome": "not_found", "position_id": position_id},
+                    ok=False,
+                )
+            if pos.status != "open":
+                return await _finish(
+                    {
+                        "status": "rejected",
+                        "outcome": "already_closed",
+                        "position_id": position_id,
+                        "position_status": pos.status,
+                    },
+                    ok=False,
+                )
+            if not sizes_match(expected_size, pos.size):
+                return await _finish(
+                    {
+                        "status": "rejected",
+                        "outcome": "stale_position",
+                        "position_id": position_id,
+                        "current_size": str(pos.size),
+                        "detail": "the position changed since it was displayed",
+                    },
+                    ok=False,
+                )
+
+            try:
+                plan = build_close_plan(pos.size, percentage)
+            except ManualCloseError as exc:
+                return await _finish(
+                    {
+                        "status": "rejected",
+                        "outcome": "invalid_request",
+                        "position_id": position_id,
+                        "detail": str(exc),
+                    },
+                    ok=False,
+                )
+
+            # The price was refreshed BEFORE taking the lock (see above): the
+            # feed call must never happen while the lock is held. Here we only
+            # read what is already stored.
+            exit_price = pos.current_price
+
+            size_before = pos.size
+            pnl = await self._close_perp_position(
+                session,
+                pos,
+                exit_price,
+                plan.close_reason,
+                datetime.now(UTC),
+                partial=not plan.is_full,
+                close_fraction=None if plan.is_full else plan.fraction,
+                set_tp1_reached=False,
+                renormalize_states=True,
+            )
+
+            # _close_perp_position returns 0 both for "no PnL" and for "venue
+            # refused", so the position itself is the evidence of what happened.
+            executed = pos.status == "closed" or pos.size != size_before
+            if not executed:
+                return await _finish(
+                    {
+                        "status": "rejected",
+                        "outcome": "execution_failed",
+                        "position_id": position_id,
+                        "detail": "the venue did not confirm the close",
+                    },
+                    ok=False,
+                )
+
+            close_trade = await session.scalar(
+                select(PerpTrade)
+                .where(PerpTrade.position_id == position_id, PerpTrade.direction == "close")
+                .order_by(PerpTrade.id.desc())
+            )
+            payload = {
+                "status": "confirmed",
+                "outcome": "confirmed",
+                "position_id": position_id,
+                "market": "perp",
+                "asset": pos.asset,
+                "requested_percentage": plan.requested_percentage,
+                "requested_qty": str(plan.close_qty),
+                "executed_qty": str(size_before - pos.size) if not plan.is_full else str(size_before),
+                "executed_price": str(exit_price),
+                "remaining_qty": str(pos.size if pos.status == "open" else Decimal("0")),
+                "position_status": pos.status,
+                "realized_pnl_usd": str(pnl),
+                "close_reason": plan.close_reason,
+                "forced_full": plan.forced_full,
+                "close_trade_id": close_trade.trade_id if close_trade else None,
+                "venue": pos.venue,
+                "note": (note or "")[:200] or None,
+            }
+            logger.info(
+                "manual_close_executed",
+                position_id=position_id,
+                asset=pos.asset,
+                percentage=plan.requested_percentage,
+                # Same figures as the response: on a full close the engine leaves
+                # pos.size at its last value and only flips the status, so
+                # "size_before - size" would log 0 closed and a residual that no
+                # longer exists.
+                executed_qty=float(payload["executed_qty"]),
+                remaining_qty=float(payload["remaining_qty"]),
+                position_status=pos.status,
+                pnl_usd=float(pnl),
+                reason=plan.close_reason,
+                forced_full=plan.forced_full,
+            )
+            result = await _finish(payload, ok=True)
+
+        # Outside the lock: a closed position never needs its lock again.
+        if result.get("position_status") == "closed":
+            locks.discard(position_id)
+        return result
 
     async def evaluate_spot(self, payload: dict, session: AsyncSession) -> dict:
         signal = await self.spot_signal.evaluate(payload)
@@ -1462,13 +1726,32 @@ class AgentService:
         *,
         partial: bool = False,
         close_fraction: Decimal | None = None,
+        set_tp1_reached: bool = True,
+        renormalize_states: bool = False,
     ) -> Decimal:
         """Chiude una posizione perp (totale o parziale); crea trade di chiusura con pnl_usd.
 
         `partial` senza `close_fraction` usa `perp_tp1_close_pct` (chiusura al TP1).
         `close_fraction` (0,1] chiude quella quota della size CORRENTE ed è la via usata
         dagli scalini del ratchet, che chiudono frazioni arbitrarie del residuo.
+
+        `set_tp1_reached=False` separates "a slice was closed" from "TP1 was hit".
+        Every strategy exit that closes a slice IS the TP1 event, so the default
+        stays True; a human-initiated reduction is not, and flagging it would make
+        the engine skip the real TP1 and switch breakeven/trailing/ratchet on a
+        target the price never reached.
+
+        `renormalize_states=True` rescales the size-derived ratchet and Smart SL
+        state by the share that survives, so those automations keep operating on
+        the reduced position instead of on quantities that no longer exist. Used
+        by the manual close; the strategy exits do not need it because their own
+        bookkeeping already tracks what they closed.
+
+        Locking: callers must already hold this position's lock
+        (`perp_position_lock`). This method never acquires it — `asyncio.Lock` is
+        not reentrant and nesting would deadlock the loop.
         """
+        get_perp_position_locks().assert_held(pos.position_id, caller="_close_perp_position")
         is_long = pos.side == "long"
         pnl_per_unit = (exit_price - pos.entry_price) if is_long else (pos.entry_price - exit_price)
         # Fee pura = opening_fee_usd escludendo lo slippage già incluso nell'entry_price.
@@ -1513,18 +1796,28 @@ class AgentService:
 
         if partial:
             f = f_req
+            size_before = pos.size
             close_size = (pos.size * f).quantize(Decimal("0.000001"))
             funding_share = pos.funding_accrued_usd * f
             raw_pnl = pnl_per_unit * close_size
             pnl = raw_pnl - fee_only * f + funding_share
             pos.size = pos.size - close_size
-            pos.tp1_reached = True
+            if set_tp1_reached:
+                pos.tp1_reached = True
             remaining = Decimal("1") - f
             pos.pnl_unrealized = pnl_per_unit * pos.size - fee_only * remaining + pos.funding_accrued_usd * remaining
             # Scala la fee residua sulla posizione: il close finale userà solo la quota rimasta
             pos.opening_fee_usd = (pos.opening_fee_usd or Decimal("0")) * remaining
             pos.slippage_usd = (pos.slippage_usd or Decimal("0")) * remaining
             pos.funding_accrued_usd = pos.funding_accrued_usd * remaining
+            if renormalize_states:
+                # Scale by what was ACTUALLY closed, not by the requested
+                # fraction: quantisation makes the two differ, and the states
+                # must follow the quantity that really left the position.
+                factor = (pos.size / size_before) if size_before > 0 else Decimal("0")
+                pos.ratchet_state, pos.smart_sl_state = renormalize_states_json(
+                    pos.ratchet_state, pos.smart_sl_state, factor
+                )
         else:
             close_size = pos.size
             raw_pnl = pnl_per_unit * close_size
@@ -1549,7 +1842,19 @@ class AgentService:
             status="confirmed",
             venue=pos.venue or "agent",
             timestamp_utc=now,
-            notes=f"auto_close:{reason}{'_partial' if partial else ''}",
+            # Manual closes carry their own prefix and keep the reason verbatim.
+            # "auto_close:" would misattribute the decision, and the generic
+            # "_partial" suffix collides with the reason name: the reader strips
+            # "_partial" wherever it appears, which would turn
+            # manual_partial_close_partial into a reason that does not exist.
+            # Human interventions must stay QUERYABLE in the database, not just
+            # visible in the logs — the shadow-vs-real comparison needs to be
+            # able to exclude or weight them.
+            notes=(
+                f"manual_close:{reason}"
+                if reason in (MANUAL_PARTIAL_CLOSE, MANUAL_FULL_CLOSE)
+                else f"auto_close:{reason}{'_partial' if partial else ''}"
+            ),
             pnl_usd=pnl,
         )
         await PerpTradeRepository(session).save(close_trade)
@@ -2221,289 +2526,293 @@ class AgentService:
         prot_mode = (getattr(ms, "perp_protection_mode", None) or "trailing")
         profit_lock_steps = list(getattr(ms, "perp_profit_lock_steps", None) or [])
 
-        for pos in perp_positions:
-            if pos.status != "open":
-                continue
-            price = pos.current_price
-            is_long = pos.side == "long"
-            reason = None
-            partial = False
-            atr_v = pos.entry_atr
+        # Each perp position is handled under its own lock: ratchet, Smart SL and
+        # exits below all run inside a single acquisition, serialised against a
+        # manual close arriving on the same position from the HTTP side.
+        async with aclosing(_iter_locked_perp(perp_positions)) as _locked_perp:
+            async for pos in _locked_perp:
+                if pos.status != "open":
+                    continue
+                price = pos.current_price
+                is_long = pos.side == "long"
+                reason = None
+                partial = False
+                atr_v = pos.entry_atr
 
-            # Estremo favorevole dall'ingresso (per il trailing): max per i long, min per gli short.
-            if is_long:
-                if pos.max_price is None or price > pos.max_price:
-                    pos.max_price = price; pos.updated_at = now; session.add(pos)
-            else:
-                if pos.max_price is None or price < pos.max_price:
-                    pos.max_price = price; pos.updated_at = now; session.add(pos)
-            extreme = pos.max_price if pos.max_price is not None else price
-
-            if self._ms.perp_breach_mode != "off":
-                self._evaluate_breach_levels(pos, price, is_long, now, self._ms)
-
-            _ssl_suspended = False
-            if pos.smart_sl_state:
-                try:
-                    _ssl_st = json.loads(pos.smart_sl_state)
-                    _ssl_suspended = _ssl_st.get("protection_suspended", False)
-                except (ValueError, KeyError):
-                    pass
-
-            # Protezione ATR — solo se l'ATR è stato congelato all'ingresso (trade nuovi).
-            if atr_v and atr_v > 0 and not _ssl_suspended:
-                # Breakeven: a +N×ATR lo SL si sposta a entry (+costi), solo verso il sicuro.
-                be_trigger = (pos.entry_price + atr_v * be_mult) if is_long else (pos.entry_price - atr_v * be_mult)
-                be_tp1_ok = ms.perp_breakeven_mode != "tp1" or pos.tp1_reached
-                if self.settings.perp_breakeven_enabled and ((is_long and price >= be_trigger) or (not is_long and price <= be_trigger)) and be_tp1_ok:
-                    be_stop = pos.entry_price
-                    if self.settings.perp_breakeven_offset_costs and pos.size > 0:
-                        # Fee andata+ritorno (×2): copre anche la chiusura.
-                        fee_only = ((pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))) * 2
-                        offset = fee_only / pos.size
-                        be_stop = pos.entry_price + offset if is_long else pos.entry_price - offset
-                    # Profitto minimo fisso a breakeven: il residuo deve chiudere ad
-                    # almeno +N$ (oltre alle fee residue). Vince il più protettivo tra
-                    # questo e l'offset costi; applicato solo se il prezzo l'ha già
-                    # superato (mai oltre il prezzo corrente → niente chiusura immediata).
-                    min_profit = Decimal(str(getattr(ms, "perp_breakeven_min_profit_usd", 0) or 0))
-                    if min_profit > 0 and pos.size > 0:
-                        fee_res = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
-                        dist = (min_profit + fee_res) / pos.size
-                        target = pos.entry_price + dist if is_long else pos.entry_price - dist
-                        if is_long and price > target and target > be_stop:
-                            be_stop = target
-                        elif not is_long and price < target and target < be_stop:
-                            be_stop = target
-                    # Cuscinetto extra entry±X%, applicato solo se il prezzo l'ha superato
-                    # (mai oltre il prezzo corrente → niente chiusura immediata).
-                    buf_pct = Decimal(str(self.settings.perp_breakeven_buffer_pct))
-                    if buf_pct > 0:
-                        if is_long:
-                            buffer_be = pos.entry_price * (Decimal("1") + buf_pct / Decimal("100"))
-                            if price > buffer_be and buffer_be > be_stop:
-                                be_stop = buffer_be
-                        else:
-                            buffer_be = pos.entry_price * (Decimal("1") - buf_pct / Decimal("100"))
-                            if price < buffer_be and buffer_be < be_stop:
-                                be_stop = buffer_be
-                    if is_long and (pos.stop_loss is None or be_stop > pos.stop_loss):
-                        pos.stop_loss = be_stop; pos.updated_at = now; session.add(pos)
-                    elif not is_long and (pos.stop_loss is None or be_stop < pos.stop_loss):
-                        pos.stop_loss = be_stop; pos.updated_at = now; session.add(pos)
-
-                # Trailing da subito, moltiplicatore ATR dinamico sulla leva del trade.
-                mult = _perp_trailing_mult(
-                    leverage=pos.leverage, min_lev=ms.perp_min_leverage, max_lev=ms.perp_max_leverage,
-                    base=trail_base, floor=trail_floor,
-                )
-                # Cappa il moltiplicatore al TP1: l'attivazione del trailing
-                # (≈ entry + mult*ATR) non deve mai superare il primo take-profit,
-                # altrimenti il trailing si accende oltre TP1 (quasi a TP2) ed è inutile.
-                tp1_cap = Decimal(str(self.settings.perp_tp1_atr_multiplier))
-                if mult > tp1_cap:
-                    mult = tp1_cap
-                pnl_pct = Decimal(str(ms.perp_trailing_pnl_pct))
+                # Estremo favorevole dall'ingresso (per il trailing): max per i long, min per gli short.
                 if is_long:
-                    trail_atr = extreme - atr_v * mult
-                    # Se perp_trailing_pnl_pct > 0, calcola anche il trailing a distanza
-                    # fissa (% del prezzo dal massimo). Vince il più alto tra i due.
-                    if pnl_pct > 0:
-                        trail_pnl = extreme * (1 - pnl_pct / Decimal("100"))
-                        trail = max(trail_atr, trail_pnl)
-                    else:
-                        trail = trail_atr
-                    # Il trailing si attiva SOLO quando supera l'entry: non deve mai
-                    # sostituire lo stop originale con uno stop più stretto ma ancora
-                    # in perdita (causa chiusure precoci senza dare spazio alla posizione).
-                    if ms.perp_trailing_enabled and trail >= pos.entry_price and (pos.stop_loss is None or trail > pos.stop_loss) and (pos.trailing_stop is None or trail > pos.trailing_stop):
-                        pos.trailing_stop = trail; pos.updated_at = now; session.add(pos)
+                    if pos.max_price is None or price > pos.max_price:
+                        pos.max_price = price; pos.updated_at = now; session.add(pos)
                 else:
-                    trail_atr = extreme + atr_v * mult
-                    if pnl_pct > 0:
-                        trail_pnl = extreme * (1 + pnl_pct / Decimal("100"))
-                        trail = min(trail_atr, trail_pnl)
-                    else:
-                        trail = trail_atr
-                    # Stesso guard per gli short: trail deve essere <= entry (in profitto).
-                    if ms.perp_trailing_enabled and trail <= pos.entry_price and (pos.stop_loss is None or trail < pos.stop_loss) and (pos.trailing_stop is None or trail < pos.trailing_stop):
-                        pos.trailing_stop = trail; pos.updated_at = now; session.add(pos)
+                    if pos.max_price is None or price < pos.max_price:
+                        pos.max_price = price; pos.updated_at = now; session.add(pos)
+                extreme = pos.max_price if pos.max_price is not None else price
 
-            # ── Profit Lock Ratchet: dopo il TP1 lavora SOLO nel tratto TP1→TP2. ──
-            # Tre meccanismi distinti:
-            #  1. uscite parziali agli scalini (quote CUMULATIVE del residuo post-TP1);
-            #  2. "breakeven del ratchet": dopo lo scalino configurato, stop fisso a
-            #     `perp_ratchet_breakeven_pct` del tratto (scritto su trailing_stop);
-            #  3. oltre il TP2 si lascia correre con un trailing percentuale (gestito
-            #     più sotto, dove il TP2 chiuderebbe).
-            # Usa l'estremo favorevole (max_price) → monotono e immune alle spike.
-            if (
-                prot_mode == "profit_lock"
-                and not _ssl_suspended
-                and pos.tp1_reached
-                and pos.take_profit_1
-                and pos.take_profit_2
-                and pos.max_price is not None
-            ):
-                progress = _ratchet_progress(pos.take_profit_1, pos.take_profit_2, pos.max_price, is_long)
-                if progress is not None:
+                if self._ms.perp_breach_mode != "off":
+                    self._evaluate_breach_levels(pos, price, is_long, now, self._ms)
+
+                _ssl_suspended = False
+                if pos.smart_sl_state:
                     try:
-                        r_state = json.loads(pos.ratchet_state) if pos.ratchet_state else {}
-                    except (TypeError, ValueError):
-                        r_state = {}
-                    # Riferimento fisso: il residuo nel momento in cui il ratchet si arma.
-                    # Le quote degli scalini sono cumulative SU QUESTA base, non a catena.
-                    if "base_size" not in r_state:
-                        r_state["base_size"] = str(pos.size)
-                    base_size = Decimal(r_state["base_size"])
-                    already = Decimal(str(r_state.get("closed_frac", "0")))
+                        _ssl_st = json.loads(pos.smart_sl_state)
+                        _ssl_suspended = _ssl_st.get("protection_suspended", False)
+                    except (ValueError, KeyError):
+                        pass
 
-                    step_idx, cum_frac = _ratchet_level(progress, profit_lock_steps)
+                # Protezione ATR — solo se l'ATR è stato congelato all'ingresso (trade nuovi).
+                if atr_v and atr_v > 0 and not _ssl_suspended:
+                    # Breakeven: a +N×ATR lo SL si sposta a entry (+costi), solo verso il sicuro.
+                    be_trigger = (pos.entry_price + atr_v * be_mult) if is_long else (pos.entry_price - atr_v * be_mult)
+                    be_tp1_ok = ms.perp_breakeven_mode != "tp1" or pos.tp1_reached
+                    if self.settings.perp_breakeven_enabled and ((is_long and price >= be_trigger) or (not is_long and price <= be_trigger)) and be_tp1_ok:
+                        be_stop = pos.entry_price
+                        if self.settings.perp_breakeven_offset_costs and pos.size > 0:
+                            # Fee andata+ritorno (×2): copre anche la chiusura.
+                            fee_only = ((pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))) * 2
+                            offset = fee_only / pos.size
+                            be_stop = pos.entry_price + offset if is_long else pos.entry_price - offset
+                        # Profitto minimo fisso a breakeven: il residuo deve chiudere ad
+                        # almeno +N$ (oltre alle fee residue). Vince il più protettivo tra
+                        # questo e l'offset costi; applicato solo se il prezzo l'ha già
+                        # superato (mai oltre il prezzo corrente → niente chiusura immediata).
+                        min_profit = Decimal(str(getattr(ms, "perp_breakeven_min_profit_usd", 0) or 0))
+                        if min_profit > 0 and pos.size > 0:
+                            fee_res = (pos.opening_fee_usd or Decimal("0")) - (pos.slippage_usd or Decimal("0"))
+                            dist = (min_profit + fee_res) / pos.size
+                            target = pos.entry_price + dist if is_long else pos.entry_price - dist
+                            if is_long and price > target and target > be_stop:
+                                be_stop = target
+                            elif not is_long and price < target and target < be_stop:
+                                be_stop = target
+                        # Cuscinetto extra entry±X%, applicato solo se il prezzo l'ha superato
+                        # (mai oltre il prezzo corrente → niente chiusura immediata).
+                        buf_pct = Decimal(str(self.settings.perp_breakeven_buffer_pct))
+                        if buf_pct > 0:
+                            if is_long:
+                                buffer_be = pos.entry_price * (Decimal("1") + buf_pct / Decimal("100"))
+                                if price > buffer_be and buffer_be > be_stop:
+                                    be_stop = buffer_be
+                            else:
+                                buffer_be = pos.entry_price * (Decimal("1") - buf_pct / Decimal("100"))
+                                if price < buffer_be and buffer_be < be_stop:
+                                    be_stop = buffer_be
+                        if is_long and (pos.stop_loss is None or be_stop > pos.stop_loss):
+                            pos.stop_loss = be_stop; pos.updated_at = now; session.add(pos)
+                        elif not is_long and (pos.stop_loss is None or be_stop < pos.stop_loss):
+                            pos.stop_loss = be_stop; pos.updated_at = now; session.add(pos)
 
-                    # 1. Uscita parziale: chiude la differenza rispetto a quanto già chiuso.
-                    if step_idx >= 0 and cum_frac > already and pos.size > 0:
-                        delta = cum_frac - already
-                        want_size = base_size * delta
-                        frac_now = min(Decimal("1"), want_size / pos.size) if pos.size > 0 else Decimal("0")
-                        if frac_now > 0:
-                            thr = Decimal(str(profit_lock_steps[step_idx][0]))
-                            level_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, thr, is_long)
-                            # Fill al livello dello scalino, non al mercato: se il feed è in
-                            # ritardo il prezzo può averlo superato di molto.
-                            fill = level_price if ((is_long and price >= level_price) or (not is_long and price <= level_price)) else price
-                            pnl_step = await self._close_perp_position(
-                                session, pos, fill, "ratchet_step", now, partial=True, close_fraction=frac_now
-                            )
-                            r_state["closed_frac"] = str(cum_frac)
-                            r_state["last_step"] = step_idx
-                            logger.info(
-                                "ratchet_step_closed",
-                                asset=pos.asset,
-                                step=step_idx + 1,
-                                progress=float(progress),
-                                closed_cum_pct=float(cum_frac * 100),
-                                size_closed=float(want_size),
-                                fill=float(fill),
-                                pnl=float(pnl_step),
-                            )
-                            margin_step = pos.entry_price * base_size / Decimal(max(int(pos.leverage or 1), 1))
-                            asyncio.create_task(
-                                notifier.notify_trade_closed(
-                                    user_id=user_id,
-                                    trade_id=f"cls_{pos.position_id}",
-                                    asset=pos.asset,
-                                    market="perp",
-                                    pnl_usd=pnl_step,
-                                    pnl_pct=(pnl_step / margin_step * 100) if margin_step > 0 else Decimal("0"),
-                                    close_reason="ratchet_step",
-                                    is_dry_run=ms.execution_mode == "dry_run",
-                                )
-                            )
-
-                    # 2. Breakeven del ratchet: si arma solo dallo scalino configurato in poi.
-                    be_after = max(1, int(getattr(ms, "perp_ratchet_breakeven_after_step", 3)))
-                    if step_idx >= (be_after - 1):
-                        be_pct = Decimal(str(getattr(ms, "perp_ratchet_breakeven_pct", 50.0))) / Decimal("100")
-                        be_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, be_pct, is_long)
-                        improves = (
-                            pos.trailing_stop is None
-                            or (is_long and be_price > pos.trailing_stop)
-                            or (not is_long and be_price < pos.trailing_stop)
-                        )
-                        # Mai oltre il prezzo corrente → niente chiusura immediata.
-                        not_beyond = (be_price < price) if is_long else (be_price > price)
-                        if improves and not_beyond:
-                            pos.trailing_stop = be_price
-                            logger.info(
-                                "ratchet_breakeven_armed",
-                                asset=pos.asset,
-                                step=step_idx + 1,
-                                level=float(be_price),
-                            )
-
-                    pos.ratchet_state = json.dumps(r_state)
-                    pos.updated_at = now
-                    session.add(pos)
-
-            # ── Smart Stop Loss (vende parzialmente prima del SL classico) ──
-            if ms.perp_smart_sl_enabled and pos.initial_stop_loss is not None:
-                await self._process_smart_sl(session, pos, price, ms, now)
-
-            # ── Uscite — trailing/profit_lock (se più protettivo) → stop → TP2 → TP1 → time ──
-            if (ms.perp_trailing_enabled or prot_mode == "profit_lock") and pos.trailing_stop is not None and (
-                pos.stop_loss is None
-                or (is_long and pos.trailing_stop > pos.stop_loss)
-                or (not is_long and pos.trailing_stop < pos.stop_loss)
-            ):
-                if (is_long and price <= pos.trailing_stop) or (not is_long and price >= pos.trailing_stop):
-                    reason = "profit_lock" if prot_mode == "profit_lock" else "trailing_stop"
-
-            if reason is None and pos.stop_loss is not None:
-                if (is_long and price <= pos.stop_loss) or (not is_long and price >= pos.stop_loss):
-                    # Stop già a breakeven (>= entry long / <= entry short) → non è perdita.
-                    at_be = pos.stop_loss >= pos.entry_price if is_long else pos.stop_loss <= pos.entry_price
-                    reason = "breakeven" if at_be else "stop_loss"
-
-            if reason is None and pos.tp1_reached and pos.take_profit_2:
-                at_or_past = (is_long and price >= pos.take_profit_2) or (not is_long and price <= pos.take_profit_2)
-                # "Superato di slancio": al controllo il prezzo è GIÀ oltre il TP2 (lo ha
-                # attraversato fra un tick e l'altro). In quel caso non si chiude: si lascia
-                # correre con un trailing percentuale. Se invece lo tocca esattamente, il
-                # TP2 chiude come sempre.
-                beyond = (is_long and price > pos.take_profit_2) or (not is_long and price < pos.take_profit_2)
-                run_on = prot_mode == "profit_lock" and bool(getattr(ms, "perp_ratchet_run_beyond_tp2", True))
-                if at_or_past and beyond and run_on:
-                    pct = Decimal(str(getattr(ms, "perp_ratchet_trailing_pct", 1.0))) / Decimal("100")
-                    ref = pos.max_price if pos.max_price is not None else price
-                    cand = ref * (Decimal("1") - pct) if is_long else ref * (Decimal("1") + pct)
-                    improves = (
-                        pos.trailing_stop is None
-                        or (is_long and cand > pos.trailing_stop)
-                        or (not is_long and cand < pos.trailing_stop)
+                    # Trailing da subito, moltiplicatore ATR dinamico sulla leva del trade.
+                    mult = _perp_trailing_mult(
+                        leverage=pos.leverage, min_lev=ms.perp_min_leverage, max_lev=ms.perp_max_leverage,
+                        base=trail_base, floor=trail_floor,
                     )
-                    not_beyond = (cand < price) if is_long else (cand > price)
-                    if improves and not_beyond:
-                        pos.trailing_stop = cand
+                    # Cappa il moltiplicatore al TP1: l'attivazione del trailing
+                    # (≈ entry + mult*ATR) non deve mai superare il primo take-profit,
+                    # altrimenti il trailing si accende oltre TP1 (quasi a TP2) ed è inutile.
+                    tp1_cap = Decimal(str(self.settings.perp_tp1_atr_multiplier))
+                    if mult > tp1_cap:
+                        mult = tp1_cap
+                    pnl_pct = Decimal(str(ms.perp_trailing_pnl_pct))
+                    if is_long:
+                        trail_atr = extreme - atr_v * mult
+                        # Se perp_trailing_pnl_pct > 0, calcola anche il trailing a distanza
+                        # fissa (% del prezzo dal massimo). Vince il più alto tra i due.
+                        if pnl_pct > 0:
+                            trail_pnl = extreme * (1 - pnl_pct / Decimal("100"))
+                            trail = max(trail_atr, trail_pnl)
+                        else:
+                            trail = trail_atr
+                        # Il trailing si attiva SOLO quando supera l'entry: non deve mai
+                        # sostituire lo stop originale con uno stop più stretto ma ancora
+                        # in perdita (causa chiusure precoci senza dare spazio alla posizione).
+                        if ms.perp_trailing_enabled and trail >= pos.entry_price and (pos.stop_loss is None or trail > pos.stop_loss) and (pos.trailing_stop is None or trail > pos.trailing_stop):
+                            pos.trailing_stop = trail; pos.updated_at = now; session.add(pos)
+                    else:
+                        trail_atr = extreme + atr_v * mult
+                        if pnl_pct > 0:
+                            trail_pnl = extreme * (1 + pnl_pct / Decimal("100"))
+                            trail = min(trail_atr, trail_pnl)
+                        else:
+                            trail = trail_atr
+                        # Stesso guard per gli short: trail deve essere <= entry (in profitto).
+                        if ms.perp_trailing_enabled and trail <= pos.entry_price and (pos.stop_loss is None or trail < pos.stop_loss) and (pos.trailing_stop is None or trail < pos.trailing_stop):
+                            pos.trailing_stop = trail; pos.updated_at = now; session.add(pos)
+
+                # ── Profit Lock Ratchet: dopo il TP1 lavora SOLO nel tratto TP1→TP2. ──
+                # Tre meccanismi distinti:
+                #  1. uscite parziali agli scalini (quote CUMULATIVE del residuo post-TP1);
+                #  2. "breakeven del ratchet": dopo lo scalino configurato, stop fisso a
+                #     `perp_ratchet_breakeven_pct` del tratto (scritto su trailing_stop);
+                #  3. oltre il TP2 si lascia correre con un trailing percentuale (gestito
+                #     più sotto, dove il TP2 chiuderebbe).
+                # Usa l'estremo favorevole (max_price) → monotono e immune alle spike.
+                if (
+                    prot_mode == "profit_lock"
+                    and not _ssl_suspended
+                    and pos.tp1_reached
+                    and pos.take_profit_1
+                    and pos.take_profit_2
+                    and pos.max_price is not None
+                ):
+                    progress = _ratchet_progress(pos.take_profit_1, pos.take_profit_2, pos.max_price, is_long)
+                    if progress is not None:
+                        try:
+                            r_state = json.loads(pos.ratchet_state) if pos.ratchet_state else {}
+                        except (TypeError, ValueError):
+                            r_state = {}
+                        # Riferimento fisso: il residuo nel momento in cui il ratchet si arma.
+                        # Le quote degli scalini sono cumulative SU QUESTA base, non a catena.
+                        if "base_size" not in r_state:
+                            r_state["base_size"] = str(pos.size)
+                        base_size = Decimal(r_state["base_size"])
+                        already = Decimal(str(r_state.get("closed_frac", "0")))
+
+                        step_idx, cum_frac = _ratchet_level(progress, profit_lock_steps)
+
+                        # 1. Uscita parziale: chiude la differenza rispetto a quanto già chiuso.
+                        if step_idx >= 0 and cum_frac > already and pos.size > 0:
+                            delta = cum_frac - already
+                            want_size = base_size * delta
+                            frac_now = min(Decimal("1"), want_size / pos.size) if pos.size > 0 else Decimal("0")
+                            if frac_now > 0:
+                                thr = Decimal(str(profit_lock_steps[step_idx][0]))
+                                level_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, thr, is_long)
+                                # Fill al livello dello scalino, non al mercato: se il feed è in
+                                # ritardo il prezzo può averlo superato di molto.
+                                fill = level_price if ((is_long and price >= level_price) or (not is_long and price <= level_price)) else price
+                                pnl_step = await self._close_perp_position(
+                                    session, pos, fill, "ratchet_step", now, partial=True, close_fraction=frac_now
+                                )
+                                r_state["closed_frac"] = str(cum_frac)
+                                r_state["last_step"] = step_idx
+                                logger.info(
+                                    "ratchet_step_closed",
+                                    asset=pos.asset,
+                                    step=step_idx + 1,
+                                    progress=float(progress),
+                                    closed_cum_pct=float(cum_frac * 100),
+                                    size_closed=float(want_size),
+                                    fill=float(fill),
+                                    pnl=float(pnl_step),
+                                )
+                                margin_step = pos.entry_price * base_size / Decimal(max(int(pos.leverage or 1), 1))
+                                asyncio.create_task(
+                                    notifier.notify_trade_closed(
+                                        user_id=user_id,
+                                        trade_id=f"cls_{pos.position_id}",
+                                        asset=pos.asset,
+                                        market="perp",
+                                        pnl_usd=pnl_step,
+                                        pnl_pct=(pnl_step / margin_step * 100) if margin_step > 0 else Decimal("0"),
+                                        close_reason="ratchet_step",
+                                        is_dry_run=ms.execution_mode == "dry_run",
+                                    )
+                                )
+
+                        # 2. Breakeven del ratchet: si arma solo dallo scalino configurato in poi.
+                        be_after = max(1, int(getattr(ms, "perp_ratchet_breakeven_after_step", 3)))
+                        if step_idx >= (be_after - 1):
+                            be_pct = Decimal(str(getattr(ms, "perp_ratchet_breakeven_pct", 50.0))) / Decimal("100")
+                            be_price = _ratchet_breakeven_price(pos.take_profit_1, pos.take_profit_2, be_pct, is_long)
+                            improves = (
+                                pos.trailing_stop is None
+                                or (is_long and be_price > pos.trailing_stop)
+                                or (not is_long and be_price < pos.trailing_stop)
+                            )
+                            # Mai oltre il prezzo corrente → niente chiusura immediata.
+                            not_beyond = (be_price < price) if is_long else (be_price > price)
+                            if improves and not_beyond:
+                                pos.trailing_stop = be_price
+                                logger.info(
+                                    "ratchet_breakeven_armed",
+                                    asset=pos.asset,
+                                    step=step_idx + 1,
+                                    level=float(be_price),
+                                )
+
+                        pos.ratchet_state = json.dumps(r_state)
                         pos.updated_at = now
                         session.add(pos)
-                        logger.info(
-                            "ratchet_running_beyond_tp2",
-                            asset=pos.asset,
-                            price=float(price),
-                            tp2=float(pos.take_profit_2),
-                            trailing=float(cand),
-                            pct=float(pct * 100),
+
+                # ── Smart Stop Loss (vende parzialmente prima del SL classico) ──
+                if ms.perp_smart_sl_enabled and pos.initial_stop_loss is not None:
+                    await self._process_smart_sl(session, pos, price, ms, now)
+
+                # ── Uscite — trailing/profit_lock (se più protettivo) → stop → TP2 → TP1 → time ──
+                if (ms.perp_trailing_enabled or prot_mode == "profit_lock") and pos.trailing_stop is not None and (
+                    pos.stop_loss is None
+                    or (is_long and pos.trailing_stop > pos.stop_loss)
+                    or (not is_long and pos.trailing_stop < pos.stop_loss)
+                ):
+                    if (is_long and price <= pos.trailing_stop) or (not is_long and price >= pos.trailing_stop):
+                        reason = "profit_lock" if prot_mode == "profit_lock" else "trailing_stop"
+
+                if reason is None and pos.stop_loss is not None:
+                    if (is_long and price <= pos.stop_loss) or (not is_long and price >= pos.stop_loss):
+                        # Stop già a breakeven (>= entry long / <= entry short) → non è perdita.
+                        at_be = pos.stop_loss >= pos.entry_price if is_long else pos.stop_loss <= pos.entry_price
+                        reason = "breakeven" if at_be else "stop_loss"
+
+                if reason is None and pos.tp1_reached and pos.take_profit_2:
+                    at_or_past = (is_long and price >= pos.take_profit_2) or (not is_long and price <= pos.take_profit_2)
+                    # "Superato di slancio": al controllo il prezzo è GIÀ oltre il TP2 (lo ha
+                    # attraversato fra un tick e l'altro). In quel caso non si chiude: si lascia
+                    # correre con un trailing percentuale. Se invece lo tocca esattamente, il
+                    # TP2 chiude come sempre.
+                    beyond = (is_long and price > pos.take_profit_2) or (not is_long and price < pos.take_profit_2)
+                    run_on = prot_mode == "profit_lock" and bool(getattr(ms, "perp_ratchet_run_beyond_tp2", True))
+                    if at_or_past and beyond and run_on:
+                        pct = Decimal(str(getattr(ms, "perp_ratchet_trailing_pct", 1.0))) / Decimal("100")
+                        ref = pos.max_price if pos.max_price is not None else price
+                        cand = ref * (Decimal("1") - pct) if is_long else ref * (Decimal("1") + pct)
+                        improves = (
+                            pos.trailing_stop is None
+                            or (is_long and cand > pos.trailing_stop)
+                            or (not is_long and cand < pos.trailing_stop)
                         )
-                elif at_or_past:
-                    reason = "take_profit_2"
+                        not_beyond = (cand < price) if is_long else (cand > price)
+                        if improves and not_beyond:
+                            pos.trailing_stop = cand
+                            pos.updated_at = now
+                            session.add(pos)
+                            logger.info(
+                                "ratchet_running_beyond_tp2",
+                                asset=pos.asset,
+                                price=float(price),
+                                tp2=float(pos.take_profit_2),
+                                trailing=float(cand),
+                                pct=float(pct * 100),
+                            )
+                    elif at_or_past:
+                        reason = "take_profit_2"
 
-            if reason is None and not pos.tp1_reached and pos.take_profit_1:
-                if (is_long and price >= pos.take_profit_1) or (not is_long and price <= pos.take_profit_1):
-                    reason = "take_profit_1"
-                    partial = True
+                if reason is None and not pos.tp1_reached and pos.take_profit_1:
+                    if (is_long and price >= pos.take_profit_1) or (not is_long and price <= pos.take_profit_1):
+                        reason = "take_profit_1"
+                        partial = True
 
-            if reason is None and ms.perp_time_stop_enabled and ms.perp_time_stop_hours > 0:
-                age_hours = (now - pos.opened_at.replace(tzinfo=pos.opened_at.tzinfo or UTC)).total_seconds() / 3600
-                if age_hours >= ms.perp_time_stop_hours:
-                    reason = "time_stop"
+                if reason is None and ms.perp_time_stop_enabled and ms.perp_time_stop_hours > 0:
+                    age_hours = (now - pos.opened_at.replace(tzinfo=pos.opened_at.tzinfo or UTC)).total_seconds() / 3600
+                    if age_hours >= ms.perp_time_stop_hours:
+                        reason = "time_stop"
 
-            if reason:
-                exit_price = _level_fill_price(pos, reason, price)
-                pnl = await self._close_perp_position(session, pos, exit_price, reason, now, partial=partial)
-                margin = pos.entry_price * pos.size / Decimal(max(int(pos.leverage or 1), 1))
-                pnl_pct = pnl / margin * 100 if margin > 0 else Decimal("0")
-                asyncio.create_task(
-                    notifier.notify_trade_closed(
-                        user_id=user_id,
-                        trade_id=f"cls_{pos.position_id}",
-                        asset=pos.asset,
-                        market="perp",
-                        pnl_usd=pnl,
-                        pnl_pct=pnl_pct,
-                        close_reason=reason,
-                        is_dry_run=ms.execution_mode == "dry_run",
+                if reason:
+                    exit_price = _level_fill_price(pos, reason, price)
+                    pnl = await self._close_perp_position(session, pos, exit_price, reason, now, partial=partial)
+                    margin = pos.entry_price * pos.size / Decimal(max(int(pos.leverage or 1), 1))
+                    pnl_pct = pnl / margin * 100 if margin > 0 else Decimal("0")
+                    asyncio.create_task(
+                        notifier.notify_trade_closed(
+                            user_id=user_id,
+                            trade_id=f"cls_{pos.position_id}",
+                            asset=pos.asset,
+                            market="perp",
+                            pnl_usd=pnl,
+                            pnl_pct=pnl_pct,
+                            close_reason=reason,
+                            is_dry_run=ms.execution_mode == "dry_run",
+                        )
                     )
-                )
 
     async def _update_portfolio_state(
         self,
@@ -3733,7 +4042,56 @@ def _close_purpose(reason: str) -> str:
         "profit_lock": "ratchet",
         "ratchet_step": "ratchet",
         "time_stop": "close",
+        # Human-initiated closes get their own purpose: a manual reduction must
+        # never be mistaken for a strategy exit when reading perp_orders back.
+        MANUAL_PARTIAL_CLOSE: MANUAL_CLOSE_PURPOSE,
+        MANUAL_FULL_CLOSE: MANUAL_CLOSE_PURPOSE,
     }.get(reason, "close")
+
+
+async def _iter_locked_perp(positions: list):
+    """Yield perp positions one at a time, each under its own position lock.
+
+    The lock is acquired before the body runs and released when the consumer
+    moves on, so the WHOLE handling of one position -- ratchet, Smart SL, exits
+    -- happens under a single acquisition, and inner helpers never need (and
+    must never take) the lock themselves.
+
+    Wrap the call in ``contextlib.aclosing`` so that a ``break`` or an exception
+    in the consumer closes the generator deterministically and runs the
+    ``finally``: without it the release would wait for garbage collection and
+    the position could stay locked.
+    """
+    locks = get_perp_position_locks()
+    for pos in positions:
+        lock = locks.get(pos.position_id)
+        await lock.acquire()
+        try:
+            yield pos
+        finally:
+            lock.release()
+
+
+def _manual_close_fingerprint(
+    position_id: str, percentage: object, expected_size: object
+) -> str:
+    """Stable hash of the fields that define a manual close request.
+
+    Lets the ledger tell "the same request, sent twice" (replay it) from "the
+    same key, a different request" (refuse it). Sizes are normalised to the
+    engine quantum first, so ``"12.3456780"`` and ``Decimal("12.345678")``
+    fingerprint identically instead of looking like two different requests.
+    """
+    try:
+        size_part = (
+            ""
+            if expected_size is None
+            else str(Decimal(str(expected_size)).quantize(Decimal("0.000001")))
+        )
+    except Exception:
+        size_part = str(expected_size)
+    raw = f"{position_id}|{percentage}|{size_part}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _level_fill_price(pos, reason: str, market_price: Decimal) -> Decimal:
