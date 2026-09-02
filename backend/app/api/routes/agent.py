@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -266,6 +266,70 @@ async def risk_close_all(session: SessionDep, _: AdminAccessDep) -> dict:
     """
 
     return await get_agent_service().close_all_and_pause(session, reason="manual_risk")
+
+
+class ManualPerpCloseRequest(BaseModel):
+    """Human-initiated close of one perp position, by preset percentage."""
+
+    #: Only the four presets. A free percentage is deliberately not accepted:
+    #: a mistyped value must not be able to produce an arbitrary size.
+    percentage: Literal[25, 50, 75, 100]
+    #: The residual size the client was displaying. If the position moved in the
+    #: meantime (TP1, stop, ratchet, another manual close) the request is
+    #: refused with 409 instead of closing a share of something else.
+    expected_size: Decimal
+    note: str | None = Field(default=None, max_length=200)
+
+
+#: Business outcome -> HTTP status. Everything the caller must act on
+#: differently gets its own code; the body always carries the precise outcome.
+_MANUAL_CLOSE_STATUS = {
+    "confirmed": 200,
+    "stale_position": 409,
+    "already_closed": 409,
+    "key_reused_with_different_payload": 409,
+    "in_progress": 409,
+    "invalid_request": 422,
+    "not_found": 404,
+    "execution_failed": 502,
+}
+
+
+@router.post("/positions/perp/{position_id}/close")
+async def manual_close_perp_position(
+    position_id: str,
+    request: ManualPerpCloseRequest,
+    response: Response,
+    session: SessionDep,
+    _: AdminAccessDep,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=8, max_length=128
+    ),
+) -> dict:
+    """Close 25/50/75/100% of ONE open perp position, on the residual size.
+
+    Admin only. The percentage always applies to what is left now, never to the
+    original size. A partial close is a resize: the position stays open and every
+    automation (stop, TP1, TP2, breakeven, trailing, profit lock, Smart SL) keeps
+    running on the remaining quantity. It does NOT mark TP1 as reached, does not
+    signal the regime guardian, does not touch the kill switch and does not pause
+    the agent.
+
+    ``Idempotency-Key`` makes a retry replay the first outcome instead of closing
+    a second slice; ``expected_size`` catches a genuinely new duplicate request
+    (the double tap), which would carry a fresh key.
+    """
+    result = await get_agent_service().manual_close_perp_position(
+        session,
+        position_id=position_id,
+        percentage=request.percentage,
+        expected_size=request.expected_size,
+        idempotency_key=idempotency_key,
+        note=request.note,
+    )
+    outcome = str(result.get("outcome") or result.get("status") or "")
+    response.status_code = _MANUAL_CLOSE_STATUS.get(outcome, 200)
+    return result
 
 
 class ResetDailyCounterRequest(BaseModel):
