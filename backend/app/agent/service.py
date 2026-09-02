@@ -603,6 +603,28 @@ class AgentService:
         locks = get_perp_position_locks()
         fingerprint = _manual_close_fingerprint(position_id, percentage, expected_size)
 
+        # Refresh the price BEFORE acquiring the lock, never while holding it.
+        # The feed has a 10s timeout per call and this path makes two of them
+        # (prices, funding) plus a possible fallback to another exchange: held
+        # inside the lock, a slow feed would suspend the fast tick's handling of
+        # every position queued behind this one -- in a system whose costliest
+        # known defect is already that stops are only evaluated every ~5s
+        # (NOTE/59, NOTE/64). Best-effort, exactly like close-all: if the feed
+        # does not answer, the last sampled price is used rather than refusing.
+        # It writes and commits on its own, so the re-read inside the lock sees
+        # the fresh value.
+        preview = await session.scalar(
+            select(PerpPosition).where(
+                PerpPosition.position_id == position_id,
+                PerpPosition.user_id == user_id,
+            )
+        )
+        if preview is not None and preview.status == "open":
+            try:
+                await self._refresh_position_prices(session, [], [preview])
+            except Exception:
+                pass
+
         # The lock is taken first and held for the whole operation: it serialises
         # this request against the fast tick (ratchet, Smart SL, TP/SL) and
         # against any other manual request on the same position. Everything
@@ -712,12 +734,9 @@ class AgentService:
                     ok=False,
                 )
 
-            # Best-effort live price, exactly like close-all: if the feed does
-            # not answer, the last sampled price is used rather than refusing.
-            try:
-                await self._refresh_position_prices(session, [], [pos])
-            except Exception:
-                pass
+            # The price was refreshed BEFORE taking the lock (see above): the
+            # feed call must never happen while the lock is held. Here we only
+            # read what is already stored.
             exit_price = pos.current_price
 
             size_before = pos.size

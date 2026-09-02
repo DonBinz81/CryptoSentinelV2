@@ -663,3 +663,37 @@ async def test_a_position_of_another_user_is_not_reachable(db) -> None:
 
     assert result["outcome"] == "not_found"
     assert pos.size == SIZE  # untouched
+
+
+async def test_the_price_feed_is_never_called_while_the_lock_is_held(db) -> None:
+    """No network call may happen inside the position lock.
+
+    The price feed has a 10s timeout per call and this path makes two of them
+    (prices, funding) plus a possible fallback to another exchange. Held inside
+    the lock, a slow feed would suspend the fast tick's handling of every
+    position queued behind this one -- in a system whose costliest known defect
+    is already that stops are only evaluated every ~5 seconds (NOTE/59, 64).
+
+    The other tests replace the refresh with a no-op, which is exactly what hid
+    this from them: here the substitute reports whether the lock was held.
+    """
+    from backend.app.agent.perp_position_lock import get_perp_position_locks
+
+    service = _service()
+    locks = get_perp_position_locks()
+    held_while_refreshing: list[bool] = []
+
+    async def _spy(session, spot_positions, perp_positions):
+        held_while_refreshing.append(locks.is_held("pos_manual"))
+
+    service._refresh_position_prices = _spy  # type: ignore[method-assign]
+
+    async with get_session_factory()() as session:
+        pos = _position()
+        await _persist(session, pos)
+        result = await _close(service, session, pos, pct=50)
+
+    assert result["status"] == "confirmed"
+    assert held_while_refreshing == [False], (
+        "the price feed was called while holding the position lock"
+    )
