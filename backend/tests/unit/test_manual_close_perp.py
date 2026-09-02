@@ -622,3 +622,44 @@ async def test_two_manual_closes_then_a_ratchet_step_closes_the_right_share(db) 
     # 25% of 2.5 = 0.625 closed, 1.875 left. NOT the whole residual.
     assert pos.status == "open"
     assert pos.size == Decimal("1.875")
+
+
+async def test_the_order_row_records_the_manual_purpose(db) -> None:
+    """Position -> Order -> Execution must be exercised by the manual path too.
+
+    Without this assertion the other tests stay green even if the venue call is
+    removed, because they only look at the position and the trade.
+    """
+    from sqlalchemy import select as _select
+
+    from backend.app.persistence.models.orders import PerpOrder
+
+    service = _service()
+    async with get_session_factory()() as session:
+        pos = _position()
+        await _persist(session, pos)
+        await _close(service, session, pos, pct=50)
+        orders = list((await session.execute(_select(PerpOrder))).scalars().all())
+
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.position_id == pos.position_id
+    assert order.purpose == "manual"          # never confused with a strategy exit
+    assert order.status == "confirmed"
+    assert order.requested_qty == Decimal("5")
+    assert order.filled_qty == Decimal("5")
+    assert order.venue == "dry_run"
+
+
+async def test_a_position_of_another_user_is_not_reachable(db) -> None:
+    """Single-user today, multi-user ready by design: the lookup is scoped by
+    user_id, so one account can never close another account's position."""
+    service = _service()
+    async with get_session_factory()() as session:
+        pos = _position(position_id="pos_other_user")
+        pos.user_id = "00000000-0000-0000-0000-0000000000ff"
+        await _persist(session, pos)
+        result = await _close(service, session, pos, pct=50)
+
+    assert result["outcome"] == "not_found"
+    assert pos.size == SIZE  # untouched
