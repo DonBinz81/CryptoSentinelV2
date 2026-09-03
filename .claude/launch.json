@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "dev-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--config", "dev-preview/vite.config.mts"],
+      "port": 5199
     }
   ]
 }
