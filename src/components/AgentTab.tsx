@@ -1209,8 +1209,8 @@ export const ClosePositionModal: FC<{
   const puoRiprovare = result != null && !chiusa && result.outcome !== 'in_progress';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
-      <div className="w-full max-w-sm rounded-t-2xl sm:rounded-2xl border border-dark-600 bg-dark-800 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-5">
+      <div className="w-full max-w-sm rounded-2xl border border-dark-600 bg-dark-800 p-4 space-y-3 max-h-[85vh] overflow-y-auto">
         <div>
           <p className="text-sm font-bold text-white">
             {position.asset} {position.side} <span className="text-accent-blue">{position.leverage}x</span>
