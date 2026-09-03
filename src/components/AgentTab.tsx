@@ -1352,12 +1352,17 @@ export const PerpPane: FC<{
                 className="block w-full text-left disabled:cursor-default"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-semibold text-white">{position.asset} {position.side}</p>
                     <span className="rounded-full bg-dark-700 px-2 py-1 text-xs text-accent-blue">{position.leverage}x</span>
                     {position.smart_sl_active && (
                       <span className={`rounded-full px-2 py-1 text-xs font-semibold ${position.smart_sl_levels_sold?.some(Boolean) ? 'bg-amber-900/40 text-amber-400' : 'bg-dark-700 text-gray-400'}`}>
                         SSL {position.smart_sl_levels_sold?.filter(Boolean).length ?? 0}/2
+                      </span>
+                    )}
+                    {!!position.manual_close_count && (
+                      <span className="rounded-full bg-amber-900/40 px-2 py-1 text-xs font-semibold text-amber-400">
+                        ✂ {position.manual_close_count}×{position.manual_reduced_pct != null ? ` · −${Number(position.manual_reduced_pct).toFixed(0)}%` : ''}
                       </span>
                     )}
                   </div>
@@ -1370,6 +1375,12 @@ export const PerpPane: FC<{
                   <span>Entry {fmtPriceFull(position.entry_price)}</span>
                   <span>Now {fmtPriceFull(position.current_price)}</span>
                 </div>
+                {!!position.manual_close_count && (
+                  <p className="mt-1.5 text-xs text-amber-400/80">
+                    Ridotta a mano {position.manual_close_count} volt{position.manual_close_count === 1 ? 'a' : 'e'}
+                    {position.manual_reduced_pct != null ? `, size originale −${Number(position.manual_reduced_pct).toFixed(1)}%` : ''}
+                  </p>
+                )}
                 <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-gray-500">
                   <span>Margin {position.margin_usd != null ? fmtUsd(position.margin_usd) : '$0.00'}</span>
                   <span>Liq {position.liquidation_price ? fmtPrice(position.liquidation_price) : '-'}</span>
