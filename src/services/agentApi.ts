@@ -1,4 +1,5 @@
-import { BackendHttpError, backendRequest } from './http';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { BackendHttpError, backendRequest, requireBackend, authHeaders } from './http';
 
 export type KillSwitchState = 'running' | 'soft_stop' | 'hard_stop' | 'degraded';
 
@@ -747,6 +748,108 @@ export function resetDrawdownPeak(adminToken: string, note?: string): Promise<Re
 export interface RiskCloseAllResponse extends AgentStatus {
   closed_spot: number;
   closed_perp: number;
+}
+
+/** Le sole percentuali che il backend accetta per una chiusura manuale (NOTE/107). */
+export type ClosePerpPercentage = 25 | 50 | 75 | 100;
+
+export type ClosePerpOutcome =
+  | 'confirmed'
+  | 'stale_position'
+  | 'already_closed'
+  | 'key_reused_with_different_payload'
+  | 'in_progress'
+  | 'invalid_request'
+  | 'not_found'
+  | 'execution_failed';
+
+export interface ClosePerpPositionResponse {
+  status: string;
+  outcome: ClosePerpOutcome;
+  position_id: string;
+  market?: string;
+  asset?: string;
+  requested_percentage?: number;
+  requested_qty?: string;
+  executed_qty?: string;
+  executed_price?: string;
+  remaining_qty?: string;
+  position_status?: string;
+  realized_pnl_usd?: string;
+  close_reason?: string;
+  /** L'utente aveva chiesto una parziale, ma il residuo sarebbe finito sotto la
+   * soglia negoziabile: la posizione e' stata chiusa PER INTERO. Va detto in UI. */
+  forced_full?: boolean;
+  close_trade_id?: string | null;
+  venue?: string;
+  note?: string | null;
+  /** Presente su stale_position: la size vera, da usare per il ritentativo. */
+  current_size?: string;
+  /** Messaggio leggibile per gli esiti non "confirmed", quando il backend lo manda. */
+  detail?: string;
+}
+
+/**
+ * Chiusura manuale (parziale o totale) di UNA posizione perp aperta (NOTE/107).
+ *
+ * NON usa backendRequest/request(): quello lancia un'eccezione su ogni stato non-2xx
+ * e scarta il corpo, ma qui l'esito preciso sta SEMPRE nel body — anche su 409/422/
+ * 404/502 — quindi va sempre letto, mai trattato come un errore generico.
+ *
+ * Due protezioni obbligatorie per contratto: `idempotencyKey` copre il retry (la
+ * stessa chiave replica il primo esito invece di chiudere una seconda fetta);
+ * `expectedSize` copre il doppio tap, che genera una chiave NUOVA e che
+ * l'idempotenza da sola non può intercettare. Chiave nuova per ogni tentativo
+ * nuovo, identica solo sul retry di uno stesso tentativo.
+ */
+export async function closePerpPosition(
+  positionId: string,
+  params: { percentage: ClosePerpPercentage; expectedSize: string; note?: string },
+  idempotencyKey: string,
+  adminToken: string,
+): Promise<ClosePerpPositionResponse> {
+  const url = `${requireBackend('Close Perp')}/api/v1/agent/positions/perp/${encodeURIComponent(positionId)}/close`;
+  const headers = {
+    ...authHeaders(adminToken),
+    'Content-Type': 'application/json',
+    'Idempotency-Key': idempotencyKey,
+  };
+  const body = {
+    percentage: params.percentage,
+    expected_size: params.expectedSize,
+    note: params.note ?? null,
+  };
+
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.request({
+      method: 'POST',
+      url,
+      headers,
+      data: body,
+      connectTimeout: 12_000,
+      readTimeout: 30_000,
+    });
+    return response.data as ClosePerpPositionResponse;
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    return await response.json() as ClosePerpPositionResponse;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Close Perp: timeout', { cause: err });
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export function riskCloseAll(adminToken: string): Promise<RiskCloseAllResponse> {

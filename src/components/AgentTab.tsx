@@ -18,6 +18,9 @@ import {
   setKillSwitch,
   resetDailyCounter,
   resetDrawdownPeak,
+  closePerpPosition,
+  type ClosePerpPercentage,
+  type ClosePerpPositionResponse,
   riskCloseAll,
   adjustEquity,
   validateOnboarding,
@@ -41,6 +44,7 @@ import {
   type GlobalView,
   type KillSwitchState,
   type PerpView,
+  type PerpPositionView,
   type SpotView,
   type TradeDetail,
   verifyAdminToken,
@@ -1037,7 +1041,289 @@ const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) => void }
   );
 };
 
-const PerpPane: FC<{ data: PerpView | null; onTrade: (tradeId: string) => void }> = ({ data, onTrade }) => {
+const CLOSE_PERCENTAGES: ClosePerpPercentage[] = [25, 50, 75, 100];
+
+/** Un UUID per ogni TENTATIVO NUOVO (apertura modale, o ripartenza dopo un esito che
+ * cambia i presupposti della richiesta). Sul retry di uno STESSO tentativo — errore di
+ * rete, "execution_failed" — la chiave resta identica: e' quella che permette al
+ * backend di riconoscere il retry e non chiudere una seconda fetta (NOTE/107). */
+const nuovaIdempotencyKey = (): string =>
+  (globalThis.crypto?.randomUUID?.() ?? `k-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+const fmtQty = (v: string | number, decimals = 4): string => Number(v).toFixed(decimals);
+
+/**
+ * Chiusura manuale (parziale o totale) di una posizione perp aperta (NOTE/107,
+ * contratto congelato dalla chat A). Due protezioni obbligatorie per contratto:
+ * l'Idempotency-Key copre il retry di rete, `expected_size` (sempre l'ultimo dato
+ * mostrato) copre il doppio tap — la chiave da sola non lo intercetterebbe, perche'
+ * un doppio tap genera due richieste con DUE chiavi diverse.
+ */
+export const ClosePositionModal: FC<{
+  position: PerpPositionView;
+  adminToken: string;
+  onCancel: () => void;
+  onClosed: () => void;
+  /** Punto di innesto per il banco di anteprima: il banco ha VITE_BACKEND_API_BASE_URL
+   * vuoto per regola condivisa (dev-preview/vite.config.mts), quindi la chiamata vera
+   * fallirebbe subito su requireBackend(). In produzione non si passa mai — resta la
+   * funzione reale, il comportamento non cambia di una virgola. */
+  closeFn?: typeof closePerpPosition;
+}> = ({ position, adminToken, onCancel, onClosed, closeFn = closePerpPosition }) => {
+  const [percentage, setPercentage] = useState<ClosePerpPercentage | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<ClosePerpPositionResponse | null>(null);
+  // La size mostrata: si aggiorna SOLO se il backend dice che era superata
+  // (stale_position). expected_size manda sempre questo valore, mai quello
+  // dell'apertura della modale se nel frattempo e' cambiato.
+  const [shownSize, setShownSize] = useState(position.size);
+  const idempotencyKeyRef = useRef(nuovaIdempotencyKey());
+
+  const sizeNum = Number(shownSize);
+  const pnlNum = Number(position.pnl_unrealized);
+  const quotaQty = percentage != null ? (sizeNum * percentage) / 100 : null;
+  const residuoQty = percentage != null ? sizeNum - (quotaQty ?? 0) : null;
+  const quotaPnl = percentage != null ? (pnlNum * percentage) / 100 : null;
+
+  const invia = async () => {
+    if (!percentage || !adminToken || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const esito = await closeFn(
+        position.position_id,
+        { percentage, expectedSize: shownSize },
+        idempotencyKeyRef.current,
+        adminToken,
+      );
+      setResult(esito);
+      switch (esito.outcome) {
+        case 'confirmed':
+        case 'already_closed':
+        case 'not_found':
+          // Non si chiude subito: l'utente deve VEDERE l'esito (quantita' e prezzo
+          // eseguiti, l'avviso forced_full se c'e') prima che la modale sparisca.
+          // Il padre si aggiorna solo quando l'utente preme "Chiudi" qui sotto, mai
+          // in anticipo sulla stima locale mostrata durante la scelta.
+          break;
+        case 'stale_position':
+          // Presupposti cambiati: serve un tentativo NUOVO, non un retry — chiave
+          // nuova, size aggiornata da quella che il backend riporta.
+          if (esito.current_size) setShownSize(esito.current_size);
+          idempotencyKeyRef.current = nuovaIdempotencyKey();
+          break;
+        case 'key_reused_with_different_payload':
+          // Non dovrebbe mai succedere con questa logica di generazione chiavi;
+          // se succede e' piu' sicuro ripartire da un tentativo nuovo.
+          idempotencyKeyRef.current = nuovaIdempotencyKey();
+          break;
+        case 'in_progress':
+        case 'invalid_request':
+        case 'execution_failed':
+          // execution_failed: STESSA chiave, e' un retry dello stesso tentativo —
+          // la venue non ha confermato, non che la richiesta fosse sbagliata.
+          break;
+      }
+    } catch (e) {
+      // Errore di rete/timeout: non sappiamo se e' arrivato al backend. La chiave
+      // resta la stessa apposta — il backend, sul retry, riconosce lo stesso
+      // tentativo invece di eseguirne uno nuovo.
+      setError(e instanceof Error ? e.message : 'Errore di rete: verifica prima di ritentare.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const rendiEsito = () => {
+    if (!result) return null;
+    switch (result.outcome) {
+      case 'confirmed': {
+        const totale = result.position_status === 'closed';
+        return (
+          <div className="rounded-lg bg-accent-green/10 border border-accent-green/30 px-3 py-2.5 space-y-1">
+            <p className="text-sm font-bold text-accent-green">
+              {totale ? 'Posizione chiusa per intero' : `Chiusa la quota richiesta`}
+            </p>
+            {result.forced_full && (
+              <p className="text-xs font-semibold text-accent-yellow">
+                ⚠️ Il residuo era sotto la soglia negoziabile: chiusa PER INTERO, non solo la quota richiesta.
+              </p>
+            )}
+            <p className="text-xs text-gray-300">
+              Eseguito {fmtQty(result.executed_qty ?? '0')} a {fmtPrice(result.executed_price ?? '0')}
+              {' · '}residuo {fmtQty(result.remaining_qty ?? '0')}
+            </p>
+            <p className="text-xs text-gray-400">PnL realizzato: {fmtUsd(result.realized_pnl_usd ?? '0')}</p>
+          </div>
+        );
+      }
+      case 'stale_position':
+        return (
+          <p className="rounded-lg bg-accent-yellow/10 border border-accent-yellow/30 px-3 py-2.5 text-xs text-accent-yellow">
+            La size è cambiata da quando hai aperto la scheda — aggiornata qui sotto. Verifica e riconferma.
+          </p>
+        );
+      case 'already_closed':
+        return (
+          <p className="rounded-lg bg-dark-900/60 px-3 py-2.5 text-xs text-gray-400">
+            La posizione non è più aperta: probabilmente chiusa nel frattempo da un altro evento (stop, TP, guardiano).
+          </p>
+        );
+      case 'not_found':
+        return (
+          <p className="rounded-lg bg-dark-900/60 px-3 py-2.5 text-xs text-gray-400">
+            Posizione non trovata.
+          </p>
+        );
+      case 'in_progress':
+        return (
+          <p className="rounded-lg bg-accent-yellow/10 border border-accent-yellow/30 px-3 py-2.5 text-xs text-accent-yellow">
+            Un tentativo precedente è ancora in corso: attendi, non reinviare adesso. Riprova tra poco.
+          </p>
+        );
+      case 'invalid_request':
+        return (
+          <p className="rounded-lg bg-accent-red/10 border border-accent-red/30 px-3 py-2.5 text-xs text-accent-red">
+            {result.detail ?? 'Richiesta non valida.'}
+          </p>
+        );
+      case 'key_reused_with_different_payload':
+        return (
+          <p className="rounded-lg bg-accent-red/10 border border-accent-red/30 px-3 py-2.5 text-xs text-accent-red">
+            Anomalia interna del client, non tua: riprova, verrà usato un tentativo nuovo.
+          </p>
+        );
+      case 'execution_failed':
+        return (
+          <p className="rounded-lg bg-accent-red/10 border border-accent-red/30 px-3 py-2.5 text-xs text-accent-red">
+            La venue non ha confermato l'esecuzione. La posizione non è cambiata — puoi riprovare in sicurezza.
+          </p>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const chiusa = result?.outcome === 'confirmed' || result?.outcome === 'already_closed' || result?.outcome === 'not_found';
+  const puoRiprovare = result != null && !chiusa && result.outcome !== 'in_progress';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+      <div className="w-full max-w-sm rounded-t-2xl sm:rounded-2xl border border-dark-600 bg-dark-800 p-4 space-y-3 max-h-[90vh] overflow-y-auto">
+        <div>
+          <p className="text-sm font-bold text-white">
+            {position.asset} {position.side} <span className="text-accent-blue">{position.leverage}x</span>
+          </p>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Size {fmtQty(shownSize)} · PnL{' '}
+            <span className={pnlNum >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+              {fmtUsd(position.pnl_unrealized)} / {position.pnl_pct ?? '+0.00'}%
+            </span>
+          </p>
+        </div>
+
+        {!chiusa && (
+          <>
+            <div className="grid grid-cols-4 gap-1.5">
+              {CLOSE_PERCENTAGES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => { setPercentage(p); setResult(null); setError(''); }}
+                  disabled={submitting}
+                  className={`rounded-lg py-2.5 text-sm font-bold transition-colors disabled:opacity-40 ${
+                    percentage === p ? 'bg-accent-blue text-white' : 'bg-dark-700 text-gray-300'
+                  }`}
+                >
+                  {p}%
+                </button>
+              ))}
+            </div>
+
+            {percentage != null && (
+              <div className="rounded-lg bg-dark-900/60 px-3 py-2.5 space-y-1 text-xs text-gray-400">
+                <div className="flex justify-between">
+                  <span>Quota da chiudere (stima)</span>
+                  <span className="text-white">{fmtQty(quotaQty ?? 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Residuo stimato</span>
+                  <span className="text-white">{fmtQty(residuoQty ?? 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>PnL stimato sulla quota</span>
+                  <span className={(quotaPnl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+                    {fmtUsd(quotaPnl ?? 0)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {(error || result) && (
+          <div className="space-y-2">
+            {error && (
+              <p className="rounded-lg bg-accent-red/10 border border-accent-red/30 px-3 py-2.5 text-xs text-accent-red">
+                {error}
+              </p>
+            )}
+            {rendiEsito()}
+          </div>
+        )}
+
+        {percentage != null && !chiusa && (
+          <p className="text-[11px] leading-4 text-gray-500">
+            Prezzo e PnL finali possono cambiare fra la conferma e l'esecuzione — quelli sopra sono una stima.
+          </p>
+        )}
+
+        {!adminToken && (
+          <p className="text-[11px] text-gray-600">Richiede admin token salvato.</p>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            // "Chiudi" dopo un esito definitivo avvisa il padre (la posizione e'
+            // davvero cambiata, la card va ricaricata); "Annulla" prima di quel
+            // momento no — non e' successo nulla da aggiornare.
+            onClick={chiusa ? onClosed : onCancel}
+            disabled={submitting}
+            className="flex-1 rounded-lg bg-dark-700 px-3 py-2.5 text-sm font-semibold text-gray-300 disabled:opacity-40"
+          >
+            {chiusa ? 'Chiudi' : 'Annulla'}
+          </button>
+          {!chiusa && (
+            <button
+              type="button"
+              onClick={() => void invia()}
+              disabled={!percentage || !adminToken || submitting || result?.outcome === 'in_progress'}
+              className="flex-1 rounded-lg bg-accent-red px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+            >
+              {submitting
+                ? 'Chiusura in corso…'
+                : puoRiprovare
+                  ? 'Riprova'
+                  : percentage
+                    ? `Conferma chiusura ${percentage}%`
+                    : 'Scegli una percentuale'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const PerpPane: FC<{
+  data: PerpView | null;
+  onTrade: (tradeId: string) => void;
+  adminToken: string;
+  onClosed: () => void;
+}> = ({ data, onTrade, adminToken, onClosed }) => {
+  const [closeTarget, setCloseTarget] = useState<PerpPositionView | null>(null);
   const hasPositions = (data?.open_positions.length ?? 0) > 0;
   const hasHistory = (data?.history.length ?? 0) > 0;
   const hasActivity = hasPositions || hasHistory || Number(data?.realized_pnl_usd ?? 0) !== 0 || Number(data?.unrealized_pnl_usd ?? 0) !== 0;
@@ -1058,46 +1344,65 @@ const PerpPane: FC<{ data: PerpView | null; onTrade: (tradeId: string) => void }
       {hasPositions ? (
         <div className="space-y-2">
           {data!.open_positions.map((position) => (
-            <button
-              key={position.position_id}
-              type="button"
-              onClick={() => position.open_trade_id && onTrade(position.open_trade_id)}
-              disabled={!position.open_trade_id}
-              className="block w-full rounded-xl bg-dark-800 px-4 py-3 text-left transition active:scale-[0.99] disabled:cursor-default"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-white">{position.asset} {position.side}</p>
-                  <span className="rounded-full bg-dark-700 px-2 py-1 text-xs text-accent-blue">{position.leverage}x</span>
-                  {position.smart_sl_active && (
-                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${position.smart_sl_levels_sold?.some(Boolean) ? 'bg-amber-900/40 text-amber-400' : 'bg-dark-700 text-gray-400'}`}>
-                      SSL {position.smart_sl_levels_sold?.filter(Boolean).length ?? 0}/2
-                    </span>
-                  )}
+            <div key={position.position_id} className="rounded-xl bg-dark-800 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => position.open_trade_id && onTrade(position.open_trade_id)}
+                disabled={!position.open_trade_id}
+                className="block w-full text-left disabled:cursor-default"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-white">{position.asset} {position.side}</p>
+                    <span className="rounded-full bg-dark-700 px-2 py-1 text-xs text-accent-blue">{position.leverage}x</span>
+                    {position.smart_sl_active && (
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${position.smart_sl_levels_sold?.some(Boolean) ? 'bg-amber-900/40 text-amber-400' : 'bg-dark-700 text-gray-400'}`}>
+                        SSL {position.smart_sl_levels_sold?.filter(Boolean).length ?? 0}/2
+                      </span>
+                    )}
+                  </div>
+                  <p className={Number(position.pnl_unrealized) >= 0 ? 'text-accent-green text-sm font-bold' : 'text-accent-red text-sm font-bold'}>
+                    {fmtUsd(position.pnl_unrealized)} / {position.pnl_pct ?? '+0.00'}%
+                  </p>
                 </div>
-                <p className={Number(position.pnl_unrealized) >= 0 ? 'text-accent-green text-sm font-bold' : 'text-accent-red text-sm font-bold'}>
-                  {fmtUsd(position.pnl_unrealized)} / {position.pnl_pct ?? '+0.00'}%
-                </p>
-              </div>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-500">
-                <span>Size {Number(position.size).toFixed(4)}</span>
-                <span>Entry {fmtPriceFull(position.entry_price)}</span>
-                <span>Now {fmtPriceFull(position.current_price)}</span>
-              </div>
-              <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-gray-500">
-                <span>Margin {position.margin_usd != null ? fmtUsd(position.margin_usd) : '$0.00'}</span>
-                <span>Liq {position.liquidation_price ? fmtPrice(position.liquidation_price) : '-'}</span>
-                <span>Funding {position.funding_rate ? fmtPct(Number(position.funding_rate) * 100) : '-'}</span>
-              </div>
-              <div className="mt-1.5 flex items-center justify-between text-xs text-gray-500">
-                <span>{position.open_trade_id ? 'Tocca per dettagli ›' : ''}</span>
-                <span>{new Date(position.opened_at).toLocaleString('it-IT', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-            </button>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-500">
+                  <span>Size {Number(position.size).toFixed(4)}</span>
+                  <span>Entry {fmtPriceFull(position.entry_price)}</span>
+                  <span>Now {fmtPriceFull(position.current_price)}</span>
+                </div>
+                <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-gray-500">
+                  <span>Margin {position.margin_usd != null ? fmtUsd(position.margin_usd) : '$0.00'}</span>
+                  <span>Liq {position.liquidation_price ? fmtPrice(position.liquidation_price) : '-'}</span>
+                  <span>Funding {position.funding_rate ? fmtPct(Number(position.funding_rate) * 100) : '-'}</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-xs text-gray-500">
+                  <span>{position.open_trade_id ? 'Tocca per dettagli ›' : ''}</span>
+                  <span>{new Date(position.opened_at).toLocaleString('it-IT', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </button>
+              {/* Chiusura manuale (NOTE/107): comando separato da "Chiudi tutto & metti
+                  in pausa" del banner del guardiano — questo riduce/chiude UNA sola
+                  posizione, non tocca il kill switch, non mette mai in pausa l'agente. */}
+              <button
+                type="button"
+                onClick={() => setCloseTarget(position)}
+                className="mt-2 w-full rounded-lg border border-accent-red/30 bg-accent-red/10 px-3 py-2 text-xs font-semibold text-accent-red"
+              >
+                Riduci / Chiudi
+              </button>
+            </div>
           ))}
         </div>
       ) : hasActivity && (
         <EmptyState title="Nessuna posizione aperta" detail="Le posizioni perp long/short appariranno qui." />
+      )}
+      {closeTarget && (
+        <ClosePositionModal
+          position={closeTarget}
+          adminToken={adminToken}
+          onCancel={() => setCloseTarget(null)}
+          onClosed={() => { setCloseTarget(null); onClosed(); }}
+        />
       )}
       {hasHistory ? (
         <div className="space-y-2">
@@ -2999,7 +3304,7 @@ const AgentTab: FC<AgentTabProps> = ({
         <p className="rounded-lg bg-accent-red/10 px-3 py-2 text-xs text-accent-red">{watchlistError}</p>
       )}
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
-      {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
+      {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} adminToken={adminToken} onClosed={() => void refresh()} />}
       {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} adminToken={adminToken} onCounterReset={() => void refresh()} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
       {pane === 'wallet' && <WalletPane execWallets={execWallets} spot={spot} perp={perp} />}
       {pane === 'coins' && (
