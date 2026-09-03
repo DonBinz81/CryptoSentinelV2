@@ -59,6 +59,32 @@ def _smart_sl_view_fields(pos) -> dict:
         return {"smart_sl_active": False, "smart_sl_levels_sold": None}
 
 
+def _manual_reduction_view_fields(position_id: str, aggregates: dict) -> dict:
+    """Badge fields: how much of this position the user closed by hand.
+
+    Percentage is on the ORIGINAL size — the opening trade — not on what is left
+    now: reductions compose, and a position can shrink through TP1, ratchet and
+    Smart SL without the user ever touching it. "You closed 62.5% of this
+    position" is the only reading that stays true when manual and automatic
+    exits alternate.
+
+    Returns ``manual_reduced_pct = None`` when the opening size is unknown
+    (legacy rows whose trades carry no position_id): the count stays reliable,
+    and the client can show the badge without a percentage instead of showing a
+    wrong one.
+    """
+    count, manual_size, opening_size = aggregates.get(position_id, (0, Decimal("0"), Decimal("0")))
+    if count <= 0:
+        return {"manual_close_count": 0, "manual_reduced_pct": None}
+    if opening_size <= 0:
+        return {"manual_close_count": count, "manual_reduced_pct": None}
+    pct = manual_size / opening_size * Decimal("100")
+    return {
+        "manual_close_count": count,
+        "manual_reduced_pct": f"{pct.quantize(Decimal('0.01'))}",
+    }
+
+
 class ViewService:
     """Assembles the Spot / Perp / Global dashboard payloads."""
 
@@ -167,6 +193,11 @@ class ViewService:
         trade_count_tot = await trade_repo.count_closed(user_id)
         trade_count_today = await trade_repo.count_closed(user_id, since=day_start)
         bot_active_days = await self._bot_active_days(user_id)
+        # One aggregate query for every open position, not one per position:
+        # this view is refreshed constantly by the app.
+        manual_reductions = await trade_repo.manual_reduction_by_position(
+            user_id, [p.position_id for p in positions]
+        )
         return PerpView(
             open_positions=[
                 PerpPositionView(
@@ -193,6 +224,7 @@ class ViewService:
                     slippage_usd=p.slippage_usd,
                     funding_accrued_usd=p.funding_accrued_usd,
                     **_smart_sl_view_fields(p),
+                    **_manual_reduction_view_fields(p.position_id, manual_reductions),
                     status=p.status,
                     opened_at=p.opened_at.isoformat(),
                 )

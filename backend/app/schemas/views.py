@@ -82,6 +82,14 @@ class PerpPositionView(BaseModel):
     funding_accrued_usd: Decimal | None = None
     smart_sl_active: bool = False
     smart_sl_levels_sold: list[bool] | None = None
+    #: Human interventions on this position: how many manual closes were
+    #: confirmed, and how much of the ORIGINAL size they removed. A position
+    #: also shrinks through TP1, ratchet and Smart SL, so these two must be
+    #: computed from the manual trades alone — never inferred from the size.
+    #: ``manual_reduced_pct`` is None when the opening size cannot be
+    #: determined (legacy rows without position_id): count is still reliable.
+    manual_close_count: int = 0
+    manual_reduced_pct: str | None = None
     status: str
     opened_at: str
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
@@ -166,6 +166,58 @@ class PerpTradeRepository:
             select(PerpTrade).where(PerpTrade.trade_id == trade_id)
         )
         return result.scalar_one_or_none()
+
+    async def manual_reduction_by_position(
+        self, user_id: str, position_ids: list[str]
+    ) -> dict[str, tuple[int, Decimal, Decimal]]:
+        """How much of each position was closed by HAND, per position.
+
+        Returns ``{position_id: (manual_count, manual_size, opening_size)}``.
+
+        A position shrinks for several reasons — TP1, ratchet steps, Smart SL
+        sells — so "the size went down" says nothing about whether the user ever
+        intervened. Only trades whose notes carry the ``manual_close:`` prefix
+        are human interventions, and that prefix exists precisely so the two can
+        be told apart (NOTE/107).
+
+        Deliberately NOT sourced from ``manual_close_requests``: that ledger also
+        holds refused attempts (stale_position, already_closed, execution_failed,
+        reused keys), which would count interventions that never happened. A row
+        in ``perp_trades`` exists only when the venue confirmed.
+
+        ``opening_size`` is the size of the opening trade, used as denominator by
+        the caller. It is sound today because nothing adds to a position after
+        entry — no scaling-in rows and no Smart SL rebuy, which is disarmed
+        (``perp_smart_sl_max_reentries = 0``). **If the rebuy is ever switched
+        back on the size can grow after entry, and the denominator must be
+        revisited**; the caller reports "not computable" rather than guessing.
+
+        One aggregate query for every position, not one per position: this feeds
+        the perp view, which the app refreshes constantly.
+        """
+        if not position_ids:
+            return {}
+        is_manual = PerpTrade.notes.like("manual_close:%")
+        rows = await self._session.execute(
+            select(
+                PerpTrade.position_id,
+                # case() and not SQLite's iif(): the project also ships a
+                # Postgres driver, and a dialect-specific function here would
+                # fail the day the database changes.
+                func.sum(case((is_manual, 1), else_=0)),
+                func.sum(case((is_manual, PerpTrade.size), else_=0)),
+                func.sum(case((PerpTrade.direction == "open", PerpTrade.size), else_=0)),
+            )
+            .where(
+                PerpTrade.user_id == user_id,
+                PerpTrade.position_id.in_(position_ids),
+            )
+            .group_by(PerpTrade.position_id)
+        )
+        return {
+            str(pid): (int(count or 0), Decimal(str(msize or 0)), Decimal(str(osize or 0)))
+            for pid, count, msize, osize in rows.all()
+        }
 
     async def list_for_user(
         self,
