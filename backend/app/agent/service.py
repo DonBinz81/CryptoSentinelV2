@@ -1890,7 +1890,17 @@ class AgentService:
         # Notifica chiusura trade (fire-and-forget)
         try:
             notifier = get_agent_notifier()
-            pnl_pct = (pnl / (pos.size * pos.entry_price)) * Decimal("100") if pos.size and pos.entry_price else Decimal("0")
+            # Percentuale sul MARGINE della quota chiusa, come la mostra l'app
+            # (`views._pnl_pct_str`). La formula precedente aveva due difetti che
+            # si sommavano: divideva per il NOZIONALE invece che per il margine —
+            # quindi ignorava la leva, e con leva 35 il numero usciva 35 volte
+            # piu' piccolo — e usava `pos.size`, che a questo punto e' gia'
+            # RIDOTTA, invece della quota davvero chiusa: rapportava il PnL al
+            # residuo che resta anziche' a cio' che lo ha prodotto. Notifica e
+            # storico raccontavano lo stesso trade con numeri diversi.
+            _lev = Decimal(max(int(pos.leverage or 1), 1))
+            _margin = pos.entry_price * close_size / _lev
+            pnl_pct = (pnl / _margin) * Decimal("100") if _margin > 0 else Decimal("0")
             await notifier.notify_trade_closed(
                 user_id=str(self.settings.default_user_id),
                 trade_id=close_trade.trade_id,
