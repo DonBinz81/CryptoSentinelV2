@@ -3,7 +3,8 @@
 **Data**: 2 settembre 2026
 **Chat**: A — esecuzione e live (capofila), con consultazione della chat B
 **Perimetro**: solo **Perp**, solo **dry-run**. Spot fuori perimetro per decisione di David.
-**Stato**: implementato e verificato. **Non committato, non deployato.**
+**Stato**: ✅ **in produzione (dry-run) dal 2 settembre, 23:47 UTC** — `main` = `2e0c37a`.
+Manca solo la UI, pronta sul branch della chat C.
 
 ---
 
@@ -234,8 +235,79 @@ di `.env`. Temporanei rimossi.
 | Suite backend senza regressioni, golden test invariato | ✅ verificato sulla VPS |
 | Spot invariato | ✅ nessun file spot modificato |
 | Nessun percorso live attivato | ✅ solo venue dry-run |
-| UI (chat C) | ⏳ contratto congelato, non implementata |
-| Commit, push, deploy | ⏳ **non eseguiti**, in attesa di autorizzazione di David |
+| UI (chat C) | ✅ implementata (`claude/manual-close-ui`, `918caac`, CI verde) — ⏳ merge e APK da fare |
+| Commit, push | ✅ `main` = `2e0c37a`, 4 commit |
+| **Deploy in produzione** | ✅ **2/09 23:47 UTC**, 7 file verificati per hash, 0 errori |
 
-**Il deliverable backend è completo e verificato in dry-run.** Mancano l'interfaccia e
-l'autorizzazione al deploy.
+**Il deliverable backend è completo, verificato e in produzione in dry-run.** Resta il
+merge della UI e la pubblicazione dell'APK perché la funzione sia usabile dall'app.
+
+
+---
+
+## 7. REVISIONE PRE-PUSH — un difetto introdotto da questo stesso lavoro
+
+Richiesta di David prima di autorizzare il push. Ha prodotto una correzione reale.
+
+**Il difetto.** Il coordinatore aggiornava il prezzo **dentro** il lock della posizione. Il
+price feed ha un timeout di **10 secondi per chiamata** e quel percorso ne fa due (prezzi e
+funding), più l'eventuale ripiego su un altro exchange. Con il feed lento il lock sarebbe
+rimasto preso per decine di secondi e — poiché il fast tick acquisisce i lock **in
+sequenza** — la gestione di ogni posizione in coda dietro quella si sarebbe fermata. Un lock
+introdotto per proteggere l'integrità che finisce per sospendere la sorveglianza, in un
+sistema il cui difetto più costoso è già che lo stop viene valutato solo ogni ~5 secondi
+(NOTE/59, NOTE/64).
+
+**Perché i test non l'avevano visto.** Sostituiscono `_refresh_position_prices` con una
+no-op, altrimenti farebbero chiamate di rete vere. Era esattamente quella sostituzione a
+nascondere il problema: la dipendenza da osservare era stata neutralizzata. Il test nuovo la
+sostituisce invece con una **sonda che riporta se il lock è tenuto**, e la sua validità è
+stata dimostrata sul campo — reintrodotto il difetto sulla VPS, il test **fallisce**;
+ripristinata la correzione, **passa**.
+
+**La correzione.** Il refresh avviene ora prima di acquisire il lock, come già fa
+`close_all_and_pause`; scrive e committa per conto proprio, quindi la rilettura dentro il
+lock vede comunque il valore fresco. Nessun cambiamento di comportamento visibile. Commit
+`f871ae0`.
+
+**Un sospetto verificato e risultato infondato.** Si era temuto che il fast tick rilasciasse
+il lock *prima* di committare, lasciando una finestra per il lost update che il lock doveva
+impedire. Verificato prima di segnalarlo: è falso, perché i repository committano al proprio
+interno (`PerpTradeRepository.save()` chiama `session.commit()`), quindi lo stato è
+persistito dentro il lock.
+
+**Lezione trasferibile**: quando un test sostituisce una dipendenza per renderla veloce, la
+domanda da porsi è *cosa smette di essere osservabile*. Qui la sostituzione nascondeva
+precisamente il difetto che quel codice poteva avere.
+
+## 8. DEPLOY — 2 settembre, 23:47 UTC
+
+Eseguito dalla chat A su autorizzazione di David.
+
+| passo | esito |
+|---|---|
+| Push | `main` = `2e0c37a` su origin, più il branch `claude/manual-close-perp` |
+| Controllo file sensibili | nessun `.env`, `secrets/`, `instance.yaml`, chiave o service account |
+| Backup pre-deploy | `/opt/cryptosentinelv2/backups/predeploy_manualclose_20260902_234652` |
+| Estrazione | `git cat-file blob`, mai `git show` (il `core.autocrlf` restituirebbe CRLF) |
+| Copia in produzione | 7 file backend, **verificati per hash uno a uno** |
+| Prova di import prima del riavvio | app importabile, 2 rotte `/close` registrate |
+| Riavvio | 23:47:20 UTC — servizio `active`, `health/live` 200 |
+| Tabella `manual_close_requests` | creata al primo avvio |
+| Errori post-riavvio | **0** (nessun traceback, nessun `no such table/column`, nessun rollback) |
+| Pulizia | temporanei rimossi da `/tmp` |
+
+Due accorgimenti aggiunti alla procedura, entrambi nati da incidenti passati:
+
+1. **Prova di import con l'interprete di produzione prima del riavvio.** Con 4 posizioni
+   aperte, scoprire un errore di import dopo il restart significherebbe un crash loop con le
+   posizioni non sorvegliate — è già successo il 18/08 durante il ripristino del database.
+   Costa dieci secondi.
+2. **Lavoro git in un worktree separato** (`git worktree add` in directory temporanea, poi
+   rimosso). La working copy è condivisa fra le chat e poche ore prima un checkout di
+   un'altra sessione aveva cambiato il branch sotto i piedi a questa. Il worktree elimina
+   l'interferenza: stessa repo, directory diversa.
+
+Le posizioni aperte al momento del deploy erano **4**, lette con `csv2-db` (che interroga una
+copia): il riavvio le ha lasciate non sorvegliate per circa venti secondi. È il costo noto di
+ogni deploy, dichiarato in anticipo e accettato.
