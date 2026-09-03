@@ -1228,7 +1228,18 @@ def _perp_trade_detail(
             "decision": None,
             "events": [],
             **_smart_sl_detail(position, settings),
-            "chart": None,
+            # Il grafico c'era gia': viene costruito in cima a questa funzione
+            # (normalizzato, con lo stop di visualizzazione e le candele
+            # post-chiusura) e veniva scartato solo qui, mentre la route aveva
+            # gia' pagato il costo del fetch. Le vendite Smart SL sono l'unica
+            # famiglia di chiusure che restava senza candele.
+            # Lo snapshot e' caricato per TRADE, e dal fix di NOTE/93 le vendite
+            # Smart SL ne scrivono uno proprio: il grafico e' quindi quello di
+            # QUELLA vendita, con il suo prezzo di uscita, non quello della
+            # posizione. Per i trade SSL anteriori a quel fix lo snapshot non
+            # esiste e `chart` resta None: il client deve dirlo, non mostrare un
+            # riquadro vuoto.
+            "chart": chart,
             "is_simulated": trade.trade_id.startswith("dry_") or trade.venue == "dry_run",
         }
 
