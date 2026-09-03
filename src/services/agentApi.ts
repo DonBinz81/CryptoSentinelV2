@@ -172,6 +172,10 @@ export interface PerpPositionView {
   smart_sl_levels_sold?: boolean[] | null;
   status: string;
   opened_at: string;
+  /** Chiusure manuali confermate ancora riflesse sulla posizione aperta. 0 se mai toccata a mano. */
+  manual_close_count?: number;
+  /** % della size di apertura chiusa a mano. null se manual_close_count è 0, o non calcolabile. */
+  manual_reduced_pct?: string | null;
 }
 
 export interface PerpTradeView {
