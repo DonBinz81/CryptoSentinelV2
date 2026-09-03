@@ -697,3 +697,43 @@ async def test_the_price_feed_is_never_called_while_the_lock_is_held(db) -> None
     assert held_while_refreshing == [False], (
         "the price feed was called while holding the position lock"
     )
+
+
+async def test_push_notification_percentage_is_on_the_closed_margin(db) -> None:
+    """La percentuale della notifica deve coincidere con quella dello storico.
+
+    Difetto trovato da David provando la v1.0.130: la push diceva 0,27% mentre
+    l'app mostrava 9,32% per lo stesso trade su LINK. Due cause sommate — la
+    notifica divideva per il NOZIONALE (ignorando la leva: 35x -> numero 35
+    volte piu' piccolo) e usava `pos.size` gia' ridotta invece della quota
+    chiusa. Qui: long entry 100, uscita 110, size 10, leva 10, chiusura del 50%
+    -> chiude 5, guadagna 50 su un margine di 50, cioe' **100%**. Con la vecchia
+    formula sarebbero stati 50/(5*100) = 10%.
+    """
+    import backend.app.agent.service as svc
+
+    captured: list[dict] = []
+
+    class _Notifier:
+        async def notify_trade_closed(self, **kw):
+            captured.append(kw)
+
+        def __getattr__(self, _name):  # gli altri eventi non interessano qui
+            async def _noop(*a, **k):
+                return None
+            return _noop
+
+    original = svc.get_agent_notifier
+    svc.get_agent_notifier = lambda: _Notifier()  # type: ignore[assignment]
+    try:
+        service = _service()
+        async with get_session_factory()() as session:
+            pos = _position(price=Decimal("110"), leverage=10)
+            await _persist(session, pos)
+            result = await _close(service, session, pos, pct=50)
+    finally:
+        svc.get_agent_notifier = original  # type: ignore[assignment]
+
+    assert Decimal(result["realized_pnl_usd"]) == Decimal("50")
+    assert captured, "la notifica di chiusura non e' stata inviata"
+    assert Decimal(str(captured[0]["pnl_pct"])) == Decimal("100")
