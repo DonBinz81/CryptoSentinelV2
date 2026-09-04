@@ -205,8 +205,15 @@ async def trade_detail(
     settings: SettingsDep,
     _: ReadAccessDep,
     enrich_chart: bool = Query(False),
+    interval: str | None = Query(None, description="Risoluzione candele scelta dall'utente"),
 ) -> dict:
     """Return full detail for one spot/perp trade or its open position."""
+
+    # Un valore non ammesso viene ignorato, non rifiutato: un grafico che si
+    # apre alla risoluzione automatica e' meglio di un 422 su una schermata di
+    # sola lettura.
+    if interval is not None and interval not in SELECTABLE_INTERVALS:
+        interval = None
 
     from backend.app.api.routes.mobile_agent import _settings_from_runtime
 
@@ -223,22 +230,22 @@ async def trade_detail(
         position = await _find_trade_position(session, SpotPosition, spot)
         decision = (await session.execute(select(AgentDecision).where(AgentDecision.trade_id == trade_id))).scalar_one_or_none()
         snapshot = await _load_chart_snapshot(chart_repo, user_id, trade_id, position)
-        live = await _live_chart_if_open(snapshot, position, "spot", settings) if enrich_chart else None
+        live = await _live_chart_if_open(snapshot, position, "spot", settings, interval) if enrich_chart else None
         chart_payload = json.loads(snapshot.payload) if snapshot else None
         post_close: list[dict] = []
         if enrich_chart and live is None and snapshot is not None:
-            chart_payload = await _enrich_trade_chart_context(chart_payload, spot.asset, "spot", "spot", "long", settings, pre_open_count)
+            chart_payload = await _enrich_trade_chart_context(chart_payload, spot.asset, "spot", "spot", "long", settings, pre_open_count, interval)
             post_close = await _fetch_post_close_candles(chart_payload, spot.asset, "spot", post_close_count)
         return _spot_trade_detail(spot, position, decision, settings, snapshot, live, post_close, chart_payload)
     position = await _find_trade_position(session, PerpPosition, perp)
     decision = (await session.execute(select(AgentDecision).where(AgentDecision.trade_id == trade_id))).scalar_one_or_none()
     snapshot = await _load_chart_snapshot(chart_repo, user_id, trade_id, position)
-    live = await _live_chart_if_open(snapshot, position, "perp", settings) if enrich_chart else None
+    live = await _live_chart_if_open(snapshot, position, "perp", settings, interval) if enrich_chart else None
     chart_payload = json.loads(snapshot.payload) if snapshot else None
     post_close = []
     if enrich_chart and live is None and snapshot is not None:
         side = position.side if position is not None else perp.side
-        chart_payload = await _enrich_trade_chart_context(chart_payload, perp.asset, "futures", "perp", side, settings, pre_open_count)
+        chart_payload = await _enrich_trade_chart_context(chart_payload, perp.asset, "futures", "perp", side, settings, pre_open_count, interval)
         post_close = await _fetch_post_close_candles(chart_payload, perp.asset, "futures", post_close_count)
     # Chiusure manuali della posizione, per i marker: una query sola, e solo se
     # un grafico ci sara' davvero (senza snapshot non c'e' nulla da marcare).
@@ -286,7 +293,7 @@ async def _load_chart_snapshot(
     return snapshot
 
 
-async def _live_chart_if_open(snapshot, position, market: str, settings) -> dict | None:
+async def _live_chart_if_open(snapshot, position, market: str, settings, interval: str | None = None) -> dict | None:
     """Per una posizione ancora aperta costruisce un grafico dal vivo.
 
     Lo snapshot parziale (TP1) viene ignorato: la posizione è ancora aperta
@@ -297,7 +304,7 @@ async def _live_chart_if_open(snapshot, position, market: str, settings) -> dict
     started = datetime.now(UTC)
     try:
         return await asyncio.wait_for(
-            _build_live_chart(position, market, settings=settings, timeout_seconds=TRADE_DETAIL_FEED_TIMEOUT_SECONDS),
+            _build_live_chart(position, market, settings=settings, timeout_seconds=TRADE_DETAIL_FEED_TIMEOUT_SECONDS, interval_override=interval),
             timeout=TRADE_DETAIL_CHART_TIMEOUT_SECONDS,
         )
     except Exception as exc:
@@ -327,6 +334,48 @@ TRADE_DETAIL_CHART_TIMEOUT_SECONDS = 12.0
 # l'attesa percepibile: e' un dettaglio aperto su richiesta, non un ciclo caldo.
 TRADE_DETAIL_FEED_TIMEOUT_SECONDS = 5.0
 TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS = 180
+
+
+# Intervalli che l'utente puo' scegliere per il grafico, dal piu' fine.
+# Non tutti reggono su ogni trade: vedi _intervals_available.
+SELECTABLE_INTERVALS: tuple[str, ...] = ("1m", "3m", "5m", "15m", "1h", "4h", "1d")
+
+
+def _chart_duration_minutes(chart: dict) -> int:
+    """Minuti fra apertura e chiusura del trade, dal payload del grafico."""
+    aperto = _parse_chart_datetime(chart.get("opened_at"))
+    chiuso = _parse_chart_datetime(chart.get("closed_at")) or datetime.now(UTC)
+    if aperto is None:
+        return 60
+    return max(1, int((chiuso - aperto).total_seconds() / 60))
+
+
+def _intervals_available(duration_min: int, lookback: int = 20) -> list[str]:
+    """Intervals whose full window fits within the per-request candle cap.
+
+    The cap is not a constant: `_build_live_chart` computes
+    `min(260, max(20, (span / per_min) * 1.6))`, so a finer interval both needs
+    MORE candles and gets a different allowance. The same expression is used
+    here on purpose -- duplicating the rule in the app would let the selector
+    keep offering an interval the day that formula changes, and the client
+    would show a partial window as if it were the whole trade.
+
+    Measured 05/09 (chat D, on real trades): time is NOT a second constraint --
+    128 and 260 candles both cost ~0.28 s against a 5 s per-call timeout, since
+    the cost is call latency, not payload. So "sustainable" is decided on the
+    candle count alone.
+    """
+    disponibili: list[str] = []
+    for nome in SELECTABLE_INTERVALS:
+        per_min = _INTERVAL_MINUTES.get(nome)
+        if not per_min:
+            continue
+        span_min = duration_min + lookback * per_min
+        servono = span_min / per_min
+        limite = min(260, max(20, servono * 1.6))
+        if limite >= servono:
+            disponibili.append(nome)
+    return disponibili
 
 
 async def _fetch_post_close_candles(chart: dict, asset: str, feed_market: str, count: int = POST_CLOSE_CANDLES) -> list[dict]:
@@ -567,6 +616,7 @@ async def _enrich_trade_chart_context(
     side: str | None,
     settings,
     pre_open_candles: int | None = None,
+    interval_override: str | None = None,
 ) -> dict | None:
     """Add pre-open candles and infer the structural SL reference for old snapshots.
 
@@ -585,13 +635,19 @@ async def _enrich_trade_chart_context(
     if opened_at is None:
         return _ensure_stop_reference(normalized_chart, market, side, _structural_stop_lookback(settings, market))
     interval = str(normalized_chart.get("interval", "5m"))
+    # Scelta dell'utente: cambia la RISOLUZIONE, non il lookback dello stop
+    # strutturale calcolato sotto (NOTE/57). Le candele dello snapshot vengono
+    # scartate, perche' sono all'intervallo vecchio: si rifa' il fetch.
+    rifai_da_zero = bool(interval_override and interval_override != interval)
+    if interval_override and interval_override in _INTERVAL_MINUTES:
+        interval = interval_override
     interval_min = _INTERVAL_MINUTES.get(interval, 5)
     lookback = _structural_stop_lookback(settings, market)
     pre_open = max(1, int(pre_open_candles if pre_open_candles is not None else lookback))
     target_start = opened_at - timedelta(minutes=interval_min * pre_open)
-    existing = _normalize_chart_candles(normalized_chart.get("candles", []))
+    existing = [] if rifai_da_zero else _normalize_chart_candles(normalized_chart.get("candles", []))
     has_enough_context = bool(existing and existing[0][0] <= target_start + timedelta(minutes=interval_min))
-    if normalized_chart.get("stop_reference") and has_enough_context:
+    if not rifai_da_zero and normalized_chart.get("stop_reference") and has_enough_context:
         return normalized_chart
 
     try:
@@ -618,10 +674,32 @@ async def _enrich_trade_chart_context(
         ]
         by_ts = {candle["t"]: candle for candle in fetched_candles}
         by_ts.update({candle["t"]: candle for _, candle in existing})
-        merged = _normalize_closed_chart({**normalized_chart, "candles": list(by_ts.values())}) or normalized_chart
+        merged = _normalize_closed_chart(
+            {**normalized_chart, "interval": interval, "candles": list(by_ts.values())}
+        ) or normalized_chart
     except Exception:
         merged = normalized_chart
-    enriched = _ensure_stop_reference(merged, market, side, lookback)
+    # 🔴 Il riferimento dello stop NON si ricava dalle candele nuove quando la
+    # risoluzione l'ha scelta l'utente.
+    #
+    # `_infer_stop_reference_from_chart` prende le ultime `lookback` candele
+    # prima dell'apertura: a 5m sono 100 minuti di storia, a 1m ne sono 20.
+    # Il massimo trovato sarebbe diverso, e con esso la riga SL mostrata —
+    # cioe' il livello si sposterebbe a seconda di COME si guarda il grafico.
+    # Verificato leggendo quella funzione, non dedotto (NOTE/57).
+    #
+    # Con un intervallo imposto si tiene quello che il grafico aveva gia': se
+    # non c'era, resta assente. Meglio nessun riferimento che uno che cambia
+    # con lo zoom.
+    if rifai_da_zero:
+        riferimento_originale = normalized_chart.get("stop_reference")
+        enriched = (
+            {**merged, "stop_reference": riferimento_originale}
+            if riferimento_originale
+            else {k: v for k, v in merged.items() if k != "stop_reference"}
+        )
+    else:
+        enriched = _ensure_stop_reference(merged, market, side, lookback)
     return _apply_display_stop_to_chart(enriched, None, settings, market, side)
 
 
@@ -649,7 +727,14 @@ def _normalize_closed_chart(chart: dict | None) -> dict | None:
     return {**chart, "candles": pre_close or candles}
 
 
-async def _build_live_chart(position, market: str, *, settings=None, timeout_seconds: float = TRADE_DETAIL_FEED_TIMEOUT_SECONDS) -> dict | None:
+async def _build_live_chart(
+    position,
+    market: str,
+    *,
+    settings=None,
+    timeout_seconds: float = TRADE_DETAIL_FEED_TIMEOUT_SECONDS,
+    interval_override: str | None = None,
+) -> dict | None:
     """Candele OHLC dall'apertura della posizione fino ad ora, con stesso payload
     degli snapshot congelati ma marcato live (closed_at non e' una chiusura reale).
 
@@ -665,6 +750,13 @@ async def _build_live_chart(position, market: str, *, settings=None, timeout_sec
         now = datetime.now(UTC)
         duration_min = max(1, int((now - opened_at).total_seconds() / 60))
         interval, per_min = _auto_chart_interval(duration_min)
+        # Scelta dell'utente: scavalca solo la RISOLUZIONE della vista. Il
+        # lookback dello stop strutturale, poche righe sotto, resta quello dei
+        # settings — sono due cose che sembrano una sola e non lo sono (NOTE/57):
+        # legarle sposterebbe il RIFERIMENTO DELLO STOP, non l'inquadratura.
+        if interval_override and interval_override in _INTERVAL_MINUTES:
+            interval = interval_override
+            per_min = _INTERVAL_MINUTES[interval_override]
         stop_reference_time = getattr(position, "stop_reference_time", None)
         if stop_reference_time and stop_reference_time.tzinfo is None:
             stop_reference_time = stop_reference_time.replace(tzinfo=UTC)
@@ -1366,9 +1458,15 @@ def _perp_trade_detail(
     # Chiusure manuali da marcare: lista sempre presente quando il grafico c'e',
     # cosi' il client non deve distinguere "assente" da "vuota".
     if chart is not None:
+        # Quali risoluzioni reggono per QUESTO trade: il selettore nell'app
+        # disabilita le altre invece di mostrare una finestra parziale come se
+        # fosse tutta la storia. La regola sta qui e non nel client, perche' il
+        # tetto e' del backend e puo' cambiare.
+        durata_min = _chart_duration_minutes(chart)
         chart = {
             **chart,
             "manual_closes": _manual_close_markers(chart, manual_trades or [], opening_size),
+            "intervals_available": _intervals_available(durata_min),
         }
     is_close = trade.trade_id.startswith("cls_")
     is_ssl = trade.trade_id.startswith("ssl_")

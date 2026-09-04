@@ -416,6 +416,10 @@ export interface TradeChart {
   post_close_candles?: TradeChartCandle[];
   /** Sempre presente (anche vuota) quando il grafico c'e'. */
   manual_closes?: ManualCloseMarker[];
+  /** Risoluzioni che reggono per QUESTO trade: le altre vanno disabilitate,
+   *  perche' mostrerebbero una finestra parziale come se fosse tutta la storia.
+   *  La regola sta nel backend: il tetto e' suo e puo' cambiare. */
+  intervals_available?: string[];
 }
 
 export interface TradeDetail {
@@ -737,9 +741,12 @@ export function fetchAssetBreakdown(): Promise<AssetBreakdownResponse> {
 
 export function fetchTradeDetail(
   tradeId: string,
-  options: { enrichChart?: boolean; timeoutMs?: number } = {},
+  options: { enrichChart?: boolean; timeoutMs?: number; interval?: string } = {},
 ): Promise<TradeDetail> {
-  const params = options.enrichChart ? '?enrich_chart=true' : '';
+  const q = new URLSearchParams();
+  if (options.enrichChart) q.set('enrich_chart', 'true');
+  if (options.interval) q.set('interval', options.interval);
+  const params = q.toString() ? `?${q}` : '';
   return request<TradeDetail>(
     `/api/v1/views/trade-detail/${encodeURIComponent(tradeId)}${params}`,
     { timeoutMs: options.timeoutMs },
