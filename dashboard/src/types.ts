@@ -80,6 +80,8 @@ export type SpotView = {
   history: SpotTrade[];
   realized_pnl_usd: string;
   unrealized_pnl_usd: string;
+  volume_total_usd?: string;
+  volume_today_usd?: string;
   win_rate_pct: number;
   trade_count: number;
   trade_count_today: number;
@@ -135,6 +137,8 @@ export type PerpView = {
   history: PerpTrade[];
   realized_pnl_usd: string;
   unrealized_pnl_usd: string;
+  volume_total_usd?: string;
+  volume_today_usd?: string;
   win_rate_pct: number;
   trade_count: number;
   trade_count_today: number;
@@ -148,6 +152,8 @@ export type GlobalView = {
   pnl_total_pct: number;
   realized_pnl_usd: string;
   unrealized_pnl_usd: string;
+  volume_total_usd?: string;
+  volume_today_usd?: string;
   drawdown_pct: string;
   max_drawdown_pct: string;
   sharpe_status?: string;

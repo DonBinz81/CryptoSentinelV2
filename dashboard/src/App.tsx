@@ -910,6 +910,8 @@ function GlobalPanel({ global, equity, expanded = false }: { global: LoadState<G
             <Metric label="Exposure Spot" value={money(data.spot_exposure_usd ?? '0')} />
             <Metric label="Exposure Perp" value={money(data.perp_exposure_usd ?? '0')} />
             <Metric label="Fee pagate" value={money(data.total_fees_usd ?? '0')} tone="warn" />
+            <Metric label="Vol Tot" value={money(data.volume_total_usd ?? '0')} />
+            <Metric label="Vol Day" value={money(data.volume_today_usd ?? '0')} />
             {expanded && (
               <Metric
                 label="Sharpe"
@@ -917,6 +919,7 @@ function GlobalPanel({ global, equity, expanded = false }: { global: LoadState<G
               />
             )}
           </div>
+          <p className="hint">Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.</p>
           {(equity.data?.items.length ?? 0) < 2 ? (
             <Empty title="No PnL history" detail="Global tracking is ready and waiting for confirmed activity." />
           ) : (
@@ -943,6 +946,8 @@ function SpotPanel({ spot, session, expanded = false }: { spot: LoadState<SpotVi
             <Metric label="Trade Tot" value={String(data.trade_count)} />
             <Metric label="Trade Day" value={String(data.trade_count_today ?? 0)} />
             <Metric label="Bot Day" value={String(data.bot_active_days ?? 0)} />
+            <Metric label="Vol Tot" value={money(data.volume_total_usd ?? '0')} />
+            <Metric label="Vol Day" value={money(data.volume_today_usd ?? '0')} />
           </div>
           {data.open_positions.length === 0 ? (
             <Empty title="No open Spot positions" detail="The agent has no active Spot exposure." />
@@ -1003,7 +1008,10 @@ function PerpPanel({ perp, session, expanded = false }: { perp: LoadState<PerpVi
             <Metric label="Trade Tot" value={String(data.trade_count)} />
             <Metric label="Trade Day" value={String(data.trade_count_today ?? 0)} />
             <Metric label="Bot Day" value={String(data.bot_active_days ?? 0)} />
+            <Metric label="Vol Tot" value={money(data.volume_total_usd ?? '0')} />
+            <Metric label="Vol Day" value={money(data.volume_today_usd ?? '0')} />
           </div>
+          <p className="hint">Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.</p>
           {data.open_positions.length === 0 ? (
             <Empty title="No open Perp positions" detail="The agent has no active Perp exposure." />
           ) : (

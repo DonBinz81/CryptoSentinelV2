@@ -141,6 +141,63 @@ class SpotTradeRepository:
         val = result.scalar_one_or_none()
         return Decimal(str(val)) if val is not None else Decimal("0")
 
+    async def sum_volume(
+        self, user_id: str, *, since: datetime | None = None
+    ) -> tuple[Decimal, Decimal]:
+        """Traded volume in quote currency: (all time, since `since`).
+
+        Volume is the TOTAL traded, every leg included -- opens, closes, partial
+        closes, Smart SL legs, rebuys and scale-ins. It is the exchange
+        convention and the one the upstream V1 uses, so the two systems stay
+        comparable.
+
+        One query, not two: the total and the windowed share are computed in the
+        same select. This feeds a view the app refreshes constantly.
+
+        ⚠️ NO filter on `status`, and this is the whole point of the method.
+
+        An earlier version filtered `status == "confirmed"` on the assumption
+        that every trade is created that way. It is false, and it silently
+        halved the figure: opening legs are written with
+        `ExecutionStatus.PREPARED` (`agent/service.py`, both markets) and
+        nothing ever promotes them. Only closes, rebuys and scale-ins are born
+        `confirmed`. Measured on production: perp showed 185'530 $ out of
+        370'901 $ real, spot 5'916 $ out of 11'348 $ -- plausible, and half.
+
+        A `prepared` row is NOT an order that never reached the market: the row
+        is written only after `entry_execution.confirmed`, otherwise the caller
+        returns `skipped` without writing anything. On production every one of
+        the 252 `prepared` openings has its matching row in `perp_positions`.
+        `prepared` is a label left behind, not a marker of "not executed".
+
+        No IS NOT NULL guard on the amount either: the column is
+        `nullable=False`, so such a filter could never exclude a row -- and
+        would wrongly suggest to the next reader that rows without an amount
+        exist. The Decimal("0") fallback below is for a different case: SUM
+        over zero rows is NULL.
+        """
+        in_window = (
+            SpotTrade.timestamp_utc >= since if since is not None else None
+        )
+        # case() and not SQLite's iif(): the project also ships a Postgres
+        # driver, and a dialect-specific function would fail the day the
+        # database changes.
+        windowed = (
+            func.sum(case((in_window, SpotTrade.amount_quote), else_=0))
+            if in_window is not None
+            else func.sum(SpotTrade.amount_quote)
+        )
+        result = await self._session.execute(
+            select(func.sum(SpotTrade.amount_quote), windowed).where(
+                SpotTrade.user_id == user_id,
+            )
+        )
+        total, window = result.one()
+        return (
+            Decimal(str(total)) if total is not None else Decimal("0"),
+            Decimal(str(window)) if window is not None else Decimal("0"),
+        )
+
     async def last_timestamp_for_asset(self, user_id: str, asset: str) -> datetime | None:
         """Timestamp del trade spot piu' recente sull'asset (per cooldown)."""
         result = await self._session.execute(
@@ -250,6 +307,39 @@ class PerpTradeRepository:
             str(pid): (int(count or 0), Decimal(str(msize or 0)), Decimal(str(osize or 0)))
             for pid, count, msize, osize in rows.all()
         }
+
+    async def sum_volume(
+        self, user_id: str, *, since: datetime | None = None
+    ) -> tuple[Decimal, Decimal]:
+        """Traded notional in USD: (all time, since `since`).
+
+        ⚠️ On perp this is NOTIONAL (size x price), not capital committed: with
+        leverage a small account produces a large figure. That is correct and it
+        is the exchange convention, but the UI must say so or it reads as a bug.
+
+        Same shape as the spot twin: one query, EVERY leg counted, and no
+        filter on `status` -- see that docstring for why filtering on it hid
+        half the volume.
+        """
+        notional = PerpTrade.size * PerpTrade.price
+        in_window = (
+            PerpTrade.timestamp_utc >= since if since is not None else None
+        )
+        windowed = (
+            func.sum(case((in_window, notional), else_=0))
+            if in_window is not None
+            else func.sum(notional)
+        )
+        result = await self._session.execute(
+            select(func.sum(notional), windowed).where(
+                PerpTrade.user_id == user_id,
+            )
+        )
+        total, window = result.one()
+        return (
+            Decimal(str(total)) if total is not None else Decimal("0"),
+            Decimal(str(window)) if window is not None else Decimal("0"),
+        )
 
     async def list_for_user(
         self,

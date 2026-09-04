@@ -55,6 +55,10 @@ class SpotView(BaseModel):
     bot_active_days: int = 0
     # Regime mercato: True se i nuovi ingressi spot sono bloccati (BTC in downtrend forte).
     market_risk_off: bool = False
+    # Volume SCAMBIATO, tutte le gambe incluse (aperture, chiusure, parziali,
+    # Smart SL, rebuy). Sul perp e' il NOZIONALE, non il capitale impegnato.
+    volume_total_usd: Decimal = Decimal("0")
+    volume_today_usd: Decimal = Decimal("0")
 
 
 class PerpPositionView(BaseModel):
@@ -131,6 +135,10 @@ class PerpView(BaseModel):
     trade_count: int
     trade_count_today: int = 0
     bot_active_days: int = 0
+    # Volume SCAMBIATO, tutte le gambe incluse (aperture, chiusure, parziali,
+    # Smart SL, rebuy). Sul perp e' il NOZIONALE, non il capitale impegnato.
+    volume_total_usd: Decimal = Decimal("0")
+    volume_today_usd: Decimal = Decimal("0")
 
 
 class ClaudeUsageView(BaseModel):
@@ -182,6 +190,10 @@ class GlobalView(BaseModel):
     exposure_pct: Decimal
     spot_exposure_usd: Decimal = Decimal("0")
     perp_exposure_usd: Decimal = Decimal("0")
+    # Volume SCAMBIATO spot + perp, tutte le gambe incluse. Sul perp e' il
+    # NOZIONALE, non il capitale impegnato.
+    volume_total_usd: Decimal = Decimal("0")
+    volume_today_usd: Decimal = Decimal("0")
     total_fees_usd: Decimal = Decimal("0")
     daily_pnl_usd: Decimal
     daily_pnl_net_pct: float = 0.0
