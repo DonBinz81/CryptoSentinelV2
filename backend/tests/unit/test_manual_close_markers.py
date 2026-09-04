@@ -166,3 +166,51 @@ def test_non_manual_rows_have_no_percentage() -> None:
 def test_percentage_is_none_when_the_opening_size_is_unknown() -> None:
     assert _manual_close_pct(_manual(T0), {}) is None
     assert _manual_close_pct(_manual(T0), {"pos_x": Decimal("0")}) is None
+
+
+# ── il difetto trovato sui dati di produzione (chat C, 4 settembre) ─────────
+
+
+def test_close_inside_the_last_candle_is_kept() -> None:
+    """Il marker che conta di piu' cadeva sempre fuori.
+
+    Un timestamp di candela e' il suo istante di APERTURA. Usando l'apertura
+    dell'ultima candela come limite superiore, ogni evento avvenuto DENTRO
+    quella candela veniva scartato — e la chiusura di una posizione sta li' per
+    costruzione, perche' il grafico di un trade chiuso viene tagliato proprio
+    sulla candela della chiusura. Risultato in produzione: 4 trade su 4 senza il
+    marker della chiusura, mentre le riduzioni precedenti passavano.
+
+    Caso reale: BCH, ultima candela 22:35:00, chiusura 22:35:49.
+    """
+    ultima_apertura = T0 + timedelta(minutes=20)
+    chiusura = ultima_apertura + timedelta(seconds=49)
+    markers = _manual_close_markers(_chart(), [_manual(chiusura)], Decimal("10"))
+    assert len(markers) == 1, "il marker della chiusura non deve sparire"
+
+
+def test_events_at_any_second_inside_a_candle_are_kept() -> None:
+    """I test precedenti usavano orari allineati alle candele e non potevano
+    vedere il difetto: era la finzione del test a nasconderlo. Qui gli orari
+    cadono a caso dentro l'intervallo, come nella realta'."""
+    base = T0 + timedelta(minutes=20)
+    for secondi in (1, 30, 59, 299):
+        markers = _manual_close_markers(
+            _chart(), [_manual(base + timedelta(seconds=secondi))], Decimal("10")
+        )
+        assert len(markers) == 1, f"scartato un evento a +{secondi}s dall'apertura"
+
+
+def test_event_past_the_end_of_the_last_candle_is_still_dropped() -> None:
+    """Il limite si estende di UN intervallo, non oltre: la zona post-chiusura
+    resta esclusa."""
+    oltre = T0 + timedelta(minutes=20) + timedelta(minutes=5, seconds=1)
+    assert _manual_close_markers(_chart(), [_manual(oltre)], Decimal("10")) == []
+
+
+def test_the_interval_declared_by_the_chart_is_honoured() -> None:
+    """Su un grafico a 1h la finestra si estende di un'ora, non di cinque minuti."""
+    chart = _chart()
+    chart["interval"] = "1h"
+    dentro = T0 + timedelta(minutes=20) + timedelta(minutes=45)
+    assert len(_manual_close_markers(chart, [_manual(dentro)], Decimal("10"))) == 1
