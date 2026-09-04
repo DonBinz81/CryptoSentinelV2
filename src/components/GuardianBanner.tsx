@@ -1,5 +1,10 @@
 import { useEffect, useState, type FC } from 'react';
-import type { GuardianState, GuardianStatus } from '../services/agentApi';
+import {
+  setGuardianOverride,
+  type GuardianOverrideChoice,
+  type GuardianState,
+  type GuardianStatus,
+} from '../services/agentApi';
 
 // Banner del guardiano di regime. Deve essere impossibile da non vedere quando il bot
 // si sta proteggendo, e quasi invisibile quando va tutto bene: in VERDE resta un chip.
@@ -37,6 +42,131 @@ const TONI = {
     sottotitolo: '',
   },
 } as const;
+
+const NOME_LIVELLO: Record<GuardianState, string> = { green: 'VERDE', yellow: 'GIALLO', red: 'ROSSO' };
+
+/** Quanto protegge ciascun livello: decide se una scelta ABBASSA la protezione. */
+const PROTEZIONE: Record<GuardianState, number> = { green: 0, yellow: 1, red: 2 };
+
+/**
+ * Comandi admin per forzare il regime, o restituirlo all'automatico.
+ *
+ * "AUTO" non e' "verde": rimuove l'override e fa tornare l'effettivo al livello
+ * automatico CORRENTE, che nel frattempo puo' essere cambiato. Per questo la
+ * conferma non guarda quale pulsante e' stato premuto ma il livello che ne
+ * RISULTA: premere AUTO con override rosso e automatico verde abbassa la
+ * protezione quanto scegliere "verde" a mano, e va confermato uguale.
+ */
+const ControlliOverride: FC<{
+  guardian: GuardianStatus;
+  adminToken: string;
+  onChanged: () => void;
+  /** Sostituita solo dal prototipo: la vera fallisce senza backend configurato. */
+  overrideFn?: typeof setGuardianOverride;
+}> = ({ guardian, adminToken, onChanged, overrideFn = setGuardianOverride }) => {
+  const [chiesta, setChiesta] = useState<GuardianOverrideChoice | null>(null);
+  const [inCorso, setInCorso] = useState(false);
+  const [errore, setErrore] = useState('');
+
+  const automatico = guardian.automatic_level ?? guardian.state;
+  const effettivo = guardian.effective_level ?? guardian.state;
+  const override = guardian.manual_override?.level ?? null;
+
+  const risultatoDi = (x: GuardianOverrideChoice): GuardianState => (x === 'auto' ? automatico : x);
+  const abbassa = (x: GuardianOverrideChoice) => PROTEZIONE[risultatoDi(x)] < PROTEZIONE[effettivo];
+
+  const invia = async (x: GuardianOverrideChoice) => {
+    setInCorso(true);
+    setErrore('');
+    try {
+      await overrideFn(x, x === 'auto' ? 'ritorno automatico da app' : `forzato ${x} da app`, adminToken);
+      setChiesta(null);
+      onChanged();
+    } catch (e) {
+      setErrore(e instanceof Error ? e.message : 'Comando non riuscito.');
+    } finally {
+      setInCorso(false);
+    }
+  };
+
+  const scegli = (x: GuardianOverrideChoice) => {
+    if (abbassa(x)) setChiesta(x);
+    else void invia(x);
+  };
+
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] uppercase tracking-wide text-gray-500">Controllo admin</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {(['auto', 'green', 'yellow', 'red'] as const).map((x) => {
+          const attivo = x === 'auto' ? override === null : override === x;
+          return (
+            <button
+              key={x}
+              type="button"
+              onClick={() => scegli(x)}
+              disabled={!adminToken || inCorso}
+              className={`rounded-lg px-2 py-2 text-xs font-bold disabled:opacity-40 ${
+                attivo ? 'bg-dark-600 text-white ring-1 ring-white/20' : 'bg-dark-800 text-gray-400'
+              }`}
+            >
+              {x === 'auto' ? 'AUTO' : NOME_LIVELLO[x]}
+            </button>
+          );
+        })}
+      </div>
+      {errore && <p className="mt-1.5 text-[11px] text-accent-red">{errore}</p>}
+
+      {chiesta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-5">
+          <div className="w-full max-w-sm space-y-3 rounded-2xl border border-dark-600 bg-dark-800 p-4">
+            <p className="text-sm font-bold text-white">
+              Forzare la Protezione PERP da {NOME_LIVELLO[effettivo]} a {NOME_LIVELLO[risultatoDi(chiesta)]}?
+            </p>
+            <p className="text-xs leading-5 text-gray-300">
+              Le nuove entrate PERP seguiranno immediatamente il regime {NOME_LIVELLO[risultatoDi(chiesta)]}
+              {chiesta === 'auto'
+                ? ', tornando a seguire l’automatico.'
+                : ' finché non torni su AUTO o scegli un altro livello.'}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setChiesta(null)}
+                disabled={inCorso}
+                className="flex-1 rounded-lg bg-dark-700 px-3 py-2.5 text-sm font-semibold text-gray-300 disabled:opacity-40"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={() => void invia(chiesta)}
+                disabled={inCorso}
+                className="flex-1 rounded-lg bg-accent-red px-3 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+              >
+                {inCorso ? 'Attendi…' : 'Conferma'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Riquadro che tiene a vista l'automatico mentre l'override lo sta scavalcando. */
+const RigaAutomatico: FC<{ automatico: GuardianState }> = ({ automatico }) => (
+  <div className="rounded-lg border border-dark-600 bg-dark-900/60 px-3 py-2 text-xs">
+    <div className="flex items-center justify-between">
+      <span className="text-gray-400">Automatico (in corso)</span>
+      <span className="font-semibold text-white">{NOME_LIVELLO[automatico]}</span>
+    </div>
+    <p className="mt-1 text-[11px] text-gray-500">
+      Premendo AUTO torni subito a {NOME_LIVELLO[automatico]}. Il motore continua a contare gli stop e ad
+      aggiornare i timer.
+    </p>
+  </div>
+);
 
 /** "3 ore fa", "22 minuti fa": piu' leggibile di un orario quando conta il "quanto e' passato". */
 const quantoFa = (iso: string | null): string | null => {
@@ -87,7 +217,10 @@ const CountdownRiattivazione: FC<{ guardian: GuardianStatus }> = ({ guardian }) 
     return () => window.clearInterval(timer);
   }, []);
 
-  const prossimo = prossimoStato(guardian.state);
+  // Il countdown racconta la macchina AUTOMATICA, che continua a girare anche
+  // sotto override: `state` mappa sull'effettivo, quindi con un override verde
+  // sparirebbe proprio mentre l'automatico sta ancora scendendo da ROSSO.
+  const prossimo = prossimoStato(guardian.automatic_level ?? guardian.state);
   if (!prossimo) return null;
   const ancoraCandidati = [guardian.last_stop_at, guardian.changed_at]
     .map((iso) => (iso ? new Date(iso).getTime() : NaN))
@@ -101,7 +234,8 @@ const CountdownRiattivazione: FC<{ guardian: GuardianStatus }> = ({ guardian }) 
     <div className="rounded-lg border border-dark-700 bg-dark-900/40 px-3 py-2">
       <p className="text-xs leading-5 text-gray-300">
         {resto > 0 ? (
-          <>Prossimo passo: <b className="text-white">{NOME_STATO[prossimo]}</b> tra{' '}
+          <>{guardian.manual_override ? 'Prossima transizione automatica' : 'Prossimo passo'}:{' '}
+            <b className="text-white">{NOME_STATO[prossimo]}</b> tra{' '}
             <b className="text-white">{formattaResto(resto)}</b></>
         ) : (
           <>In attesa che il ciclo registri il passaggio a <b className="text-white">{NOME_STATO[prossimo]}</b>…</>
@@ -137,18 +271,36 @@ export const GuardianBanner: FC<{
   busy: boolean;
   onPause: () => void;
   onCloseAll: () => void;
-}> = ({ guardian, killSwitch, adminToken, busy, onPause, onCloseAll }) => {
+  /** Ricarica lo stato dopo un cambio di override. */
+  onGuardianChanged?: () => void;
+  /** Solo per il prototipo: vedi ControlliOverride. */
+  overrideFn?: typeof setGuardianOverride;
+}> = ({ guardian, killSwitch, adminToken, busy, onPause, onCloseAll, onGuardianChanged, overrideFn }) => {
   if (!guardian || !guardian.enabled) return null;
 
   const tono = TONI[guardian.state] ?? TONI.green;
   const attivo = killSwitch === 'running';
+  const automatico = guardian.automatic_level ?? guardian.state;
+  const manuale = guardian.manual_override?.level != null;
 
   // VERDE: solo un chip. Nei giorni normali il guardiano non deve fare rumore.
-  if (guardian.state === 'green') {
+  //
+  // ⚠️ MA non quando il verde e' FORZATO: li' il chip nasconderebbe proprio la cosa
+  // da non dimenticare, cioe' che l'automatico e' su un livello piu' protettivo e
+  // che tornando in AUTO ci si ricade. Il banner resta esteso finche' c'e' override.
+  if (guardian.state === 'green' && !manuale) {
     return (
-      <div className="flex items-center gap-2 px-1">
-        <span className={`h-1.5 w-1.5 rounded-full ${tono.puntino}`} />
-        <span className="text-[11px] text-gray-500">Regime normale (perp)</span>
+      <div className="space-y-2 px-1">
+        <div className="flex items-center gap-2">
+          <span className={`h-1.5 w-1.5 rounded-full ${tono.puntino}`} />
+          <span className="text-[11px] text-gray-500">Regime normale (perp)</span>
+        </div>
+        {/* I comandi restano raggiungibili anche in verde — servono a provare i
+            livelli senza aspettare che il mercato li faccia scattare — ma sotto
+            il chip, non dentro: in giornata normale il guardiano resta quieto. */}
+        {adminToken && onGuardianChanged && (
+          <ControlliOverride guardian={guardian} adminToken={adminToken} onChanged={onGuardianChanged} overrideFn={overrideFn} />
+        )}
       </div>
     );
   }
@@ -178,7 +330,15 @@ export const GuardianBanner: FC<{
               li' le entrate siano bloccate. Non lo sono mai. */}
           <p className="mt-1 text-[11px] text-gray-500">Lo spot non e&apos; toccato: entra normalmente.</p>
         </div>
+        {manuale && (
+          <span className="flex-shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-400">
+            MANUALE
+          </span>
+        )}
       </div>
+
+      {/* Sotto override l'automatico resta a vista: e' cio' a cui si torna con AUTO. */}
+      {manuale && <RigaAutomatico automatico={automatico} />}
 
       <CountdownRiattivazione guardian={guardian} />
 
@@ -216,6 +376,9 @@ export const GuardianBanner: FC<{
           </button>
         )}
       </div>
+      {adminToken && onGuardianChanged && (
+        <ControlliOverride guardian={guardian} adminToken={adminToken} onChanged={onGuardianChanged} overrideFn={overrideFn} />
+      )}
       {!adminToken && (
         <p className="text-[11px] text-gray-600">Per usare i comandi serve l&apos;admin token nel setup.</p>
       )}

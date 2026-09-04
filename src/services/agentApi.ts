@@ -19,6 +19,36 @@ export interface GuardianStatus {
   /** Spiegazione del Brain sull'ultima transizione. null quando non disponibile. */
   explanation: string | null;
   explained_at: string | null;
+  /** Livello calcolato dal motore, MAI toccato dall'override manuale. */
+  automatic_level?: GuardianState;
+  /** Livello con cui il motore sta davvero operando. `state` mappa qui sopra. */
+  effective_level?: GuardianState;
+  /** Forzatura admin attiva, oppure null quando si segue l'automatico. */
+  manual_override?: { level: GuardianState; at: string } | null;
+}
+
+/** "auto" non forza il verde: rimuove l'override e torna a seguire l'automatico. */
+export type GuardianOverrideChoice = GuardianState | 'auto';
+
+export interface GuardianOverrideResponse {
+  status: string;
+  action: 'set' | 'cleared';
+  automatic_level: GuardianState;
+  effective_level: GuardianState;
+  manual_override: GuardianState | null;
+  note: string;
+}
+
+export function setGuardianOverride(
+  level: GuardianOverrideChoice,
+  note: string,
+  adminToken: string,
+): Promise<GuardianOverrideResponse> {
+  return request<GuardianOverrideResponse>('/api/v1/agent/guardian/override', {
+    method: 'POST',
+    body: { level, note },
+    token: adminToken,
+  });
 }
 
 /** Esito dell'ultimo ciclo di scansione per un mercato: quanti asset in ognuna delle

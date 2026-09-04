@@ -3307,6 +3307,7 @@ const AgentTab: FC<AgentTabProps> = ({
         busy={saving}
         onPause={() => void handleKill('soft_stop')}
         onCloseAll={() => void handleCloseAll()}
+        onGuardianChanged={() => void refresh()}
       />
 
       <ScannerStatusPanel status={scannerStatus} />
