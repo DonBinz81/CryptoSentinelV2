@@ -27,6 +27,22 @@ export interface GuardianStatus {
   manual_override?: { level: GuardianState; at: string } | null;
 }
 
+/**
+ * Salute del sistema. Ogni campo e' opzionale e puo' essere null: un valore che
+ * il backend non sa calcolare va mostrato come "non disponibile", MAI come uno
+ * zero o un 100% — un pannello che rassicura sempre e' peggio di nessun pannello.
+ */
+export interface OperationalStats {
+  disk?: { used_pct: number; free_bytes: number; total_bytes: number; path?: string } | null;
+  db_size_bytes?: number | null;
+  degraded_reasons?: string[] | null;
+  heartbeat?: Record<string, string | null> | null;
+}
+
+export function fetchOperationalStats(): Promise<OperationalStats> {
+  return request<OperationalStats>('/api/v1/views/operational-stats');
+}
+
 /** "auto" non forza il verde: rimuove l'override e torna a seguire l'automatico. */
 export type GuardianOverrideChoice = GuardianState | 'auto';
 
