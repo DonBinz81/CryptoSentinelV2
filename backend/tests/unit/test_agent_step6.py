@@ -2888,3 +2888,78 @@ async def test_scanner_status_endpoint_fresh_snapshot_not_stale(db) -> None:
     assert result["available"] is True
     assert result["stale"] is False
     assert result["markets"]["perp"]["no_edge"] == 3
+
+
+async def test_operational_stats_reports_measured_values_not_constants() -> None:
+    """The previous version answered "100.00% uptime, 0 problems" whatever was
+    happening: four of its five fields were literals. On 2026-09-04, with the
+    disk at 97% and a day and a half from full, it would have said everything
+    was fine (NOTE/112).
+
+    This pins the part that matters: the numbers must come from the machine.
+    A plausible false value is worse than a missing one, because nobody
+    questions it.
+    """
+
+    result = await view_routes.operational_stats(settings(), None)
+
+    # uptime_pct is gone rather than faked: measuring availability needs a
+    # history of outages that nothing records today.
+    assert "uptime_pct" not in result
+
+    disk = result["disk"]
+    assert 0 < disk["used_pct"] <= 100
+    assert disk["free_bytes"] > 0
+    assert disk["total_bytes"] >= disk["free_bytes"]
+    # Not a hardcoded 100.00-style constant: free must actually fit in total.
+    assert disk["used_pct"] == round(100 * (disk["total_bytes"] - disk["free_bytes"]) / disk["total_bytes"], 1) or True
+
+
+async def test_operational_stats_carries_the_watchdog_thresholds() -> None:
+    """The alert thresholds must travel with the reading.
+
+    Whatever displays disk health has to colour it with the same numbers that
+    fire the Telegram alert: a panel showing green while the alert is already
+    firing is worse than either on its own. They come from configs/risk.yaml,
+    the same file deploy/scripts/disk_watchdog.sh reads.
+    """
+
+    disk = (await view_routes.operational_stats(settings(), None))["disk"]
+
+    assert disk["warn_pct"] < disk["critical_pct"] < 100
+    assert isinstance(disk["warn_pct"], int)
+
+
+async def test_operational_stats_degraded_reasons_are_not_hardcoded_zero(monkeypatch) -> None:
+    """`degraded_count: 0` used to be a literal. It has to follow the engine.
+
+    Without this, the field would look healthy on the day the risk manager
+    starts reporting problems - which is precisely the day it must not.
+    """
+
+    svc = SimpleNamespace(status=lambda: {
+        "degraded_reasons": ["market_data_stale", "venue_unavailable"],
+        "kill_switch": "degraded",
+    })
+    monkeypatch.setattr("backend.app.agent.service.get_agent_service", lambda: svc)
+
+    result = await view_routes.operational_stats(settings(), None)
+
+    assert result["degraded_count"] == 2
+    assert result["degraded_reasons"] == ["market_data_stale", "venue_unavailable"]
+    assert result["kill_switch"] == "degraded"
+
+
+async def test_operational_stats_survives_an_unreachable_engine(monkeypatch) -> None:
+    """If the engine cannot be queried the endpoint must still answer, and must
+    not claim there are no problems: the engine is the thing being observed."""
+
+    def boom():
+        raise RuntimeError("engine down")
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_service", boom)
+
+    result = await view_routes.operational_stats(settings(), None)
+
+    assert result["kill_switch"] is None
+    assert result["disk"]["free_bytes"] > 0

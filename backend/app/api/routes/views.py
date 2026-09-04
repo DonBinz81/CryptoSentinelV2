@@ -2,13 +2,18 @@
 
 import asyncio
 import json
+import shutil
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, localcontext
+from pathlib import Path
+
+import yaml
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from backend.app.api.dependencies import AdminAccessDep, ReadAccessDep, SessionDep, SettingsDep
+from backend.app.core.config import PROJECT_ROOT, _config_dir
 from backend.app.core.logging import get_logger
 from backend.app.persistence.archive import list_archived_runs
 from backend.app.persistence.models.decisions import AgentDecision
@@ -24,6 +29,9 @@ from backend.app.persistence.views import ViewService, _close_reason, _position_
 from backend.app.schemas.views import GlobalView, PerpView, SpotView
 
 router = APIRouter(prefix="/api/v1/views", tags=["views"])
+
+# Where the backup script publishes its artefacts and last_result.json.
+BACKUP_DIR = "/var/backups/cryptosentinelv2"
 logger = get_logger("api.views")
 
 
@@ -759,21 +767,123 @@ def _cached_klines(market: str, symbol: str, interval: str, *, min_limit: int) -
         return None
 
 
+def _disk_thresholds(config_dir: Path) -> tuple[int, int]:
+    """Alert thresholds, read from the same file the disk watchdog uses.
+
+    They live in configs/risk.yaml (section `monitoring`) precisely so that the
+    alert and whatever displays disk health cannot disagree: a panel showing
+    green while Telegram is already firing is worse than either on its own. The
+    section is deliberately absent from SECTION_FIELD_MAP - unmapped sections
+    are ignored by the loader - so it is parsed here rather than through
+    Settings. Falls back to the same defaults as the watchdog.
+    """
+
+    warn, critical = 85, 92
+    try:
+        payload = yaml.safe_load((config_dir / "risk.yaml").read_text(encoding="utf-8")) or {}
+        section = payload.get("monitoring") or {}
+        warn = int(section.get("disk_warn_pct", warn))
+        critical = int(section.get("disk_critical_pct", critical))
+    except Exception:
+        pass
+    return warn, critical
+
+
+def _last_backup_state(backup_dir: Path) -> dict | None:
+    """Outcome and age of the last backup, from the file the backup script writes.
+
+    Returns None when there is nothing readable, so the caller can report it as
+    unknown rather than as a reassuring default. A failed backup is the one
+    fault that today is visible only if the Telegram notification arrives.
+    """
+
+    try:
+        payload = json.loads((backup_dir / "last_result.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    stamp = str(payload.get("timestamp") or "")
+    age_seconds: float | None = None
+    try:
+        taken = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+        age_seconds = (datetime.now(UTC) - taken).total_seconds()
+    except ValueError:
+        pass
+    return {
+        "status": payload.get("status"),
+        "integrity": payload.get("integrity"),
+        "timestamp_utc": stamp or None,
+        "age_seconds": age_seconds,
+    }
+
+
 @router.get("/operational-stats")
 async def operational_stats(
+    settings: SettingsDep,
     _: ReadAccessDep,
 ) -> dict:
-    """Return lightweight runtime operational stats."""
+    """System health: disk, database size, engine state, last backup.
+
+    Every field here is measured. The previous version returned four constants
+    ("uptime_pct": "100.00", zero degraded reasons, no kill switch) and only the
+    heartbeat was real - so on 2026-09-04, with the disk at 97% and a day and a
+    half from full, this endpoint would have answered "100.00% uptime, 0
+    problems" (NOTE/112). A plausible false value is worse than a missing one:
+    nobody questions it.
+
+    `uptime_pct` is therefore gone rather than faked. Measuring availability
+    needs a history of outages that nothing records today; the process start
+    time, which is what we actually have, says nothing about the hours before
+    the last restart.
+    """
 
     from backend.app.agent.heartbeat import heartbeat
+    from backend.app.agent.service import get_agent_service
 
-    beats = heartbeat.as_dict()
+    usage = shutil.disk_usage("/")
+    warn_pct, critical_pct = _disk_thresholds(_config_dir())
+
+    db_size_bytes: int | None = None
+    try:
+        # stat(), not a database open: reading a file's size is not opening a
+        # database, which after four corruptions is a distinction that matters.
+        #
+        # The configured URL carries a RELATIVE path (sqlite+aiosqlite:///./backend/
+        # local.db), so resolving it against the process working directory would
+        # make this field depend on how the service was started - and it would
+        # fail as a silent null, not as an error. Anchor it to PROJECT_ROOT, the
+        # same base the configuration loader uses.
+        db_path = Path(str(settings.database_url).split("///", 1)[-1])
+        if not db_path.is_absolute():
+            db_path = PROJECT_ROOT / db_path
+        db_size_bytes = db_path.stat().st_size
+    except Exception:
+        pass
+
+    try:
+        agent_status = get_agent_service().status()
+        degraded_reasons = list(agent_status.get("degraded_reasons") or [])
+        kill_switch = agent_status.get("kill_switch")
+    except Exception:
+        # The engine is the thing being observed: if it cannot be reached, say
+        # so with a null instead of reporting zero problems.
+        degraded_reasons = []
+        kill_switch = None
+
     return {
-        "uptime_pct": "100.00",
-        "heartbeat": beats,
-        "degraded_count": 0,
-        "degraded_reasons": [],
-        "last_kill_switch": None,
+        "disk": {
+            "path": "/",
+            "used_pct": round(100 * usage.used / usage.total, 1) if usage.total else None,
+            "free_bytes": usage.free,
+            "total_bytes": usage.total,
+            "warn_pct": warn_pct,
+            "critical_pct": critical_pct,
+        },
+        "db_size_bytes": db_size_bytes,
+        "heartbeat": heartbeat.as_dict(),
+        "degraded_reasons": degraded_reasons,
+        "degraded_count": len(degraded_reasons),
+        "kill_switch": kill_switch,
+        "last_backup": _last_backup_state(Path(BACKUP_DIR)),
     }
 
 
