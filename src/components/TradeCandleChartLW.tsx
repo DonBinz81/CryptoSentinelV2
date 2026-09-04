@@ -222,6 +222,17 @@ export const TradeCandleChartLW: FC<{
         shape: 'arrowDown',
       });
     }
+    // Chiusure decise da una persona: restano visibili per sempre, perche'
+    // vengono dalle righe immutabili dei trade e non da un calcolo al volo.
+    for (const mc of model.manualCloses) {
+      markers.push({
+        time: seconds(model.candles[mc.index].t),
+        position: 'belowBar',
+        color: LEVEL_COLORS.manual,
+        shape: 'circle',
+        text: `✂ ${mc.tag}`,
+      });
+    }
     // I marker vanno in ordine di tempo, altrimenti la libreria li rifiuta.
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(series, markers);
@@ -240,6 +251,13 @@ export const TradeCandleChartLW: FC<{
     }
 
     c.timeScale().fitContent();
+    // La chiusura manuale cade sull'ULTIMA candela, e fitContent() la incolla al
+    // bordo: senza un po' d'aria la sua etichetta ("✂ 50%") esce dal grafico
+    // tagliata a meta'. Il margine si aggiunge solo quando quei marker ci sono,
+    // per non cambiare l'inquadratura di tutti gli altri grafici.
+    if (model.manualCloses.length > 0) {
+      c.timeScale().applyOptions({ rightOffset: 5 });
+    }
 
     // Distanza sotto la quale due sigle si sovrapporrebbero.
     const MIN_GAP_PX = 10;
