@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && tsc -b dashboard && vite build",
     "dashboard:dev": "vite --config dashboard/vite.config.ts --host 0.0.0.0",
     "dashboard:build": "tsc -p dashboard/tsconfig.json && vite build --config dashboard/vite.config.ts",
     "dashboard:preview": "vite preview --config dashboard/vite.config.ts --host 0.0.0.0",
