@@ -841,9 +841,15 @@ const CLOSE_REASON_LABELS: Record<string, { label: string; className: string }> 
   smart_sl_rebuy_l1: { label: 'Smart SL Rebuy L1', className: 'text-sky-400' },
   smart_sl_rebuy_l2: { label: 'Smart SL Rebuy L2', className: 'text-sky-400' },
   smart_sl_rebuy_all: { label: 'Smart SL Rebuy All', className: 'text-sky-400' },
+  // Chiusure decise da una persona. Mancavano: il backend le mandava gia', ma
+  // senza una voce qui il rendering le scartava in silenzio e in lista non si
+  // vedeva nulla. Fucsia come il marker sul grafico, per non confonderle con
+  // l'ambra dello Smart SL, che e' automatico.
+  manual_partial_close: { label: '✂ Riduzione manuale', className: 'text-fuchsia-400' },
+  manual_full_close: { label: '✂ Chiusura manuale', className: 'text-fuchsia-400' },
 };
 
-const TradeHistoryList: FC<{
+export const TradeHistoryList: FC<{
   trades: SpotHistoryRow[] | PerpHistoryRow[];
   market: 'spot' | 'perp';
   onTrade: (id: string) => void;
@@ -941,6 +947,9 @@ const TradeHistoryList: FC<{
                 {t.close_reason && CLOSE_REASON_LABELS[t.close_reason] && (
                   <span className={`rounded bg-dark-900 px-1.5 py-0.5 font-semibold ${CLOSE_REASON_LABELS[t.close_reason].className}`}>
                     {CLOSE_REASON_LABELS[t.close_reason].label}
+                    {/* Quota tolta da QUESTA chiusura (non cumulativa: quella e' il
+                        badge sulla posizione aperta). Assente se non calcolabile. */}
+                    {'manual_close_pct' in t && t.manual_close_pct != null && ` · −${Number(t.manual_close_pct).toFixed(0)}%`}
                   </span>
                 )}
               </span>
@@ -2676,6 +2685,9 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
               <span style={{ color: LEVEL_COLORS.sl }}>- - SL</span>
               {detail.smart_sl_levels && <span style={{ color: LEVEL_COLORS.s2 }}>- - S1/S2 Smart SL (✓ = venduto)</span>}
               {detail.chart.stop_reference && <span style={{ color: LEVEL_COLORS.ref }}>▮ candela dello stop</span>}
+              {!!detail.chart.manual_closes?.length && (
+                <span style={{ color: LEVEL_COLORS.manual }}>✂ chiusura manuale</span>
+              )}
               {detail.breakeven_price != null && <span style={{ color: LEVEL_COLORS.be }}>- - BE = pareggio</span>}
               {detail.trailing_stop != null && <span style={{ color: LEVEL_COLORS.trl }}>- - TRL = trailing</span>}
               <span style={{ color: LEVEL_COLORS.tp1 }}>- - TP1</span>

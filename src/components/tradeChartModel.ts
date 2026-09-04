@@ -21,6 +21,14 @@ export interface TradeChartLevel {
   strong: boolean;
 }
 
+/** Chiusura manuale gia' agganciata alla sua candela, pronta da disegnare. */
+export interface TradeChartManualClose {
+  index: number;
+  price: number;
+  /** Etichetta breve del marker: "50%" quando la quota e' nota, altrimenti "manuale". */
+  tag: string;
+}
+
 export interface TradeChartModel {
   /** Candele del trade seguite da quelle successive alla chiusura. */
   candles: Candle[];
@@ -38,6 +46,8 @@ export interface TradeChartModel {
   exitGood: boolean;
   stopRefIndex: number | null;
   stopRefPrice: number | null;
+  /** Chiusure decise da una persona, in ordine di tempo. Vuoto quasi sempre. */
+  manualCloses: TradeChartManualClose[];
   /** Estremi verticali: comprendono candele E livelli, cosi' nulla resta fuori vista. */
   scaleLow: number;
   scaleHigh: number;
@@ -81,6 +91,12 @@ export const LEVEL_COLORS = {
   ref: '#8b5cf6',   // viola: la candela da cui e' stato calcolato lo stop. Sta fuori
                     // dalle tre famiglie (rischio, obiettivi, neutri) perche' non e' un
                     // livello operativo ma un dato di costruzione.
+  manual: '#e879f9', // fucsia: una chiusura decisa da una PERSONA. Come il viola di
+                     // `ref`, sta fuori dalle tre famiglie (rischio, obiettivi,
+                     // neutri) perche' non e' un livello del motore. Deliberatamente
+                     // NON ambra: l'ambra qui e' gia' dei livelli Smart SL, che sono
+                     // automatici, e confonderli e' esattamente cio' che questo
+                     // marker esiste per evitare.
   now: '#9ca3af',   // grigio chiaro, apposta leggero: il prezzo corrente su una
                     // posizione live non e' un giudizio (a differenza della vecchia
                     // freccia verde/rossa), e' solo un riferimento — non deve competere
@@ -152,6 +168,16 @@ export function buildTradeChartModel(
   if (scaleHigh === scaleLow) { scaleHigh += 1; scaleLow -= 1; }
   const range = scaleHigh - scaleLow;
 
+  // Il backend spedisce solo eventi dentro la finestra disegnata, quindi
+  // nearest() non puo' agganciarne uno a una candela di bordo sbagliata.
+  const manualCloses: TradeChartManualClose[] = (chart.manual_closes ?? [])
+    .map((m) => ({
+      index: nearest(ts(m.t), candles),
+      price: Number(m.price),
+      tag: m.pct != null ? `${Number(m.pct).toFixed(0)}%` : 'manuale',
+    }))
+    .filter((m) => !Number.isNaN(m.price));
+
   const stopRefIndex = chart.stop_reference?.t ? nearest(ts(chart.stop_reference.t), candles) : null;
   const stopRefPrice = sl ?? (chart.stop_reference?.price != null ? Number(chart.stop_reference.price) : null);
 
@@ -172,6 +198,7 @@ export function buildTradeChartModel(
     exitGood: exit >= entry,
     stopRefIndex,
     stopRefPrice,
+    manualCloses,
     scaleLow,
     scaleHigh,
     yTicks,

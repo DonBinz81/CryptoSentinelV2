@@ -193,6 +193,9 @@ export interface PerpTradeView {
   leverage: number;
   status: string;
   close_reason?: string | null;
+  /** % della size di apertura tolta da QUESTA chiusura manuale (evento singolo,
+   *  non cumulativo). null sulle righe non manuali e se non calcolabile. */
+  manual_close_pct?: string | null;
   tx_hash?: string | null;
   timestamp_utc: string;
 }
@@ -303,6 +306,17 @@ export interface TradeChartCandle {
   c: number;
 }
 
+/** Una chiusura decisa da una persona, da marcare sul grafico.
+ *  Il backend spedisce solo eventi che cadono DENTRO la finestra disegnata:
+ *  quelli fuori sono gia' scartati la', quindi qui non serve nessun controllo. */
+export interface ManualCloseMarker {
+  t: string;
+  price: string;
+  size: string;
+  /** % della size di apertura tolta da questa chiusura. null se non calcolabile. */
+  pct?: string | null;
+}
+
 export interface TradeChart {
   interval: string;
   market: string;
@@ -325,6 +339,8 @@ export interface TradeChart {
   } | null;
   candles: TradeChartCandle[];
   post_close_candles?: TradeChartCandle[];
+  /** Sempre presente (anche vuota) quando il grafico c'e'. */
+  manual_closes?: ManualCloseMarker[];
 }
 
 export interface TradeDetail {
