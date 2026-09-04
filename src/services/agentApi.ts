@@ -173,6 +173,10 @@ export interface SpotView {
   trade_count_today: number;
   bot_active_days: number;
   market_risk_off?: boolean;
+  /** Volume SCAMBIATO, tutte le gambe incluse. Sul perp e' il NOZIONALE,
+   *  non il capitale impegnato: con la leva le cifre sono molto maggiori. */
+  volume_total_usd: string;
+  volume_today_usd: string;
 }
 
 export interface PerpPositionView {
@@ -239,6 +243,10 @@ export interface PerpView {
   trade_count: number;
   trade_count_today: number;
   bot_active_days: number;
+  /** Volume SCAMBIATO, tutte le gambe incluse. Sul perp e' il NOZIONALE,
+   *  non il capitale impegnato: con la leva le cifre sono molto maggiori. */
+  volume_total_usd: string;
+  volume_today_usd: string;
 }
 
 export interface PnlPoint {
@@ -264,6 +272,10 @@ export interface GlobalView {
   open_spot_positions: number;
   open_perp_positions: number;
   total_fees_usd: string;
+  /** Volume SCAMBIATO, tutte le gambe incluse. Sul perp e' il NOZIONALE,
+   *  non il capitale impegnato: con la leva le cifre sono molto maggiori. */
+  volume_total_usd: string;
+  volume_today_usd: string;
   daily_pnl_net_pct: number;
   pnl_total_net_pct: number;
   risk_guardrail?: {

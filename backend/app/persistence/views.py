@@ -147,8 +147,12 @@ class ViewService:
         spot_trade_count_tot = await trade_repo.count_closed(user_id)
         spot_trade_count_today = await trade_repo.count_closed(user_id, since=day_start_spot)
         bot_active_days = await self._bot_active_days(user_id)
+        # Una sola chiamata: totale e quota odierna escono dalla stessa query.
+        volume_total, volume_today = await trade_repo.sum_volume(user_id, since=day_start_spot)
         return SpotView(
             market_risk_off=_market_risk_off(user_id),
+            volume_total_usd=volume_total,
+            volume_today_usd=volume_today,
             open_positions=[
                 SpotPositionView(
                     position_id=p.position_id,
@@ -231,7 +235,11 @@ class ViewService:
                 await trade_repo.manual_reduction_by_position(user_id, manual_history_ids)
             ).items()
         }
+        # Una sola chiamata: totale e quota odierna escono dalla stessa query.
+        volume_total, volume_today = await trade_repo.sum_volume(user_id, since=day_start)
         return PerpView(
+            volume_total_usd=volume_total,
+            volume_today_usd=volume_today,
             open_positions=[
                 PerpPositionView(
                     position_id=p.position_id,
@@ -331,6 +339,16 @@ class ViewService:
         fees_perp = await perp_trade_repo.sum_fees(user_id)
         total_fees_usd = fees_spot + fees_perp
 
+        # Volume scambiato, spot + perp. Due chiamate (una per mercato), non
+        # quattro: ognuna restituisce gia' totale e quota odierna. Mezzanotte
+        # UTC come nelle viste per mercato, altrimenti "oggi" vorrebbe dire due
+        # cose diverse in due schermate.
+        day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        vol_spot_tot, vol_spot_day = await spot_trade_repo.sum_volume(user_id, since=day_start)
+        vol_perp_tot, vol_perp_day = await perp_trade_repo.sum_volume(user_id, since=day_start)
+        volume_total_usd = vol_spot_tot + vol_perp_tot
+        volume_today_usd = vol_spot_day + vol_perp_day
+
         if portfolio is None:
             base_equity = self._base_equity_usd
             return GlobalView(
@@ -349,6 +367,8 @@ class ViewService:
                 spot_exposure_usd=spot_exposure_usd,
                 perp_exposure_usd=perp_exposure_usd,
                 total_fees_usd=total_fees_usd,
+                volume_total_usd=volume_total_usd,
+                volume_today_usd=volume_today_usd,
                 daily_pnl_usd=Decimal("0"),
                 daily_pnl_net_pct=0.0,
                 pnl_total_net_pct=0.0,
@@ -387,6 +407,8 @@ class ViewService:
             spot_exposure_usd=spot_exposure_usd,
             perp_exposure_usd=perp_exposure_usd,
             total_fees_usd=total_fees_usd,
+                volume_total_usd=volume_total_usd,
+                volume_today_usd=volume_today_usd,
             daily_pnl_usd=daily_pnl,
             daily_pnl_net_pct=round(daily_pnl_net_pct, 2),
             pnl_total_net_pct=round(pnl_pct, 2),

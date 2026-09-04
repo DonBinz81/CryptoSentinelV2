@@ -979,7 +979,7 @@ export const TradeHistoryList: FC<{
   );
 };
 
-const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) => void }> = ({ data, onTrade }) => {
+export const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) => void }> = ({ data, onTrade }) => {
   const hasPositions = (data?.open_positions.length ?? 0) > 0;
   const hasHistory = (data?.history.length ?? 0) > 0;
   const hasActivity = hasPositions || hasHistory || Number(data?.realized_pnl_usd ?? 0) !== 0 || Number(data?.unrealized_pnl_usd ?? 0) !== 0;
@@ -994,6 +994,8 @@ const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) => void }
         <Stat label="Trade Tot" value={String(data?.trade_count ?? 0)} />
         <Stat label="Trade Day" value={String(data?.trade_count_today ?? 0)} />
         <Stat label="Bot Day" value={String(data?.bot_active_days ?? 0)} />
+        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
+        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
       </div>
       {!hasActivity && (
         riskOff
@@ -1346,7 +1348,15 @@ export const PerpPane: FC<{
         <Stat label="Trade Tot" value={String(data?.trade_count ?? 0)} />
         <Stat label="Trade Day" value={String(data?.trade_count_today ?? 0)} />
         <Stat label="Bot Day" value={String(data?.bot_active_days ?? 0)} />
+        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
+        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
       </div>
+      {/* Senza questa riga un Vol Tot da migliaia di dollari su un conto da
+          poche centinaia sembra un errore di calcolo: e' il nozionale, che con
+          la leva e' un multiplo del capitale. */}
+      <p className="px-1 text-[11px] text-gray-500">
+        Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.
+      </p>
       {!hasActivity && (
         <EmptyState title="In attesa di segnali perp" detail="Nessuna posizione aperta e nessun trade registrato." />
       )}
@@ -1510,12 +1520,19 @@ export const GlobalPane: FC<{
         <Stat label="Trades UTC" value={String(data?.trades_today ?? 0)} />
         <Stat label="Kill switch" value={status?.kill_switch ?? data?.agent_status ?? 'idle'} />
         <Stat label="Fee pagate" value={fmtUsd(data?.total_fees_usd ?? '0')} tone="bad" />
+        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
+        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
         <Stat
           label="API Claude"
           value={claudeUsage != null ? `$${claudeUsage.total_cost_usd.toFixed(2)} / $${claudeUsage.budget_usd.toFixed(2)}` : '--'}
           tone={claudeUsage == null ? 'neutral' : claudeUsage.budget_pct >= 90 ? 'bad' : claudeUsage.budget_pct >= 70 ? 'neutral' : 'good'}
         />
       </div>
+      {/* Il Global somma anche il perp: senza questa riga il Vol Tot sembra
+          sproporzionato rispetto all'equity. */}
+      <p className="px-1 text-[11px] text-gray-500">
+        Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.
+      </p>
       {!hasPortfolio && !hasHistory && (
         <EmptyState title="In attesa dello stato globale" detail="Equity, drawdown ed esposizione saranno visibili al primo snapshot." />
       )}
