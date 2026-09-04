@@ -919,6 +919,7 @@ function GlobalPanel({ global, equity, expanded = false }: { global: LoadState<G
               />
             )}
           </div>
+          <p className="hint">Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.</p>
           {(equity.data?.items.length ?? 0) < 2 ? (
             <Empty title="No PnL history" detail="Global tracking is ready and waiting for confirmed activity." />
           ) : (
@@ -1010,6 +1011,7 @@ function PerpPanel({ perp, session, expanded = false }: { perp: LoadState<PerpVi
             <Metric label="Vol Tot" value={money(data.volume_total_usd ?? '0')} />
             <Metric label="Vol Day" value={money(data.volume_today_usd ?? '0')} />
           </div>
+          <p className="hint">Vol = volume scambiato (nozionale, leva inclusa), non capitale impegnato.</p>
           {data.open_positions.length === 0 ? (
             <Empty title="No open Perp positions" detail="The agent has no active Perp exposure." />
           ) : (

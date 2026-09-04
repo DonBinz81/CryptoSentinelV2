@@ -74,6 +74,20 @@ const fmtUsd = (value: string | number | null | undefined) => {
   return `$${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+/**
+ * Come fmtUsd, ma distingue "assente" da "zero": rende `$--` quando il campo non
+ * arriva, `$0,00` quando vale davvero zero.
+ *
+ * Serve ai campi aggiunti di recente. La CI pubblica un APK a ogni push, mentre
+ * il backend si deploya a mano: esiste una finestra in cui l'app nuova parla con
+ * un backend vecchio che quel campo non lo manda. Con fmtUsd si leggerebbe
+ * `$0,00` — indistinguibile da "non hai scambiato niente", cioe' un numero
+ * plausibile e falso. `fmtUsd` non e' stato cambiato: le sue decine di chiamate
+ * esistenti si aspettano lo zero.
+ */
+const fmtUsdOpt = (value: string | number | null | undefined): string =>
+  value == null || value === '' ? '$--' : fmtUsd(value);
+
 const fmtMicroPrice = (value: number, maxDecimals = 18): string => {
   const sign = value < 0 ? '-' : '';
   const fixed = Math.abs(value).toFixed(maxDecimals).replace(/0+$/, '').replace(/\.$/, '');
@@ -994,8 +1008,8 @@ export const SpotPane: FC<{ data: SpotView | null; onTrade: (tradeId: string) =>
         <Stat label="Trade Tot" value={String(data?.trade_count ?? 0)} />
         <Stat label="Trade Day" value={String(data?.trade_count_today ?? 0)} />
         <Stat label="Bot Day" value={String(data?.bot_active_days ?? 0)} />
-        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
-        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
+        <Stat label="Vol Tot" value={fmtUsdOpt(data?.volume_total_usd)} />
+        <Stat label="Vol Day" value={fmtUsdOpt(data?.volume_today_usd)} />
       </div>
       {!hasActivity && (
         riskOff
@@ -1348,8 +1362,8 @@ export const PerpPane: FC<{
         <Stat label="Trade Tot" value={String(data?.trade_count ?? 0)} />
         <Stat label="Trade Day" value={String(data?.trade_count_today ?? 0)} />
         <Stat label="Bot Day" value={String(data?.bot_active_days ?? 0)} />
-        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
-        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
+        <Stat label="Vol Tot" value={fmtUsdOpt(data?.volume_total_usd)} />
+        <Stat label="Vol Day" value={fmtUsdOpt(data?.volume_today_usd)} />
       </div>
       {/* Senza questa riga un Vol Tot da migliaia di dollari su un conto da
           poche centinaia sembra un errore di calcolo: e' il nozionale, che con
@@ -1520,8 +1534,8 @@ export const GlobalPane: FC<{
         <Stat label="Trades UTC" value={String(data?.trades_today ?? 0)} />
         <Stat label="Kill switch" value={status?.kill_switch ?? data?.agent_status ?? 'idle'} />
         <Stat label="Fee pagate" value={fmtUsd(data?.total_fees_usd ?? '0')} tone="bad" />
-        <Stat label="Vol Tot" value={fmtUsd(Number(data?.volume_total_usd ?? 0))} />
-        <Stat label="Vol Day" value={fmtUsd(Number(data?.volume_today_usd ?? 0))} />
+        <Stat label="Vol Tot" value={fmtUsdOpt(data?.volume_total_usd)} />
+        <Stat label="Vol Day" value={fmtUsdOpt(data?.volume_today_usd)} />
         <Stat
           label="API Claude"
           value={claudeUsage != null ? `$${claudeUsage.total_cost_usd.toFixed(2)} / $${claudeUsage.budget_usd.toFixed(2)}` : '--'}
