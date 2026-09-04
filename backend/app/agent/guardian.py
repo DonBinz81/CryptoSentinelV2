@@ -74,6 +74,15 @@ class RegimeGuardian:
         # filled in later by record_explanation() once the Brain call returns.
         self._explanation: str | None = None
         self._explained_at: datetime | None = None
+        # Manual override (NOTE/107 §13): a layer ON TOP of the automatic state,
+        # never a replacement for it. The state machine below keeps running
+        # untouched -- it counts stops, moves its own level, advances its
+        # timers -- and only the READ of the operational level is redirected.
+        # Same idea as ``_eff_ms()`` in service.py: resolve at read time, never
+        # write over the underlying value, so leaving the override needs no
+        # restore step and nothing can be lost.
+        self._override_level: str | None = None
+        self._override_at: datetime | None = None
 
     # ── persistence ──────────────────────────────────────────────────────
 
@@ -99,6 +108,10 @@ class RegimeGuardian:
             self._explanation = data.get("explanation")
             explained = data.get("explained_at")
             self._explained_at = datetime.fromisoformat(explained) if explained else None
+            level = data.get("manual_override_level")
+            self._override_level = level if level in _SEVERITY else None
+            ov_at = data.get("manual_override_at")
+            self._override_at = datetime.fromisoformat(ov_at) if ov_at else None
         except Exception as exc:  # never let a corrupt blob stop the agent
             logger.warning("guardian_state_load_failed", error=str(exc))
 
@@ -112,6 +125,8 @@ class RegimeGuardian:
             "changed_at": self._changed_at.isoformat() if self._changed_at else None,
             "explanation": self._explanation,
             "explained_at": self._explained_at.isoformat() if self._explained_at else None,
+            "manual_override_level": self._override_level,
+            "manual_override_at": self._override_at.isoformat() if self._override_at else None,
         }
         set_runtime_value(self.user_id, GUARDIAN_STATE_KEY, json.dumps(payload))
 
@@ -121,6 +136,25 @@ class RegimeGuardian:
     def state(self) -> str:
         self._load()
         return self._state
+
+    @property
+    def effective_state(self) -> str:
+        """The level the engine must OBEY: the override when set, else the automatic one.
+
+        This is what the three operational readers use (entry block, yellow
+        sizing, capital preservation). ``state`` stays the pure automatic level,
+        and the state machine -- ``evaluate``, ``record_stop``, the escalation
+        safety net -- keeps reading ``_state`` directly: an override must never
+        be able to falsify the machine that computes the automatic level, or
+        pressing AUTO would return to a level the market never produced.
+        """
+        self._load()
+        return self._override_level or self._state
+
+    @property
+    def manual_override(self) -> str | None:
+        self._load()
+        return self._override_level
 
     def last_stop_at(self) -> datetime | None:
         self._load()
@@ -140,8 +174,19 @@ class RegimeGuardian:
         """Serializable view for /agent/status and notifications."""
         self._load()
         last = self.last_stop_at()
+        automatic = self._state if cfg.enabled else GREEN
+        effective = (self._override_level or automatic) if cfg.enabled else GREEN
         return {
-            "state": self._state if cfg.enabled else GREEN,
+            # ``state`` keeps meaning "what the engine is doing", so the existing
+            # banner and the V1 client stay correct without changes: with no
+            # override the two are identical. The distinct levels are below.
+            "state": effective,
+            "automatic_level": automatic,
+            "effective_level": effective,
+            "manual_override": (
+                {"level": self._override_level, "at": self._override_at.isoformat() if self._override_at else None}
+                if self._override_level else None
+            ),
             "enabled": cfg.enabled,
             "stops_in_window": self.stops_in_window(now, cfg),
             "window_hours": cfg.window_hours,
@@ -173,6 +218,53 @@ class RegimeGuardian:
         if count >= cfg.yellow_stops:
             return YELLOW
         return GREEN
+
+    def set_manual_override(self, level: str, now: datetime, *, admin: str = "admin") -> dict:
+        """Pin the operational level, leaving the automatic machine untouched.
+
+        Deliberately NOT implemented through ``_set_state``: that would overwrite
+        ``_state`` (destroying the automatic level, so AUTO would have nothing to
+        return to), move ``changed_at`` (the anchor of the de-escalation
+        countdown, which must keep running) and clear the Brain explanation.
+        None of those may happen here.
+        """
+        self._load()
+        if level not in _SEVERITY:
+            raise ValueError(f"unknown guardian level: {level}")
+        previous = self._override_level
+        self._override_level = level
+        self._override_at = now
+        self._save()
+        logger.info(
+            "perp_protection_manual_override",
+            admin=admin,
+            from_level=previous or self._state,
+            to_level=level,
+            automatic_level=self._state,
+            effective_level=level,
+        )
+        return {"automatic_level": self._state, "effective_level": level, "previous": previous}
+
+    def clear_manual_override(self, now: datetime, *, admin: str = "admin") -> dict:
+        """Back to AUTO: the effective level returns to the CURRENT automatic one.
+
+        Which may well differ from the one in force when the override was set --
+        the machine kept working underneath. That is the point of the feature.
+        """
+        self._load()
+        previous = self._override_level
+        self._override_level = None
+        self._override_at = None
+        self._save()
+        logger.info(
+            "perp_protection_manual_override_cleared",
+            admin=admin,
+            from_level=previous,
+            to_level=self._state,
+            automatic_level=self._state,
+            effective_level=self._state,
+        )
+        return {"automatic_level": self._state, "effective_level": self._state, "previous": previous}
 
     def _set_state(self, new_state: str, now: datetime, cfg: GuardianConfig) -> GuardianChange:
         previous = self._state
