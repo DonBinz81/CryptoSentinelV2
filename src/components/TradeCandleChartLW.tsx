@@ -251,7 +251,8 @@ export const TradeCandleChartLW: FC<{
         position: 'belowBar',
         color: LEVEL_COLORS.manual,
         shape: 'circle',
-        text: `✂ ${mc.tag}`,
+        // Niente testo qui: lo porta l'etichetta inline, che sa separarsi da
+        // quelle vicine. I testi dei marker nativi invece si sovrappongono.
       });
     }
     // I marker vanno in ordine di tempo, altrimenti la libreria li rifiuta.
@@ -283,7 +284,27 @@ export const TradeCandleChartLW: FC<{
     // Distanza sotto la quale due sigle si sovrapporrebbero.
     const MIN_GAP_PX = 10;
     const placeInlineLabels = () => {
-      const placed = model.levels
+      // Livelli e chiusure manuali nella STESSA lista: cosi' le chiusure
+      // ereditano la separazione a corsie gia' scritta per i livelli, invece di
+      // avere un impianto proprio. Le chiusure portano il prezzo eseguito, che
+      // e' un livello a tutti gli effetti per chi guarda.
+      const voci: { key: string; price: number; tag: string; color: string; forte: boolean }[] = [
+        ...model.levels.map((l) => ({
+          key: l.key as string,
+          price: l.price,
+          tag: l.key === 'trl' && trailingGapPct != null ? `${l.tag} ${trailingGapPct}` : l.tag,
+          color: l.color,
+          forte: KEY_LEVELS.has(l.key) || l.strong,
+        })),
+        ...model.manualCloses.map((mc, i) => ({
+          key: `manual-${i}`,
+          price: mc.price,
+          tag: `✂ ${mc.tag}`,
+          color: LEVEL_COLORS.manual,
+          forte: false,
+        })),
+      ];
+      const placed = voci
         .map((level) => {
           const coordinate = series.priceToCoordinate(level.price);
           // priceToCoordinate NON torna null per i livelli fuori vista: restituisce
@@ -296,13 +317,10 @@ export const TradeCandleChartLW: FC<{
           const y = coordinate as number;
           if (y - LABEL_OFFSET_PX < 0 || y > height) return null;
           return {
-            key: level.key as string,
-            text:
-              level.key === 'trl' && trailingGapPct != null
-                ? `${level.tag} ${trailingGapPct}`
-                : level.tag,
+            key: level.key,
+            text: level.tag,
             color: level.color,
-            bold: KEY_LEVELS.has(level.key) || level.strong,
+            bold: level.forte,
             top: coordinate as number,
             lane: 0,
           };
