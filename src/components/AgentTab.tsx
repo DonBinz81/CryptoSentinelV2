@@ -1593,6 +1593,16 @@ const etaTick = (iso: string | null | undefined): { testo: string; vecchio: bool
   return { testo: s < 60 ? `${s}s fa` : `${Math.floor(s / 60)} min fa`, vecchio: s >= 120 };
 };
 
+/** Codici del motore -> testo leggibile. Oggi `claude_unavailable` e' l'unico
+ *  che il backend produca davvero (`agent/service.py:3312`); un codice
+ *  sconosciuto si mostra COM'E', perche' nasconderlo perderebbe l'unica
+ *  informazione disponibile su un guasto che non abbiamo previsto. */
+const DEGRADO_LEGGIBILE: Record<string, string> = {
+  claude_unavailable: 'Brain (Claude) non raggiungibile',
+};
+
+const leggiDegrado = (codice: string): string => DEGRADO_LEGGIBILE[codice] ?? codice;
+
 /** Riga del pannello salute. Valore null => "non disponibile", mai un numero inventato. */
 const RigaSalute: FC<{
   etichetta: string;
@@ -1628,11 +1638,17 @@ const RigaSalute: FC<{
  */
 export const SystemHealthPanel: FC<{ stats: OperationalStats | null; status: AgentStatus | null }> = ({ stats, status }) => {
   const d = stats?.disk ?? null;
+  // Le soglie arrivano dal backend (risk.yaml), le stesse che fanno scattare
+  // l'allarme: se il pannello ne usasse di proprie, potrebbe mostrare verde
+  // mentre la notifica sta gia' suonando — due verita' diverse sulla stessa
+  // cosa. I valori di ripiego servono solo a un backend piu' vecchio.
+  const soglieAvviso = d?.warn_pct ?? 85;
+  const soglieCritica = d?.critical_pct ?? 92;
   const tono = d == null
     ? null
-    : d.used_pct >= 92
+    : d.used_pct >= soglieCritica
       ? { testo: 'text-accent-red', barra: 'bg-accent-red', punto: 'bg-accent-red' }
-      : d.used_pct >= 85
+      : d.used_pct >= soglieAvviso
         ? { testo: 'text-accent-yellow', barra: 'bg-accent-yellow', punto: 'bg-accent-yellow' }
         : { testo: 'text-gray-300', barra: 'bg-accent-green', punto: 'bg-accent-green' };
 
@@ -1659,7 +1675,7 @@ export const SystemHealthPanel: FC<{ stats: OperationalStats | null; status: Age
             <div className={`h-full ${tono.barra}`} style={{ width: `${Math.min(100, d.used_pct)}%` }} />
           </div>
           {/* Un 97% da solo e' un numero: senza questa riga non dice cosa comporta. */}
-          {d.used_pct >= 85 && (
+          {d.used_pct >= soglieAvviso && (
             <p className="mt-1 text-[11px] text-accent-yellow">
               A disco pieno il database non riesce piu&apos; a scrivere: si presenta come una corruzione.
             </p>
@@ -1681,9 +1697,32 @@ export const SystemHealthPanel: FC<{ stats: OperationalStats | null; status: Age
         punto={veloce?.vecchio === false ? 'bg-accent-green' : 'bg-accent-yellow'}
       />
       <RigaSalute
+        etichetta="Ultimo backup"
+        valore={
+          stats?.last_backup?.status == null
+            ? null
+            : stats.last_backup.status === 'ok' && stats.last_backup.integrity === 'ok'
+              ? 'ok'
+              : `${stats.last_backup.status}${stats.last_backup.integrity ? ` · integrita' ${stats.last_backup.integrity}` : ''}`
+        }
+        dettaglio={
+          stats?.last_backup?.age_seconds != null
+            ? `${Math.floor(stats.last_backup.age_seconds / 3600)}h fa`
+            : null
+        }
+        punto={
+          stats?.last_backup?.status == null
+            ? undefined
+            : stats.last_backup.status === 'ok' && stats.last_backup.integrity === 'ok'
+              ? 'bg-accent-green'
+              : 'bg-accent-red'
+        }
+        tono={stats?.last_backup?.status === 'ok' ? 'text-gray-300' : 'text-accent-red'}
+      />
+      <RigaSalute
         etichetta="Problemi attivi"
         valore={problemi == null ? null : problemi.length === 0 ? 'nessuno' : String(problemi.length)}
-        dettaglio={problemi?.length ? problemi.join(' · ') : null}
+        dettaglio={problemi?.length ? problemi.map(leggiDegrado).join(' · ') : null}
         punto={problemi == null ? undefined : problemi.length ? 'bg-accent-red' : 'bg-accent-green'}
         tono={problemi?.length ? 'text-accent-red' : 'text-gray-300'}
       />
