@@ -328,7 +328,7 @@ class AgentService:
         modified, so leaving RED needs no restore step.
         """
         ms = self._ms
-        if getattr(ms, "perp_guardian_enabled", True) and self.guardian.state == GUARDIAN_RED:
+        if getattr(ms, "perp_guardian_enabled", True) and self.guardian.effective_state == GUARDIAN_RED:
             return _CapitalPreservationView(ms)
         return ms
 
@@ -1248,7 +1248,7 @@ class AgentService:
         # rejection reason is unambiguous.
         if signal.get("action") != "skip":
             g_cfg = self._guardian_cfg()
-            if g_cfg.enabled and self.guardian.state == GUARDIAN_RED:
+            if g_cfg.enabled and self.guardian.effective_state == GUARDIAN_RED:
                 logger.info(
                     "perp_entry_rejected",
                     asset=signal.get("asset"),
@@ -3223,7 +3223,7 @@ class AgentService:
         if risk_decision.allowed and str(signal.get("market")) == "perp":
             g_ms = self._ms
             g_cfg = self._guardian_cfg(g_ms)
-            if g_cfg.enabled and self.guardian.state == GUARDIAN_YELLOW:
+            if g_cfg.enabled and self.guardian.effective_state == GUARDIAN_YELLOW:
                 risk_decision = _apply_guardian_yellow(
                     risk_decision,
                     factor=Decimal(str(getattr(g_ms, "perp_guardian_yellow_size_factor", 0.5))),

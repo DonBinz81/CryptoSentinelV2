@@ -295,6 +295,58 @@ _MANUAL_CLOSE_STATUS = {
 }
 
 
+class GuardianOverrideRequest(BaseModel):
+    """Force the operational protection level, or hand it back to the machine."""
+
+    #: "auto" clears the override and returns to the CURRENT automatic level,
+    #: which may differ from the one in force when the override was set.
+    level: Literal["green", "yellow", "red", "auto"]
+    note: str = Field(..., min_length=3, max_length=200)
+
+
+@router.post("/guardian/override")
+async def set_guardian_override(
+    request: GuardianOverrideRequest,
+    _: AdminAccessDep,
+) -> dict:
+    """Pin the guardian level by hand, without stopping the automatic machine.
+
+    The automatic level keeps being computed underneath — stops are counted,
+    timers advance, its own level moves — and only the level the engine OBEYS is
+    redirected. Sending "auto" removes the override and the effective level goes
+    back to whatever the machine says at that moment, which is the point: the
+    market may have changed while the override was in place.
+
+    Admin only, and refused server-side: hiding the button would not be enough.
+    Both the override and its removal are logged with the two levels, so reading
+    the history later a human decision can never look like a real de-escalation.
+    """
+    service = get_agent_service()
+    now = datetime.now(UTC)
+    note = request.note.strip()
+    if request.level == "auto":
+        result = service.guardian.clear_manual_override(now, admin=note)
+        action = "cleared"
+    else:
+        result = service.guardian.set_manual_override(request.level, now, admin=note)
+        action = "set"
+    logger.info(
+        "guardian_override_request",
+        action=action,
+        requested=request.level,
+        automatic_level=result["automatic_level"],
+        effective_level=result["effective_level"],
+    )
+    return {
+        "status": "ok",
+        "action": action,
+        "automatic_level": result["automatic_level"],
+        "effective_level": result["effective_level"],
+        "manual_override": None if request.level == "auto" else request.level,
+        "note": note,
+    }
+
+
 @router.post("/positions/perp/{position_id}/close")
 async def manual_close_perp_position(
     position_id: str,
