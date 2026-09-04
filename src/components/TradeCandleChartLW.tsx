@@ -77,6 +77,13 @@ export const TradeCandleChartLW: FC<{
   const [inlineLabels, setInlineLabels] = useState<
     { key: string; text: string; color: string; bold: boolean; top: number; lane: number }[]
   >([]);
+  // Le chiusure manuali stanno al loro PREZZO ESEGUITO, sull'incrocio con la
+  // candela in cui sono avvenute: i marker nativi della libreria si limitano a
+  // stare sotto la candela, a una quota che non e' quella del taglio.
+  // (impianto ripreso dal branch codex/manual-close-price-marker)
+  const [manualCloseLabels, setManualCloseLabels] = useState<
+    { key: string; text: string; left: number; top: number; lane: number }[]
+  >([]);
   // Larghezza dell'asse dei prezzi: le etichette si fermano prima, altrimenti
   // finirebbero sopra i numeri della scala.
   const [priceAxisWidth, setPriceAxisWidth] = useState(0);
@@ -243,18 +250,6 @@ export const TradeCandleChartLW: FC<{
         shape: 'arrowDown',
       });
     }
-    // Chiusure decise da una persona: restano visibili per sempre, perche'
-    // vengono dalle righe immutabili dei trade e non da un calcolo al volo.
-    for (const mc of model.manualCloses) {
-      markers.push({
-        time: seconds(model.candles[mc.index].t),
-        position: 'belowBar',
-        color: LEVEL_COLORS.manual,
-        shape: 'circle',
-        // Niente testo qui: lo porta l'etichetta inline, che sa separarsi da
-        // quelle vicine. I testi dei marker nativi invece si sovrappongono.
-      });
-    }
     // I marker vanno in ordine di tempo, altrimenti la libreria li rifiuta.
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(series, markers);
@@ -272,22 +267,27 @@ export const TradeCandleChartLW: FC<{
       });
     }
 
-    c.timeScale().fitContent();
-    // La chiusura manuale cade sull'ULTIMA candela, e fitContent() la incolla al
-    // bordo: senza un po' d'aria la sua etichetta ("✂ 50%") esce dal grafico
-    // tagliata a meta'. Il margine si aggiunge solo quando quei marker ci sono,
-    // per non cambiare l'inquadratura di tutti gli altri grafici.
-    if (model.manualCloses.length > 0) {
-      c.timeScale().applyOptions({ rightOffset: 5 });
+    // Vista iniziale: TUTTO il trade con un po' di contesto ai lati, invece di
+    // schiacciare l'intera finestra con fitContent(). Nulla viene nascosto:
+    // zoom-out e trascinamento raggiungono tutta la storia.
+    //
+    // Centrare sull'ingresso (come faceva la prima stesura) lasciava FUORI
+    // l'uscita sui trade piu' lunghi di una ventina di candele — e l'uscita e'
+    // il punto che si guarda per primo. Verificato: la freccia rossa spariva.
+    const CONTESTO = 10;
+    const MINIMO = 40; // un trade di tre candele non va inquadrato a tre candele
+    let da = model.entryIndex - CONTESTO;
+    let a = model.exitIndex + CONTESTO;
+    const mancante = MINIMO - (a - da);
+    if (mancante > 0) {
+      da -= mancante / 2;
+      a += mancante / 2;
     }
+    c.timeScale().setVisibleLogicalRange({ from: da, to: a });
 
     // Distanza sotto la quale due sigle si sovrapporrebbero.
     const MIN_GAP_PX = 10;
     const placeInlineLabels = () => {
-      // Livelli e chiusure manuali nella STESSA lista: cosi' le chiusure
-      // ereditano la separazione a corsie gia' scritta per i livelli, invece di
-      // avere un impianto proprio. Le chiusure portano il prezzo eseguito, che
-      // e' un livello a tutti gli effetti per chi guarda.
       const voci: { key: string; price: number; tag: string; color: string; forte: boolean }[] = [
         ...model.levels.map((l) => ({
           key: l.key as string,
@@ -295,13 +295,6 @@ export const TradeCandleChartLW: FC<{
           tag: l.key === 'trl' && trailingGapPct != null ? `${l.tag} ${trailingGapPct}` : l.tag,
           color: l.color,
           forte: KEY_LEVELS.has(l.key) || l.strong,
-        })),
-        ...model.manualCloses.map((mc, i) => ({
-          key: `manual-${i}`,
-          price: mc.price,
-          tag: `✂ ${mc.tag}`,
-          color: LEVEL_COLORS.manual,
-          forte: false,
         })),
       ];
       const placed = voci
@@ -337,13 +330,33 @@ export const TradeCandleChartLW: FC<{
         label.lane = lane;
         previousTop = label.top;
       }
+      const manual = model.manualCloses
+        .map((event, index) => {
+          const left = c.timeScale().timeToCoordinate(seconds(model.candles[event.index].t));
+          const top = series.priceToCoordinate(event.price);
+          if (left == null || top == null || left < 0 || left > container.clientWidth || top < 0 || top > height) {
+            return null;
+          }
+          return { key: `${event.index}-${event.price}-${index}`, text: event.tag, left, top, lane: 0 };
+        })
+        .filter((event): event is NonNullable<typeof event> => event != null)
+        .sort((a, b) => a.left - b.left || a.top - b.top);
+      // Due riduzioni possono cadere nella stessa candela e quasi allo stesso
+      // prezzo. La prima resta sul punto esatto; le successive spostano solo il
+      // testo, mentre il centro della forbice continua a indicare quel prezzo.
+      for (let i = 0; i < manual.length; i += 1) {
+        manual[i].lane = manual.slice(0, i).filter(
+          (other) => Math.abs(other.left - manual[i].left) < 18 && Math.abs(other.top - manual[i].top) < 16,
+        ).length;
+      }
       const axisWidth = series.priceScale().width();
       const signature = `${axisWidth}|${placed
         .map((l) => `${l.key}:${Math.round(l.top)}:${l.lane}:${l.text}`)
-        .join(',')}`;
+        .join(',')}|${manual.map((m) => `${m.key}:${Math.round(m.left)}:${Math.round(m.top)}:${m.lane}`).join(',')}`;
       if (signature === lastPlacementRef.current) return;
       lastPlacementRef.current = signature;
       setInlineLabels(placed);
+      setManualCloseLabels(manual);
       setPriceAxisWidth(axisWidth);
     };
     placeInlineLabels();
@@ -430,6 +443,31 @@ export const TradeCandleChartLW: FC<{
           }}
         >
           {label.text}
+        </span>
+      ))}
+      {/* La forbice sta sul punto: stessa x della candela, stessa y del prezzo
+          eseguito — quindi cade sulla propria riga orizzontale, che da li' porta
+          il prezzo fino alla scala di destra. */}
+      {manualCloseLabels.map((event) => (
+        <span
+          key={event.key}
+          style={{
+            position: 'absolute',
+            left: event.left,
+            top: event.top,
+            transform: `translate(-8px, calc(-50% - ${event.lane * 15}px))`,
+            color: LEVEL_COLORS.manual,
+            fontSize: 10,
+            lineHeight: '14px',
+            fontWeight: 700,
+            textShadow: '0 0 3px #0b0e11, 0 0 3px #0b0e11',
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+            zIndex: 3,
+          }}
+          title={`Chiusura manuale ${event.text}`}
+        >
+          ✂ {event.text}
         </span>
       ))}
     </div>
