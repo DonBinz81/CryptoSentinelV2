@@ -12,7 +12,9 @@ import {
   fetchGlobalView,
   fetchPerpView,
   fetchScannerStatus,
+  fetchOperationalStats,
   type ScannerStatusResponse,
+  type OperationalStats,
   fetchSpotView,
   saveAgentSettings,
   setKillSwitch,
@@ -1472,7 +1474,8 @@ export const GlobalPane: FC<{
   onOpenSetup?: () => void;
   adminToken?: string;
   onCounterReset?: () => void;
-}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup, adminToken, onCounterReset }) => {
+  operationalStats?: OperationalStats | null;
+}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup, adminToken, onCounterReset, operationalStats = null }) => {
   const [resetKind, setResetKind] = useState<ResetKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState('');
@@ -1575,7 +1578,155 @@ export const GlobalPane: FC<{
           <EmptyState title="Nessuna decisione" detail="Le ultime valutazioni AI appariranno qui." />
         )}
       </section>
+      {/* In fondo: si consulta, non si sorveglia. */}
+      <SystemHealthPanel stats={operationalStats} status={status} />
     </div>
+  );
+};
+
+/** Da quanto tempo un tick non batte, in forma leggibile. */
+const etaTick = (iso: string | null | undefined): { testo: string; vecchio: boolean } | null => {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  return { testo: s < 60 ? `${s}s fa` : `${Math.floor(s / 60)} min fa`, vecchio: s >= 120 };
+};
+
+/** Codici del motore -> testo leggibile. Oggi `claude_unavailable` e' l'unico
+ *  che il backend produca davvero (`agent/service.py:3312`); un codice
+ *  sconosciuto si mostra COM'E', perche' nasconderlo perderebbe l'unica
+ *  informazione disponibile su un guasto che non abbiamo previsto. */
+const DEGRADO_LEGGIBILE: Record<string, string> = {
+  claude_unavailable: 'Brain (Claude) non raggiungibile',
+};
+
+const leggiDegrado = (codice: string): string => DEGRADO_LEGGIBILE[codice] ?? codice;
+
+/** Riga del pannello salute. Valore null => "non disponibile", mai un numero inventato. */
+const RigaSalute: FC<{
+  etichetta: string;
+  valore: string | null;
+  dettaglio?: string | null;
+  punto?: string;
+  tono?: string;
+}> = ({ etichetta, valore, dettaglio, punto, tono = 'text-gray-300' }) => (
+  <div className="flex items-start justify-between gap-3 py-1.5">
+    <div className="flex items-center gap-2">
+      {punto && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${punto}`} />}
+      <span className="whitespace-nowrap text-xs text-gray-400">{etichetta}</span>
+    </div>
+    <div className="min-w-0 text-right">
+      {valore == null ? (
+        <span className="text-xs italic text-gray-600">non disponibile</span>
+      ) : (
+        <span className={`text-xs font-semibold ${tono}`}>{valore}</span>
+      )}
+      {dettaglio && <p className="mt-0.5 text-[11px] text-gray-500">{dettaglio}</p>}
+    </div>
+  </div>
+);
+
+/**
+ * Salute del sistema, in fondo al Global: informazione da consultare, non da
+ * sorvegliare (scelta di David, 04/09).
+ *
+ * Il disco sta per primo perche' e' l'unico guasto che non da' alcun segnale
+ * finche' non e' troppo tardi, e che quando esplode si presenta con la faccia di
+ * una corruzione del database (NOTE/112): il 4 settembre era al 97%, a un giorno
+ * e mezzo dal blocco, e nessun allarme lo copriva.
+ */
+export const SystemHealthPanel: FC<{ stats: OperationalStats | null; status: AgentStatus | null }> = ({ stats, status }) => {
+  const d = stats?.disk ?? null;
+  // Le soglie arrivano dal backend (risk.yaml), le stesse che fanno scattare
+  // l'allarme: se il pannello ne usasse di proprie, potrebbe mostrare verde
+  // mentre la notifica sta gia' suonando — due verita' diverse sulla stessa
+  // cosa. I valori di ripiego servono solo a un backend piu' vecchio.
+  const soglieAvviso = d?.warn_pct ?? 85;
+  const soglieCritica = d?.critical_pct ?? 92;
+  const tono = d == null
+    ? null
+    : d.used_pct >= soglieCritica
+      ? { testo: 'text-accent-red', barra: 'bg-accent-red', punto: 'bg-accent-red' }
+      : d.used_pct >= soglieAvviso
+        ? { testo: 'text-accent-yellow', barra: 'bg-accent-yellow', punto: 'bg-accent-yellow' }
+        : { testo: 'text-gray-300', barra: 'bg-accent-green', punto: 'bg-accent-green' };
+
+  const problemi = stats?.degraded_reasons ?? null;
+  const veloce = etaTick(status?.fast_loop_last_tick);
+  const lento = etaTick(status?.slow_loop_last_tick);
+
+  return (
+    <section className="rounded-xl border border-dark-600 bg-dark-800 px-4 py-3">
+      <p className="mb-2 text-sm font-bold text-white">Salute del sistema</p>
+
+      {d && tono ? (
+        <div className="py-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className={`h-1.5 w-1.5 rounded-full ${tono.punto}`} />
+              <span className="text-xs text-gray-400">Disco VPS</span>
+            </div>
+            <span className={`text-xs font-semibold ${tono.testo}`}>
+              {d.used_pct}% · {(d.free_bytes / 1e9).toFixed(1)} GB liberi
+            </span>
+          </div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-dark-700">
+            <div className={`h-full ${tono.barra}`} style={{ width: `${Math.min(100, d.used_pct)}%` }} />
+          </div>
+          {/* Un 97% da solo e' un numero: senza questa riga non dice cosa comporta. */}
+          {d.used_pct >= soglieAvviso && (
+            <p className="mt-1 text-[11px] text-accent-yellow">
+              A disco pieno il database non riesce piu&apos; a scrivere: si presenta come una corruzione.
+            </p>
+          )}
+        </div>
+      ) : (
+        <RigaSalute etichetta="Disco VPS" valore={null} />
+      )}
+
+      <div className="mt-1 border-t border-dark-700" />
+
+      <RigaSalute
+        etichetta="Database"
+        valore={stats?.db_size_bytes != null ? `${Math.round(stats.db_size_bytes / 1e6)} MB` : null}
+      />
+      <RigaSalute
+        etichetta="Cicli motore"
+        valore={veloce || lento ? `veloce ${veloce?.testo ?? '—'} · lento ${lento?.testo ?? '—'}` : null}
+        punto={veloce?.vecchio === false ? 'bg-accent-green' : 'bg-accent-yellow'}
+      />
+      <RigaSalute
+        etichetta="Ultimo backup"
+        valore={
+          stats?.last_backup?.status == null
+            ? null
+            : stats.last_backup.status === 'ok' && stats.last_backup.integrity === 'ok'
+              ? 'ok'
+              : `${stats.last_backup.status}${stats.last_backup.integrity ? ` · integrita' ${stats.last_backup.integrity}` : ''}`
+        }
+        dettaglio={
+          stats?.last_backup?.age_seconds != null
+            ? `${Math.floor(stats.last_backup.age_seconds / 3600)}h fa`
+            : null
+        }
+        punto={
+          stats?.last_backup?.status == null
+            ? undefined
+            : stats.last_backup.status === 'ok' && stats.last_backup.integrity === 'ok'
+              ? 'bg-accent-green'
+              : 'bg-accent-red'
+        }
+        tono={stats?.last_backup?.status === 'ok' ? 'text-gray-300' : 'text-accent-red'}
+      />
+      <RigaSalute
+        etichetta="Problemi attivi"
+        valore={problemi == null ? null : problemi.length === 0 ? 'nessuno' : String(problemi.length)}
+        dettaglio={problemi?.length ? problemi.map(leggiDegrado).join(' · ') : null}
+        punto={problemi == null ? undefined : problemi.length ? 'bg-accent-red' : 'bg-accent-green'}
+        tono={problemi?.length ? 'text-accent-red' : 'text-gray-300'}
+      />
+    </section>
   );
 };
 
@@ -2929,6 +3080,7 @@ const AgentTab: FC<AgentTabProps> = ({
   const [spot, setSpot] = useState<SpotView | null>(agentCache.spot);
   const [perp, setPerp] = useState<PerpView | null>(agentCache.perp);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatusResponse | null>(agentCache.scannerStatus);
+  const [operationalStats, setOperationalStats] = useState<OperationalStats | null>(null);
   const [global, setGlobal] = useState<GlobalView | null>(agentCache.global);
   const [equity, setEquity] = useState<EquityCurveResponse | null>(agentCache.equity);
   const [equityRange, setEquityRange] = useState<EquityRange>(agentCache.equityRange);
@@ -3033,6 +3185,7 @@ const AgentTab: FC<AgentTabProps> = ({
         fetchPerpView().then(setPerp),
         fetchGlobalView().then(setGlobal),
         fetchScannerStatus().then(setScannerStatus),
+        fetchOperationalStats().then(setOperationalStats),
         fetchAgentSettings().then((r) => {
           // Con modifiche in corso non salvate, la copia locale ha precedenza.
           if (!settingsDirtyRef.current) setSettings(r.settings);
@@ -3107,6 +3260,7 @@ const AgentTab: FC<AgentTabProps> = ({
         fetchPerpView().then(setPerp),
         fetchGlobalView().then(setGlobal),
         fetchScannerStatus().then(setScannerStatus),
+        fetchOperationalStats().then(setOperationalStats),
       ]).finally(() => {
         fastRefreshInFlightRef.current = false;
       });
@@ -3360,7 +3514,7 @@ const AgentTab: FC<AgentTabProps> = ({
       )}
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
       {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} adminToken={adminToken} onClosed={() => void refresh()} />}
-      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} adminToken={adminToken} onCounterReset={() => void refresh()} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
+      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} adminToken={adminToken} onCounterReset={() => void refresh()} operationalStats={operationalStats} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
       {pane === 'wallet' && <WalletPane execWallets={execWallets} spot={spot} perp={perp} />}
       {pane === 'coins' && (
         <CoinsPane

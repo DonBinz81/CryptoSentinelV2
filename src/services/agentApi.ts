@@ -27,6 +27,39 @@ export interface GuardianStatus {
   manual_override?: { level: GuardianState; at: string } | null;
 }
 
+/**
+ * Salute del sistema. Ogni campo e' opzionale e puo' essere null: un valore che
+ * il backend non sa calcolare va mostrato come "non disponibile", MAI come uno
+ * zero o un 100% — un pannello che rassicura sempre e' peggio di nessun pannello.
+ */
+export interface OperationalStats {
+  disk?: {
+    used_pct: number;
+    free_bytes: number;
+    total_bytes: number;
+    path?: string;
+    /** Soglie che fanno scattare l'ALLARME (risk.yaml). Il pannello usa queste e non
+     *  le proprie: se divergessero, l'app direbbe "verde" mentre la notifica suona. */
+    warn_pct?: number;
+    critical_pct?: number;
+  } | null;
+  db_size_bytes?: number | null;
+  degraded_reasons?: string[] | null;
+  heartbeat?: Record<string, string | number | null> | null;
+  /** Ultimo backup: e' il guasto che altrimenti si vede solo via Telegram — e se
+   *  il canale stesso e' rotto, non lo si vede affatto. */
+  last_backup?: {
+    status?: string | null;
+    integrity?: string | null;
+    timestamp_utc?: string | null;
+    age_seconds?: number | null;
+  } | null;
+}
+
+export function fetchOperationalStats(): Promise<OperationalStats> {
+  return request<OperationalStats>('/api/v1/views/operational-stats');
+}
+
 /** "auto" non forza il verde: rimuove l'override e torna a seguire l'automatico. */
 export type GuardianOverrideChoice = GuardianState | 'auto';
 
