@@ -1,0 +1,21 @@
+[Unit]
+Description=CryptoSentinelV2 disk space watchdog
+
+[Service]
+Type=oneshot
+User=cryptosentinelv2
+Group=cryptosentinelv2
+# Same order as the backend unit: needed for API_ADMIN_TOKEN, TELEGRAM_BOT_TOKEN
+# and TELEGRAM_CHAT_ID, which notify_alert.sh reads from the environment.
+EnvironmentFile=-/etc/cryptosentinelv2/backend.env
+EnvironmentFile=/opt/cryptosentinelv2/app/.env
+ExecStart=/opt/cryptosentinelv2/app/deploy/scripts/disk_watchdog.sh
+StateDirectory=cryptosentinelv2-disk-watchdog
+UMask=0077
+Nice=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/cryptosentinelv2/app

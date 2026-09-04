@@ -22,3 +22,14 @@ risk:
   # the structural stop keeps its own lookback, which must not follow this value.
   # 20 candles = the current behaviour (~1h40 at 5m); 288 = 24h at 5m.
   chart_pre_open_candles: 20
+
+# Operational monitoring thresholds. Kept here, and not inside the watchdog
+# script, so that the alert and anything that displays disk health read the same
+# numbers: two sources would eventually disagree, and a panel showing green
+# while the alert is firing is worse than either on its own.
+# Consumed today by deploy/scripts/disk_watchdog.sh. Not mapped in
+# SECTION_FIELD_MAP yet - unmapped sections are ignored by the loader - so add
+# the mapping when the backend needs to expose these values.
+monitoring:
+  disk_warn_pct: 85
+  disk_critical_pct: 92
