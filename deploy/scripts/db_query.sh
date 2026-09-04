@@ -66,8 +66,19 @@ if [ "$use_backup" -eq 1 ]; then
         echo "csv2-db: no automatic backup found in $BACKUP_DIR" >&2
         exit 1
     fi
-    sudo cp "$BACKUP_DIR/$latest/local.db" "$WORK_DIR/db.sqlite" || exit 1
-    echo "csv2-db: querying backup $latest" >&2
+    # Backups older than COMPRESS_AFTER_HOURS keep the database gzipped (see
+    # backup_sqlite.sh), so accept both shapes: the recent ones cost nothing,
+    # the older ones about a second to unpack.
+    if [ -f "$BACKUP_DIR/$latest/local.db" ]; then
+        sudo cp "$BACKUP_DIR/$latest/local.db" "$WORK_DIR/db.sqlite" || exit 1
+        echo "csv2-db: querying backup $latest" >&2
+    elif [ -f "$BACKUP_DIR/$latest/local.db.gz" ]; then
+        sudo gzip -dc "$BACKUP_DIR/$latest/local.db.gz" > "$WORK_DIR/db.sqlite" || exit 1
+        echo "csv2-db: querying backup $latest (decompressed)" >&2
+    else
+        echo "csv2-db: backup $latest has no database file" >&2
+        exit 1
+    fi
 else
     # Hot copy of the live file. Both sidecars matter: without -wal the copy is
     # missing every transaction not yet checkpointed into the main file.
