@@ -167,6 +167,38 @@ class PerpTradeRepository:
         )
         return result.scalar_one_or_none()
 
+    async def manual_closes_for_positions(
+        self, user_id: str, position_ids: list[str], *, limit: int = 50
+    ) -> dict[str, list[PerpTrade]]:
+        """The human closes of each position, oldest first.
+
+        Used to mark them on the chart and to annotate history rows. Read at
+        query time from ``perp_trades`` instead of being frozen into the chart
+        snapshot, for three reasons: those rows are immutable, so reopening a
+        chart hours later shows exactly the same thing; a snapshot taken at
+        close time could not cover positions that are still OPEN, which is the
+        main case (reduce by hand, keep watching); and it works retroactively on
+        closes made before this feature existed, with no backfill.
+
+        ``limit`` is a belt: today the busiest position has two manual closes.
+        """
+        if not position_ids:
+            return {}
+        rows = await self._session.execute(
+            select(PerpTrade)
+            .where(
+                PerpTrade.user_id == user_id,
+                PerpTrade.position_id.in_(position_ids),
+                PerpTrade.notes.like("manual_close:%"),
+            )
+            .order_by(PerpTrade.id)
+            .limit(limit)
+        )
+        out: dict[str, list[PerpTrade]] = {}
+        for trade in rows.scalars().all():
+            out.setdefault(str(trade.position_id), []).append(trade)
+        return out
+
     async def manual_reduction_by_position(
         self, user_id: str, position_ids: list[str]
     ) -> dict[str, tuple[int, Decimal, Decimal]]:

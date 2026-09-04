@@ -109,6 +109,13 @@ class PerpTradeView(BaseModel):
     leverage: int
     status: str
     close_reason: str | None = None
+    #: Percentage of the ORIGINAL position size that THIS manual close removed.
+    #: Set only on manual_close rows; None everywhere else, and None when the
+    #: opening size cannot be determined. Deliberately NOT named like the
+    #: position-level ``manual_reduced_pct``, which is cumulative: the two live
+    #: in the same client file with the same type, so identical names would let
+    #: a wrong autocompletion produce a plausible but false number.
+    manual_close_pct: str | None = None
     tx_hash: str | None = None
     timestamp_utc: str
     block_timestamp_utc: str | None = None

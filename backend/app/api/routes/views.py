@@ -17,9 +17,10 @@ from backend.app.persistence.models.positions import PerpPosition, SpotPosition
 from backend.app.persistence.models.trade_charts import TradeChartSnapshot
 from backend.app.persistence.models.trades import PerpTrade, SpotTrade
 from backend.app.persistence.repositories.pnl import PnlRepository
+from backend.app.persistence.repositories.trades import PerpTradeRepository
 from backend.app.persistence.runtime_state import get_runtime_value
 from backend.app.persistence.repositories.trade_charts import TradeChartRepository
-from backend.app.persistence.views import ViewService, _close_reason
+from backend.app.persistence.views import ViewService, _close_reason, _position_id_from_close_trade
 from backend.app.schemas.views import GlobalView, PerpView, SpotView
 
 router = APIRouter(prefix="/api/v1/views", tags=["views"])
@@ -231,7 +232,21 @@ async def trade_detail(
         side = position.side if position is not None else perp.side
         chart_payload = await _enrich_trade_chart_context(chart_payload, perp.asset, "futures", "perp", side, settings, pre_open_count)
         post_close = await _fetch_post_close_candles(chart_payload, perp.asset, "futures", post_close_count)
-    return _perp_trade_detail(perp, position, decision, settings, snapshot, live, post_close, chart_payload)
+    # Chiusure manuali della posizione, per i marker: una query sola, e solo se
+    # un grafico ci sara' davvero (senza snapshot non c'e' nulla da marcare).
+    manual_trades: list = []
+    opening_size: Decimal | None = None
+    pos_id = position.position_id if position is not None else _position_id_from_close_trade(perp.trade_id)
+    if pos_id and (live is not None or chart_payload is not None):
+        trade_repo = PerpTradeRepository(session)
+        manual_trades = (await trade_repo.manual_closes_for_positions(user_id, [pos_id])).get(pos_id, [])
+        if manual_trades:
+            aggregates = await trade_repo.manual_reduction_by_position(user_id, [pos_id])
+            opening_size = aggregates.get(pos_id, (0, Decimal("0"), Decimal("0")))[2] or None
+    return _perp_trade_detail(
+        perp, position, decision, settings, snapshot, live, post_close, chart_payload,
+        manual_trades, opening_size,
+    )
 
 
 async def _find_trade_position(session, model, trade):
@@ -362,6 +377,52 @@ async def _fetch_post_close_candles(chart: dict, asset: str, feed_market: str, c
         return post[:count]
     except Exception:
         return []
+
+
+def _manual_close_markers(
+    chart: dict | None, manual_trades: list, opening_size: Decimal | None
+) -> list[dict]:
+    """Human closes that fall INSIDE the window this chart draws.
+
+    Events outside the window are dropped here, on purpose. The client maps a
+    timestamp to the nearest candle, and "nearest" never fails: an out-of-range
+    event would be pinned to an edge candle and drawn at a point where that
+    close never happened — plausible and false, the worst kind of wrong. Doing
+    the filtering here makes the contract stronger: every element of this list
+    is drawable, so the client needs no check of its own.
+
+    Consequence to know: on a long-lived position whose live chart only covers
+    the recent window, an older manual close will be absent while the position
+    badge still counts it. That is not an inconsistency — the badge counts every
+    intervention, the chart shows the ones inside what it is drawing.
+    """
+    if chart is None or not manual_trades:
+        return []
+    normalized = _normalize_chart_candles(chart.get("candles", []))
+    if not normalized:
+        return []
+    first_ts, last_ts = normalized[0][0], normalized[-1][0]
+    markers: list[dict] = []
+    for trade in manual_trades:
+        ts = trade.timestamp_utc
+        if ts is None:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        if ts < first_ts or ts > last_ts:
+            continue
+        pct = None
+        if opening_size and opening_size > 0:
+            pct = f"{(Decimal(str(trade.size)) / opening_size * Decimal('100')).quantize(Decimal('0.01'))}"
+        markers.append(
+            {
+                "t": ts.isoformat(),
+                "price": _fmt_price(trade.price),
+                "size": _fmt_price(trade.size),
+                "pct": pct,
+            }
+        )
+    return markers
 
 
 def _normalize_chart_candles(raw_candles: list[dict]) -> list[tuple[datetime, dict]]:
@@ -1169,6 +1230,8 @@ def _perp_trade_detail(
     live_chart: dict | None = None,
     post_close_candles: list[dict] | None = None,
     chart_payload: dict | None = None,
+    manual_trades: list | None = None,
+    opening_size: Decimal | None = None,
 ) -> dict:
     # Per posizioni ancora aperte il grafico live prevale sullo snapshot parziale (TP1).
     raw_chart = live_chart if live_chart is not None else (chart_payload if chart_payload is not None else (json.loads(snapshot.payload) if snapshot else None))
@@ -1177,6 +1240,13 @@ def _perp_trade_detail(
     chart = _apply_display_stop_to_chart(chart, position, settings, "perp", side)
     if chart is not None and post_close_candles:
         chart = {**chart, "post_close_candles": post_close_candles}
+    # Chiusure manuali da marcare: lista sempre presente quando il grafico c'e',
+    # cosi' il client non deve distinguere "assente" da "vuota".
+    if chart is not None:
+        chart = {
+            **chart,
+            "manual_closes": _manual_close_markers(chart, manual_trades or [], opening_size),
+        }
     is_close = trade.trade_id.startswith("cls_")
     is_ssl = trade.trade_id.startswith("ssl_")
     entry = (

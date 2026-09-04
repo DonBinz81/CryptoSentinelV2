@@ -85,6 +85,26 @@ def _manual_reduction_view_fields(position_id: str, aggregates: dict) -> dict:
     }
 
 
+def _manual_close_pct(trade, openings: dict) -> str | None:
+    """Share of the ORIGINAL size removed by THIS manual close.
+
+    Per-event, not cumulative: on a history row the reader is looking at that
+    one event. Two consecutive rows of the same position showing "50%" and
+    "75%" would read as two reductions of different size, when the second
+    removed 25%. The cumulative figure is the badge on the open position, and
+    the two fields are named differently on purpose.
+
+    None on non-manual rows and whenever the opening size is unknown.
+    """
+    notes = trade.notes or ""
+    if not notes.startswith("manual_close:"):
+        return None
+    opening = openings.get(str(trade.position_id or ""))
+    if not opening or opening <= 0:
+        return None
+    return f"{(Decimal(str(trade.size)) / opening * Decimal('100')).quantize(Decimal('0.01'))}"
+
+
 class ViewService:
     """Assembles the Spot / Perp / Global dashboard payloads."""
 
@@ -198,6 +218,19 @@ class ViewService:
         manual_reductions = await trade_repo.manual_reduction_by_position(
             user_id, [p.position_id for p in positions]
         )
+        # Denominatori per le righe di storico: solo le posizioni che hanno
+        # davvero una chiusura manuale, non tutte quelle dello storico. In
+        # produzione sono 16 su 225 — non c'e' motivo di chiedere le altre.
+        manual_history_ids = sorted({
+            str(t.position_id) for t in history_trades
+            if t.position_id and (t.notes or "").startswith("manual_close:")
+        })
+        manual_openings = {
+            pid: opening
+            for pid, (_c, _m, opening) in (
+                await trade_repo.manual_reduction_by_position(user_id, manual_history_ids)
+            ).items()
+        }
         return PerpView(
             open_positions=[
                 PerpPositionView(
@@ -251,6 +284,7 @@ class ViewService:
                     leverage=t.leverage,
                     status=t.status,
                     close_reason=_close_reason(t),
+                    manual_close_pct=_manual_close_pct(t, manual_openings),
                     tx_hash=t.tx_hash,
                     timestamp_utc=t.timestamp_utc.isoformat(),
                     block_timestamp_utc=t.block_timestamp_utc.isoformat() if t.block_timestamp_utc else None,
