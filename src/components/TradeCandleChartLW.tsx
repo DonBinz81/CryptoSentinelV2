@@ -199,6 +199,27 @@ export const TradeCandleChartLW: FC<{
       });
     }
 
+    // Prezzo di ogni chiusura manuale, come linea orizzontale. Il marker dice
+    // QUANDO e QUANTO; la linea dice A CHE PREZZO, ed e' l'informazione che
+    // serve a giudicare la decisione: quell'uscita sta sopra o sotto l'entry,
+    // sopra o sotto il TP che il prezzo ha poi toccato.
+    //
+    // Punteggiata e sottile di proposito: e' un EVENTO GIA' AVVENUTO, non un
+    // livello attivo come SL o TP, e non deve competere con le righe che dicono
+    // cosa succedera'.
+    for (const mc of model.manualCloses) {
+      series.createPriceLine({
+        price: mc.price,
+        color: LEVEL_COLORS.manual,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        axisLabelColor: '#0b0e11',
+        axisLabelTextColor: LEVEL_COLORS.manual,
+        title: '',
+      });
+    }
+
     const markers: SeriesMarker<UTCTimestamp>[] = [
       {
         // L'ingresso segue la direzione del trade: freccia in su sotto la candela

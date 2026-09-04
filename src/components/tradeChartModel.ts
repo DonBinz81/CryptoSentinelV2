@@ -161,7 +161,15 @@ export function buildTradeChartModel(
   const levels = candidates.filter((l): l is TradeChartLevel => l != null && !Number.isNaN(l.price));
 
   // La scala comprende anche il prezzo di uscita, che non e' una linea ma un marker.
-  const scalePrices = [entry, exit, sl, tp1, tp2, be, trail, s1, s2]
+  // I prezzi delle chiusure manuali entrano nella scala: oggi cadono sempre
+  // dentro il range delle candele (sono prezzi a cui il mercato ha scambiato in
+  // quel momento), ma se uno finisse fuori la sua linea sparirebbe SENZA
+  // segnalarlo — con il marker che continua a dire che il taglio c'e' stato.
+  // In live, con lo slippage e un feed diverso da quello della venue, non e'
+  // garantito. Verificato: senza questa riga, un prezzo fuori range non viene
+  // disegnato affatto.
+  const prezziManuali = (chart.manual_closes ?? []).map((m) => Number(m.price));
+  const scalePrices = [entry, exit, sl, tp1, tp2, be, trail, s1, s2, ...prezziManuali]
     .filter((v): v is number => v != null && !Number.isNaN(v));
   let scaleHigh = Math.max(...candles.map((c) => c.h), ...scalePrices);
   let scaleLow = Math.min(...candles.map((c) => c.l), ...scalePrices);
