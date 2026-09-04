@@ -1,0 +1,11 @@
+[Unit]
+Description=CryptoSentinelV2 disk space watchdog every hour
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=1h
+AccuracySec=5min
+Unit=cryptosentinelv2-disk-watchdog.service
+
+[Install]
+WantedBy=timers.target
