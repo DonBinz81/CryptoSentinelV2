@@ -391,6 +391,10 @@ def _manual_close_markers(
     the filtering here makes the contract stronger: every element of this list
     is drawable, so the client needs no check of its own.
 
+    The window is [first candle open, last candle open + one interval): the end
+    of the last candle, not its start. A close happening inside the last candle
+    must be kept — it is the most important marker of all.
+
     Consequence to know: on a long-lived position whose live chart only covers
     the recent window, an older manual close will be absent while the position
     badge still counts it. That is not an inconsistency — the badge counts every
@@ -401,7 +405,16 @@ def _manual_close_markers(
     normalized = _normalize_chart_candles(chart.get("candles", []))
     if not normalized:
         return []
-    first_ts, last_ts = normalized[0][0], normalized[-1][0]
+    # Il limite superiore e' la FINE dell'ultima candela, non la sua apertura.
+    # Un timestamp di candela e' il suo istante di apertura: usarlo come limite
+    # scartava ogni evento avvenuto DENTRO l'ultima candela — e la chiusura di
+    # una posizione sta li' per costruzione, perche' `_normalize_closed_chart`
+    # taglia il grafico proprio sulla candela in cui il trade si e' chiuso.
+    # Effetto: su un trade chiuso a mano spariva il marker della chiusura, cioe'
+    # esattamente quello richiesto, mentre le riduzioni precedenti passavano.
+    interval_min = _INTERVAL_MINUTES.get(str(chart.get("interval", "5m")), 5)
+    first_ts = normalized[0][0]
+    last_ts = normalized[-1][0] + timedelta(minutes=interval_min)
     markers: list[dict] = []
     for trade in manual_trades:
         ts = trade.timestamp_utc
