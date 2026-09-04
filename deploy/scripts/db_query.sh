@@ -69,10 +69,13 @@ if [ "$use_backup" -eq 1 ]; then
     # Backups older than COMPRESS_AFTER_HOURS keep the database gzipped (see
     # backup_sqlite.sh), so accept both shapes: the recent ones cost nothing,
     # the older ones about a second to unpack.
-    if [ -f "$BACKUP_DIR/$latest/local.db" ]; then
+    # `sudo test`, not `[ -f ]`: backups are 0600 and owned by the service user,
+    # so an unprivileged existence check always says "missing" and would send
+    # every lookup down the wrong branch.
+    if sudo test -f "$BACKUP_DIR/$latest/local.db"; then
         sudo cp "$BACKUP_DIR/$latest/local.db" "$WORK_DIR/db.sqlite" || exit 1
         echo "csv2-db: querying backup $latest" >&2
-    elif [ -f "$BACKUP_DIR/$latest/local.db.gz" ]; then
+    elif sudo test -f "$BACKUP_DIR/$latest/local.db.gz"; then
         sudo gzip -dc "$BACKUP_DIR/$latest/local.db.gz" > "$WORK_DIR/db.sqlite" || exit 1
         echo "csv2-db: querying backup $latest (decompressed)" >&2
     else
