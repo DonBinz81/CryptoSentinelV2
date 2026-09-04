@@ -229,6 +229,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |   |   |-- backup_alert.sh - notifica push critica quando il backup fallisce o la copia del DB non passa `integrity_check`. Riceve il token admin da EnvironmentFile e non lo stampa mai.
 |   |   |-- db_query.sh - interroga il DB di produzione SENZA aprirlo: copia file e sidecar in /tmp e legge la copia. Installato come `/usr/local/bin/csv2-db`. Opzioni: --backup (usa l'ultimo backup), --keep, --shell.
 |   |   |-- sqlite3_guard.sh - installato come `/usr/local/bin/sqlite3`: rifiuta l'apertura del DB di produzione a servizio attivo e indica csv2-db. Fail-open per costruzione; non tocca backup_sqlite.sh, che lavora sulla copia in staging.
+|   |   |-- disk_watchdog.sh - allarme sullo spazio disco, ogni ora, due livelli (avviso/critico) con soglie lette da `configs/risk.yaml` sezione `monitoring`, non dallo script: l'allarme e cio' che mostra lo spazio devono leggere gli stessi numeri. Stima dei giorni rimasti misurata sullo storico reale, assente se lo spazio non cala.
 |   |   |-- backup_freshness_watchdog.sh - copre il caso che `backup_alert.sh` non vede: il timer di backup che smette di partire del tutto (nessun fallimento da segnalare). Due segnali: il timer non e' `active`, o l'ultimo esito e' piu' vecchio della cadenza attesa oltre margine. Throttle proprio, consegna via `notify_alert.sh`.
 |   |   `-- healthcheck.sh - curl fail-fast su `/health/live`.
 |   `-- systemd/ - unit e timer systemd.
@@ -237,6 +238,7 @@ CryptoSentinelHackathon/ - repository CryptoSentinelV2 + backend agente BNB Hack
 |       |-- cryptosentinelv2-backup-alert.service - allarme push sul fallimento del backup e sulla corruzione del database.
 |       |-- cryptosentinelv2-db-watchdog.service / .timer - rilevamento guasti del database ogni 60 secondi, con throttle di 30 minuti sulla notifica.
 |       |-- cryptosentinelv2-backup-freshness.service / .timer - watchdog di freschezza del backup ogni ora (NOTE/54 SS10.2).
+|       |-- cryptosentinelv2-disk-watchdog.service / .timer - allarme spazio disco ogni ora (NOTE/112).
 |       `-- cryptosentinelv2-healthcheck.service / cryptosentinelv2-healthcheck.timer - liveness periodica ogni 60 secondi.
 |-- docs/ - documentazione progetto e review.
 |   |-- CURRENT_STRUCTURE.md - baseline pre-integrazione backend.
