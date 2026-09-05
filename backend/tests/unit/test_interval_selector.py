@@ -166,3 +166,109 @@ async def test_con_intervallo_imposto_il_riferimento_NON_viene_inferito() -> Non
         "con una risoluzione scelta dall'utente il riferimento non va inventato: "
         "meglio assente che dipendente dallo zoom"
     )
+
+
+# ── 🔴 anche il percorso della posizione APERTA, che nella prima stesura ────
+#     era rimasto scoperto (trovato da una revisione avversariale).
+#
+# La protezione esisteva solo per i trade chiusi. Su una posizione aperta
+# `_build_live_chart` chiamava `_ensure_stop_reference` sulle candele appena
+# scaricate alla risoluzione scelta dall'utente.
+#
+# Oggi il ramo e' inerte in produzione (tutte le posizioni aperte hanno
+# `stop_reference_time`), ma "inerte oggi" e' quello che si era detto anche del
+# percorso chiuso, dove poi sono emersi 7 snapshot senza riferimento.
+
+
+class _PosizioneSenzaRiferimento:
+    """Posizione aperta priva di stop_reference_time: il caso che scopre il ramo."""
+
+    asset = "LINK"
+    side = "long"
+    entry_price = "100"
+    current_price = "99"
+    stop_loss = "95"
+    initial_stop_loss = None
+    take_profit_1 = None
+    take_profit_2 = None
+    liquidation_price = None
+    stop_reference_time = None
+    stop_reference_price = None
+    stop_reference_field = None
+    opened_at = APERTURA
+
+
+def _stub_moduli(monkeypatch, per_min_atteso: dict):
+    """Feed e _auto_chart_interval finti: senza, la funzione esce prima di
+    arrivare al punto che vogliamo osservare — ed e' esattamente cosi' che la
+    prima stesura di questo test passava anche col difetto presente."""
+    import types
+
+    # service.py non e' importabile in locale (web3 senza wheel ARM64): copia
+    # identica della funzione, da service.py:166-174.
+    serv = types.ModuleType("backend.app.agent.service")
+
+    def _auto(duration_min):
+        if duration_min <= 6 * 60:
+            return "5m", 5
+        if duration_min <= 2 * 24 * 60:
+            return "1h", 60
+        if duration_min <= 30 * 24 * 60:
+            return "4h", 240
+        return "1d", 1440
+
+    serv._auto_chart_interval = _auto
+    monkeypatch.setitem(sys.modules, "backend.app.agent.service", serv)
+
+    class _Candela:
+        def __init__(self, t, o, h, l, c):
+            self.timestamp, self.open, self.high, self.low, self.close = t, o, h, l, c
+
+    class _Feed:
+        def __init__(self, *a, **k):
+            pass
+
+        async def fetch(self, *, symbol, interval, limit, market, start_time=None):
+            per_min = V._INTERVAL_MINUTES[interval]
+            per_min_atteso["visto"] = interval
+            base = start_time or (APERTURA - timedelta(minutes=per_min * limit))
+            fuori = []
+            for i in range(limit):
+                t = base + timedelta(minutes=i * per_min)
+                minuti_prima = (APERTURA - t).total_seconds() / 60
+                basso = 50.0 if 55 < minuti_prima <= 65 else 98.0
+                fuori.append(_Candela(t, 99, 100.0, basso, 99))
+            return fuori
+
+    mod = types.ModuleType("backend.app.agent.signals.perp.binance_klines")
+    mod.BinanceKlineFeed = _Feed
+    monkeypatch.setitem(sys.modules, "backend.app.agent.signals.perp.binance_klines", mod)
+
+
+async def test_posizione_aperta_SENZA_scelta_utente_inferisce(monkeypatch) -> None:
+    """Comportamento storico: senza intervallo imposto il riferimento si deduce."""
+    _stub_moduli(monkeypatch, {})
+    monkeypatch.setattr(V, "_cached_klines", lambda *a, **k: None, raising=False)
+    r = await V._build_live_chart(_PosizioneSenzaRiferimento(), "perp", settings=None)
+    assert r is not None and r.get("stop_reference"), "senza scelta utente l inferenza resta"
+
+
+async def test_posizione_aperta_con_intervallo_scelto_NON_inferisce(monkeypatch) -> None:
+    """🔴 Il difetto trovato dalla revisione: qui la protezione mancava.
+
+    Se fallisce, la candela indicata come origine dello stop — e in assenza di
+    `initial_stop_loss` la riga SL stessa — cambiano a seconda della
+    risoluzione con cui si guarda il grafico.
+    """
+    visto: dict = {}
+    _stub_moduli(monkeypatch, visto)
+    monkeypatch.setattr(V, "_cached_klines", lambda *a, **k: None, raising=False)
+    r = await V._build_live_chart(
+        _PosizioneSenzaRiferimento(), "perp", settings=None, interval_override="1m"
+    )
+    assert r is not None, "il feed finto deve produrre un grafico"
+    assert visto.get("visto") == "1m", "la risoluzione scelta deve arrivare al feed"
+    assert not r.get("stop_reference"), (
+        "con una risoluzione scelta dall utente il riferimento non va dedotto: "
+        "meglio assente che dipendente dallo zoom"
+    )

@@ -827,7 +827,25 @@ async def _build_live_chart(
                 for c in candles
             ],
         }
-        chart = _ensure_stop_reference(chart, market, chart["side"], lookback)
+        # 🔴 Stessa protezione del percorso dei trade chiusi, che nella prima
+        # stesura mancava QUI: `_ensure_stop_reference` inferisce il riferimento
+        # dalle ultime `lookback` CANDELE, e 20 candele valgono 20 minuti a 1m e
+        # 100 a 5m. Con una risoluzione scelta dall'utente il riferimento — e la
+        # candela evidenziata come origine dello stop — si sposterebbe a seconda
+        # di come si guarda il grafico.
+        #
+        # Oggi il ramo e' inerte: tutte le 6 posizioni aperte in produzione hanno
+        # `stop_reference_time`, quindi la guardia in cima a _ensure_stop_reference
+        # esce subito. Ma "inerte oggi" e' quello che si era detto anche del
+        # percorso chiuso, dove poi sono saltati fuori 7 snapshot senza
+        # riferimento: la simmetria costa cinque righe, il guasto sarebbe una
+        # riga di stop falsa.
+        if interval_override:
+            chart = {k: v for k, v in chart.items() if k != "stop_reference"} if not chart.get(
+                "stop_reference"
+            ) else chart
+        else:
+            chart = _ensure_stop_reference(chart, market, chart["side"], lookback)
         return _apply_display_stop_to_chart(chart, position, settings, market, chart["side"])
     except Exception as exc:
         # NOTE/93 parte 2: era un ritorno None completamente silenzioso -- un
