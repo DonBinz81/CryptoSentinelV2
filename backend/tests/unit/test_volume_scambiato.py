@@ -35,6 +35,34 @@ MEZZANOTTE = OGGI.replace(hour=0, minute=0, second=0, microsecond=0)
 IERI = OGGI - timedelta(days=1)
 
 
+class _OrologioFermo(datetime):
+    """Congela `now()` a OGGI, lasciando intatto tutto il resto di datetime.
+
+    ⚠️ Senza questo, i due test sulle viste marcivano da soli: le righe erano
+    datate 4 settembre e la vista chiedeva "da mezzanotte" all'orologio VERO,
+    quindi dal 5 settembre in poi `volume_today` tornava 0 e il test falliva su
+    codice sano. Un test legato al calendario e' un allarme che suona da solo:
+    rompe la CI ogni notte e insegna a ignorarla.
+
+    Sottoclasse invece di una lambda perche' la vista usa `datetime` anche per
+    costruire istanti, non solo per leggere l'ora.
+    """
+
+    @classmethod
+    def now(cls, tz=None):  # noqa: D102
+        return OGGI if tz is None else OGGI.astimezone(tz)
+
+
+@pytest.fixture()
+def orologio_fermo(monkeypatch):
+    """La vista importa lo stesso modulo sotto DUE nomi (`datetime` e `_dt`)."""
+    from backend.app.persistence import views as _viste_mod
+
+    for nome in ("datetime", "_dt"):
+        if hasattr(_viste_mod, nome):
+            monkeypatch.setattr(_viste_mod, nome, _OrologioFermo)
+
+
 @pytest.fixture()
 async def db(tmp_path: Path):
     await init_db(f"sqlite+aiosqlite:///{tmp_path / 'volume.db'}")
@@ -257,7 +285,7 @@ async def _viste(righe: list):
         )
 
 
-async def test_le_viste_non_scambiano_totale_e_oggi(db) -> None:
+async def test_le_viste_non_scambiano_totale_e_oggi(db, orologio_fermo) -> None:
     """Totale e quota odierna devono finire ognuno nel proprio campo.
 
     Numeri scelti perche' uno scambio sia visibile: se invertiti, Vol Tot
@@ -278,7 +306,9 @@ async def test_le_viste_non_scambiano_totale_e_oggi(db) -> None:
     assert glob.volume_today_usd == Decimal("170")
 
 
-async def test_global_view_senza_portfolio_riporta_comunque_il_volume(db) -> None:
+async def test_global_view_senza_portfolio_riporta_comunque_il_volume(
+    db, orologio_fermo
+) -> None:
     """global_view ha DUE punti di uscita: quello anticipato non deve dare zero.
 
     Nessuna riga in `portfolio`, quindi si passa dal return anticipato. Senza

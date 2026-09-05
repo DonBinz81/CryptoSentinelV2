@@ -142,8 +142,7 @@ class ViewService:
         win = await trade_repo.win_rate(user_id)
         unrealized = sum((p.pnl_unrealized for p in positions), Decimal("0"))
         realized = await trade_repo.sum_realized_pnl(user_id)
-        from datetime import UTC, datetime as _dt
-        day_start_spot = _dt.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_spot = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         spot_trade_count_tot = await trade_repo.count_closed(user_id)
         spot_trade_count_today = await trade_repo.count_closed(user_id, since=day_start_spot)
         bot_active_days = await self._bot_active_days(user_id)
@@ -212,8 +211,7 @@ class ViewService:
         realized = await trade_repo.sum_realized_pnl(user_id)
         history_positions = await pos_repo.history_for_user(user_id, limit=200)
         entry_by_position_id = {p.position_id: p.entry_price for p in history_positions}
-        from datetime import UTC, datetime as _dt
-        day_start = _dt.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         trade_count_tot = await trade_repo.count_closed(user_id)
         trade_count_today = await trade_repo.count_closed(user_id, since=day_start)
         bot_active_days = await self._bot_active_days(user_id)

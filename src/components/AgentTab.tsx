@@ -12,6 +12,7 @@ import {
   fetchGlobalView,
   fetchPerpView,
   fetchScannerStatus,
+  fetchTradeDetail,
   fetchOperationalStats,
   type ScannerStatusResponse,
   type OperationalStats,
@@ -2802,7 +2803,17 @@ export const SetupPane: FC<{
   );
 };
 
-const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ detail, onBack }) => (
+/** Risoluzioni offerte, dalla piu' fine. Quali reggano per QUESTO trade lo dice
+ *  il backend in `chart.intervals_available`: le altre restano visibili ma
+ *  spente, con la ragione a fianco — nasconderle non spiegherebbe perche'. */
+const INTERVALLI_SCELTA = ['1m', '3m', '5m', '15m', '1h'] as const;
+
+export const TradeDetailScreen: FC<{
+  detail: TradeDetail;
+  onBack: () => void;
+  onInterval?: (i: string) => void;
+  intervalBusy?: boolean;
+}> = ({ detail, onBack, onInterval, intervalBusy }) => (
   <div className="space-y-4">
     <button onClick={onBack} className="rounded-lg bg-dark-800 px-3 py-2 text-sm font-semibold text-gray-300">
       Back
@@ -2840,9 +2851,34 @@ const TradeDetailScreen: FC<{ detail: TradeDetail; onBack: () => void }> = ({ de
       <>
         {detail.chart && (
           <section className="rounded-xl bg-dark-800 px-4 py-4 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-white">{detail.chart.live ? 'Grafico posizione (live)' : 'Grafico del trade'}</h3>
-              <span className="text-xs text-gray-500">{detail.chart.interval}</span>
+              {onInterval && detail.chart.intervals_available?.length ? (
+                <div className="flex gap-1">
+                  {INTERVALLI_SCELTA.map((i) => {
+                    const sostenibile = detail.chart!.intervals_available!.includes(i);
+                    const attivo = detail.chart!.interval === i;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        disabled={!sostenibile || intervalBusy || attivo}
+                        onClick={() => { hapticLight(); onInterval(i); }}
+                        title={sostenibile ? `Candele da ${i}` : 'Su un trade cosi’ lungo non entrerebbe tutta la storia'}
+                        className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                          attivo ? 'bg-accent-blue text-white'
+                            : sostenibile ? 'bg-dark-700 text-gray-300'
+                            : 'bg-dark-800 text-gray-600 line-through'
+                        }`}
+                      >
+                        {i}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span className="text-xs text-gray-500">{detail.chart.interval}</span>
+              )}
             </div>
             <TradeCandleChartLW
               chart={detail.chart}
@@ -3112,6 +3148,29 @@ const AgentTab: FC<AgentTabProps> = ({
   const [actionError, setActionError] = useState('');
   const refreshInFlightRef = useRef(false);
   const fastRefreshInFlightRef = useRef(false);
+
+  // Risoluzione scelta a mano per il grafico aperto. La cache del dettaglio e'
+  // per trade, non per risoluzione: quando cambia si va sempre alla rete.
+  const [intervalBusy, setIntervalBusy] = useState(false);
+
+  const cambiaIntervallo = useCallback(async (i: string) => {
+    const tradeId = detailTradeIdRef.current;
+    if (!tradeId) return;
+    setIntervalBusy(true);
+    try {
+      const detail = await fetchTradeDetail(tradeId, {
+        enrichChart: true,
+        interval: i,
+        timeoutMs: TRADE_DETAIL_ENRICH_TIMEOUT_MS,
+      });
+      if (detailTradeIdRef.current === tradeId) setTradeDetail(detail);
+    } catch {
+      // Il grafico resta quello di prima: meglio della risoluzione richiesta
+      // ma senza dati.
+    } finally {
+      setIntervalBusy(false);
+    }
+  }, []);
 
   const loadActiveTradeDetail = useCallback(async (tradeId: string, enrichChart = false) => {
     const cached = getCachedTradeDetail(tradeId);
@@ -3442,7 +3501,7 @@ const AgentTab: FC<AgentTabProps> = ({
         <p className="rounded-lg bg-accent-red/10 px-3 py-2 text-xs text-accent-red">{actionError}</p>
       )}
       {tradeDetail ? (
-        <TradeDetailScreen detail={tradeDetail} onBack={closeTradeDetail} />
+        <TradeDetailScreen detail={tradeDetail} onBack={closeTradeDetail} onInterval={(i) => void cambiaIntervallo(i)} intervalBusy={intervalBusy} />
       ) : (
         <>
       <div className="rounded-xl bg-dark-800 px-4 py-3">
