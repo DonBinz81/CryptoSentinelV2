@@ -61,3 +61,6 @@ desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# Cache incrementale di "tsc -b" (rigenerata a ogni controllo tipi)
+*.tsbuildinfo
