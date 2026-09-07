@@ -333,7 +333,25 @@ TRADE_DETAIL_CHART_TIMEOUT_SECONDS = 12.0
 # fuori dal processo funzionava sempre. 5s lascia margine reale senza rendere
 # l'attesa percepibile: e' un dettaglio aperto su richiesta, non un ciclo caldo.
 TRADE_DETAIL_FEED_TIMEOUT_SECONDS = 5.0
+# Upper bound only: the real limit is per-interval, see _kline_cache_max_age.
 TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS = 180
+
+
+def _kline_cache_max_age(interval: str) -> float:
+    """How long a cached kline set can still describe THIS chart.
+
+    Tied to the candle size rather than being one constant: on a 1m chart a
+    180s-old snapshot is missing whole candles, while on 15m it is still the
+    same picture. Half a candle is the point where the newest one has moved
+    enough to matter but a refetch is not yet wasted.
+
+    Only the cache lifetime changes. When it expires the caller already falls
+    back to fetching from the venue, so this opens no new path -- it just takes
+    an existing one more often, and only on the fine intervals where the user
+    can see the difference.
+    """
+    minutes = _INTERVAL_MINUTES.get(interval, 5)
+    return min(float(TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS), max(20.0, minutes * 30.0))
 
 
 # Intervalli che l'utente puo' scegliere per il grafico, dal piu' fine.
@@ -868,7 +886,7 @@ def _cached_klines(market: str, symbol: str, interval: str, *, min_limit: int) -
         if entry is None:
             return None
         age = (datetime.now(UTC) - entry.updated_at).total_seconds()
-        if age > TRADE_DETAIL_KLINE_CACHE_MAX_AGE_SECONDS:
+        if age > _kline_cache_max_age(interval):
             return None
         if len(entry.candles) < min_limit:
             return None
