@@ -3605,10 +3605,22 @@ const AgentTab: FC<AgentTabProps> = ({
       )}
       {/* Sopra la scheda attiva, non dentro una sola: un blocco del rischio si deve
           vedere da dove si guarda quando il bot sembra fermo (NOTE/117). */}
+      {/* ⚠️ `onOpenSetup` NON va passato quando si e' gia' sul Setup, e il cartello
+          disegna quel pulsante solo se lo riceve.
+          Prima il pulsante esisteva unicamente dentro `pane === 'global'`, quindi
+          `setPane('setup')` cambiava SEMPRE valore e SetupPane si rimontava leggendo
+          la sotto-scheda dalla cache. Sollevando la sezione sopra lo switch quella
+          guardia implicita e' sparita: da Setup il click sarebbe inerte (stesso
+          valore -> React esce dal re-render, e SetupPane non ha `key` che lo
+          rimonti), e per giunta `agentCache.setupTab = 'generale'` verrebbe scritto
+          lo stesso — l'effetto di riga 2268 scrive e non rilegge — riaprendo il
+          Setup su "Generale" invece che dove l'utente stava lavorando.
+          Un pulsante che non fa niente e' peggio di un pulsante assente: la barra
+          delle sotto-schede e' comunque a pochi pixel sotto il cartello. */}
       <RiskGuardrailSection
         guardrail={global?.risk_guardrail}
         adminToken={adminToken}
-        onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }}
+        onOpenSetup={pane === 'setup' ? undefined : () => { setPane('setup'); agentCache.setupTab = 'generale'; }}
         onReset={() => void refresh()}
       />
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
