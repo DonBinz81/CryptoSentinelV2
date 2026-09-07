@@ -78,6 +78,7 @@ export const TradeCandleChartLW: FC<{
   const vistaRef = useRef<{
     identita: string;
     range: { from: number; to: number };
+    ultimoIndice: number;
   } | null>(null);
   // Etichette dei livelli che non stanno sull'asse: le posiziona il componente,
   // perche' la libreria mostra il nome del livello solo insieme all'etichetta d'asse.
@@ -296,7 +297,23 @@ export const TradeCandleChartLW: FC<{
     const identita = `${chart.opened_at}|${chart.interval}`;
     const salvata = vistaRef.current;
     if (salvata && salvata.identita === identita) {
-      c.timeScale().setVisibleLogicalRange(salvata.range);
+      // ⚠️ Conservare l'inquadratura NON basta: gli indici sono assoluti e le
+      // candele nuove si accodano (il backend ancora `chart_start` a
+      // `opened_at`, non a `now`, quindi l'indice 0 non si sposta mai). Rimessa
+      // tale e quale, dopo 10-20 candele la candela viva e' finita fuori dal
+      // bordo destro e il grafico sembra di nuovo fermo — cioe' il difetto che
+      // questo lavoro doveva togliere, scambiato con un altro.
+      //
+      // Quindi si scorre di quante candele sono arrivate, ma SOLO se la vista
+      // era agganciata al bordo destro. Se l'utente era andato indietro a
+      // guardare l'ingresso, resta dov'e': seguire il presente mentre lui
+      // guarda il passato sarebbe di nuovo strappargli il grafico di mano.
+      const nuove = model.candles.length - 1 - salvata.ultimoIndice;
+      const scorri = nuove > 0 && salvata.range.to >= salvata.ultimoIndice ? nuove : 0;
+      c.timeScale().setVisibleLogicalRange({
+        from: salvata.range.from + scorri,
+        to: salvata.range.to + scorri,
+      });
     } else {
       const CONTESTO = 10;
       const MINIMO = 40; // un trade di tre candele non va inquadrato a tre candele
@@ -435,7 +452,15 @@ export const TradeCandleChartLW: FC<{
       // istante in cui e' ancora leggibile. Alla ricostruzione viene rimessa,
       // se si tratta dello stesso grafico (vedi `identita` sopra).
       const range = c.timeScale().getVisibleLogicalRange();
-      if (range) vistaRef.current = { identita: `${chart.opened_at}|${chart.interval}`, range };
+      if (range) {
+        vistaRef.current = {
+          identita: `${chart.opened_at}|${chart.interval}`,
+          range,
+          // Quante candele c'erano: alla ricostruzione la differenza dice di
+          // quanto scorrere per restare agganciati al presente.
+          ultimoIndice: model.candles.length - 1,
+        };
+      }
       c.remove();
       chartRef.current = null;
       seriesRef.current = null;
