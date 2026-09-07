@@ -2840,6 +2840,16 @@ export const SetupPane: FC<{
  *  spente, con la ragione a fianco — nasconderle non spiegherebbe perche'. */
 const INTERVALLI_SCELTA = ['1m', '3m', '5m', '15m', '1h'] as const;
 
+// Durata di ogni risoluzione, in minuti. ⚠️ Serve SOLO a decidere ogni quanto
+// ricaricare: QUALI risoluzioni siano utilizzabili su un trade lo decide il
+// backend e arriva in `intervals_available` — quella formula non va duplicata
+// qui, o il giorno che cambia il selettore mentirebbe.
+const MINUTI_INTERVALLO: Record<string, number> = { '1m': 1, '3m': 3, '5m': 5, '15m': 15, '1h': 60 };
+// Pavimento sulla frequenza: a 1m sarebbero 30s, ed e' gia' il minimo sensato
+// su una rete mobile. Senza pavimento, una risoluzione piu' fitta aggiunta in
+// futuro comincerebbe a martellare senza che nessuno l'abbia deciso.
+const RICARICA_MINIMA_MS = 20_000;
+
 export const TradeDetailScreen: FC<{
   detail: TradeDetail;
   onBack: () => void;
@@ -3185,9 +3195,20 @@ const AgentTab: FC<AgentTabProps> = ({
   // per trade, non per risoluzione: quando cambia si va sempre alla rete.
   const [intervalBusy, setIntervalBusy] = useState(false);
 
+  // ⚠️ Solo la risoluzione scelta A MANO, non quella correntemente disegnata.
+  // Il ricaricamento periodico deve inoltrare `interval` SOLTANTO se l'utente
+  // l'ha scelto: passarlo sempre direbbe al backend "questa e' una scelta
+  // dell'utente" anche quando non lo e', e con un intervallo imposto il backend
+  // NON deduce piu' il riferimento dello stop dalle candele (e' la protezione
+  // voluta: quel riferimento cambia con la risoluzione, quindi meglio assente
+  // che dipendente dallo zoom). Risultato: l'origine della riga SL sparirebbe
+  // al primo ricaricamento su un grafico che l'utente non ha nemmeno toccato.
+  const intervalloSceltoRef = useRef<string | null>(null);
+
   const cambiaIntervallo = useCallback(async (i: string) => {
     const tradeId = detailTradeIdRef.current;
     if (!tradeId) return;
+    intervalloSceltoRef.current = i;
     setIntervalBusy(true);
     try {
       const detail = await fetchTradeDetail(tradeId, {
@@ -3254,8 +3275,34 @@ const AgentTab: FC<AgentTabProps> = ({
 
   const closeTradeDetail = useCallback(() => {
     detailTradeIdRef.current = null;
+    intervalloSceltoRef.current = null;
     setLoadingDetail(false);
     setTradeDetail(null);
+  }, []);
+
+  // Ricaricamento del grafico su POSIZIONE APERTA. Non e' un "tempo reale":
+  // una candela da 1 minuto nasce una volta al minuto, quello che si muove di
+  // continuo e' l'ultima candela in formazione. Quindi si richiede a meta'
+  // intervallo — piu' spesso restituirebbe due volte lo stesso dato.
+  const ricaricaInFlightRef = useRef(false);
+  const ricaricaGrafico = useCallback(async () => {
+    const tradeId = detailTradeIdRef.current;
+    if (!tradeId || ricaricaInFlightRef.current) return;
+    ricaricaInFlightRef.current = true;
+    try {
+      const detail = await fetchTradeDetail(tradeId, {
+        enrichChart: true,
+        interval: intervalloSceltoRef.current ?? undefined,
+        timeoutMs: TRADE_DETAIL_ENRICH_TIMEOUT_MS,
+      });
+      if (detailTradeIdRef.current === tradeId) setTradeDetail(detail);
+    } catch {
+      // Silenzioso e senza spinner: e' un aggiornamento che l'utente non ha
+      // chiesto, quindi un suo fallimento non deve comparire sullo schermo.
+      // Il grafico resta quello di prima, che e' vecchio ma vero.
+    } finally {
+      ricaricaInFlightRef.current = false;
+    }
   }, []);
 
   const refresh = useCallback(async (silent = false) => {
@@ -3338,6 +3385,31 @@ const AgentTab: FC<AgentTabProps> = ({
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    const chart = tradeDetail?.chart;
+    // Solo su posizione APERTA. Su un trade chiuso il grafico e' congelato,
+    // tranne le candele successive alla chiusura, che si completano in una
+    // decina di candele e poi mai piu': non vale un timer acceso a vuoto per
+    // sempre: riaprendo la schermata si vedono comunque aggiornate.
+    if (!chart?.live) return;
+    const minuti = MINUTI_INTERVALLO[chart.interval] ?? 5;
+    const ogni = Math.max(RICARICA_MINIMA_MS, (minuti * 60_000) / 2);
+    const tick = () => {
+      if (!document.hidden) void ricaricaGrafico();
+    };
+    const timer = window.setInterval(tick, ogni);
+    // Al rientro in primo piano si recupera subito: e' il momento in cui il
+    // dato e' piu' vecchio, ed e' anche quando l'utente sta guardando.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [tradeDetail?.chart?.live, tradeDetail?.chart?.interval, ricaricaGrafico]);
 
   // Refresh leggero: aggiorna solo le viste principali e salta se un ciclo e' gia' in corso.
   useEffect(() => {
