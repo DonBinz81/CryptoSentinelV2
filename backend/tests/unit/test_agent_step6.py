@@ -2963,3 +2963,89 @@ async def test_operational_stats_survives_an_unreachable_engine(monkeypatch) -> 
 
     assert result["kill_switch"] is None
     assert result["disk"]["free_bytes"] > 0
+
+
+@pytest.mark.asyncio
+async def test_drawdown_alert_stalled_flat_message(db, monkeypatch) -> None:
+    """Cap engaged with no open positions: the alert must say the bot is stuck
+    and needs a peak reset (dry-run deadlock, NOTE/117). Default test cap: 15."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=True, risk_notify_drawdown_pct=5.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, value
+            calls.append((alert_type, detail))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        session.add(_portfolio(drawdown_pct=Decimal("16")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [])
+
+    assert len(calls) == 1
+    alert_type, detail = calls[0]
+    assert alert_type == "drawdown"
+    assert "FERMO" in detail and "reset del picco" in detail
+
+
+@pytest.mark.asyncio
+async def test_drawdown_alert_blocked_with_open_positions_message(db, monkeypatch) -> None:
+    """Cap engaged but positions still open: entries are blocked, not stalled."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=True, risk_notify_drawdown_pct=5.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, value
+            calls.append((alert_type, detail))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        session.add(_portfolio(drawdown_pct=Decimal("16")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [SimpleNamespace()])
+
+    assert len(calls) == 1
+    _, detail = calls[0]
+    assert "BLOCCATI" in detail and "FERMO" not in detail
+
+
+@pytest.mark.asyncio
+async def test_drawdown_alert_below_cap_keeps_generic_message(db, monkeypatch) -> None:
+    """Above the notify threshold but below the cap: plain threshold message."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=True, risk_notify_drawdown_pct=5.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, value
+            calls.append((alert_type, detail))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        session.add(_portfolio(drawdown_pct=Decimal("7")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [])
+
+    assert len(calls) == 1
+    _, detail = calls[0]
+    assert "supera soglia" in detail and "cap" not in detail
