@@ -72,6 +72,13 @@ export const TradeCandleChartLW: FC<{
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  // Inquadratura scelta dall'utente, conservata fra le ricostruzioni del
+  // grafico. In un ref e non in stato: cambiarla non deve ridisegnare nulla —
+  // serve solo al momento della ricostruzione, che e' gia' innescata dai dati.
+  const vistaRef = useRef<{
+    identita: string;
+    range: { from: number; to: number };
+  } | null>(null);
   // Etichette dei livelli che non stanno sull'asse: le posiziona il componente,
   // perche' la libreria mostra il nome del livello solo insieme all'etichetta d'asse.
   const [inlineLabels, setInlineLabels] = useState<
@@ -274,16 +281,34 @@ export const TradeCandleChartLW: FC<{
     // Centrare sull'ingresso (come faceva la prima stesura) lasciava FUORI
     // l'uscita sui trade piu' lunghi di una ventina di candele — e l'uscita e'
     // il punto che si guarda per primo. Verificato: la freccia rossa spariva.
-    const CONTESTO = 10;
-    const MINIMO = 40; // un trade di tre candele non va inquadrato a tre candele
-    let da = model.entryIndex - CONTESTO;
-    let a = model.exitIndex + CONTESTO;
-    const mancante = MINIMO - (a - da);
-    if (mancante > 0) {
-      da -= mancante / 2;
-      a += mancante / 2;
+    // ⚠️ ...ma SOLO la prima volta che si guarda questo grafico. Il grafico si
+    // ricostruisce da zero a ogni dato nuovo (l'effetto dipende da `model` e in
+    // chiusura fa `c.remove()`), quindi con il ricaricamento periodico attivo
+    // rieseguire l'inquadratura qui strapperebbe la vista di mano all'utente
+    // ogni volta: a 1 minuto, due volte al minuto. Uno zoom che si annulla da
+    // solo mentre lo si guarda e' peggio di un grafico fermo.
+    //
+    // `vistaRef` conserva l'inquadratura fra una ricostruzione e l'altra.
+    // `identita` distingue "stesso grafico, dati aggiornati" (si conserva) da
+    // "grafico diverso" — altro trade, o risoluzione cambiata dal selettore —
+    // dove l'inquadratura vecchia non avrebbe senso: a 1m un intervallo logico
+    // calcolato su candele da 5m coprirebbe un quinto del tempo.
+    const identita = `${chart.opened_at}|${chart.interval}`;
+    const salvata = vistaRef.current;
+    if (salvata && salvata.identita === identita) {
+      c.timeScale().setVisibleLogicalRange(salvata.range);
+    } else {
+      const CONTESTO = 10;
+      const MINIMO = 40; // un trade di tre candele non va inquadrato a tre candele
+      let da = model.entryIndex - CONTESTO;
+      let a = model.exitIndex + CONTESTO;
+      const mancante = MINIMO - (a - da);
+      if (mancante > 0) {
+        da -= mancante / 2;
+        a += mancante / 2;
+      }
+      c.timeScale().setVisibleLogicalRange({ from: da, to: a });
     }
-    c.timeScale().setVisibleLogicalRange({ from: da, to: a });
 
     // Distanza sotto la quale due sigle si sovrapporrebbero.
     const MIN_GAP_PX = 10;
@@ -406,6 +431,11 @@ export const TradeCandleChartLW: FC<{
       window.removeEventListener('pointercancel', onPointerUp);
       cancelAnimationFrame(frame);
       c.timeScale().unsubscribeVisibleLogicalRangeChange(placeInlineLabels);
+      // Fotografa l'inquadratura PRIMA di distruggere il grafico: e' l'unico
+      // istante in cui e' ancora leggibile. Alla ricostruzione viene rimessa,
+      // se si tratta dello stesso grafico (vedi `identita` sopra).
+      const range = c.timeScale().getVisibleLogicalRange();
+      if (range) vistaRef.current = { identita: `${chart.opened_at}|${chart.interval}`, range };
       c.remove();
       chartRef.current = null;
       seriesRef.current = null;
