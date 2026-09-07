@@ -3915,28 +3915,33 @@ class AgentService:
                 )
                 return
 
-            # Drawdown
+            # Drawdown. Two tiers with different gating (NOTE/117):
+            #   - cap ENGAGED (entries vetoed): always notify, no toggle — a
+            #     hard block must never be silenceable, like the kill switch;
+            #   - informational threshold: still governed by the app toggle,
+            #     since it can be noisy on volatile days.
+            # Same alert_type for both, so the throttle escalates naturally
+            # when a warning turns into a block (value keeps growing).
             drawdown = float(getattr(portfolio, "drawdown_pct", 0) or 0)
-            if self.settings.risk_drawdown_alert_enabled and drawdown >= self.settings.risk_notify_drawdown_pct:
-                # Same cap source and semantics as RiskManager's drawdown_cap_guard
-                # (risk/manager.py): mobile settings first, config fallback, abs().
-                ms = self._ms
-                cap = abs(float(ms.drawdown_cap_pct if ms else self.settings.risk_max_drawdown_pct))
-                blocked = drawdown >= cap
-                flat = not spot_positions and not perp_positions
-                if blocked and flat:
+            # Same cap source and semantics as RiskManager's drawdown_cap_guard
+            # (risk/manager.py): mobile settings first, config fallback, abs().
+            ms = self._ms
+            cap = abs(float(ms.drawdown_cap_pct if ms else self.settings.risk_max_drawdown_pct))
+            if drawdown >= cap:
+                if not spot_positions and not perp_positions:
                     # Dry-run deadlock: equity frozen with no positions, so the
                     # cap can never disengage on its own (NOTE/117).
                     detail = (
                         f"Bot FERMO per drawdown cap ({drawdown:.1f}% >= {cap:.0f}%) senza "
                         f"posizioni aperte: non riparte da solo, serve il reset del picco"
                     )
-                elif blocked:
-                    detail = f"Ingressi BLOCCATI dal drawdown cap: {drawdown:.1f}% >= {cap:.0f}%"
                 else:
-                    detail = f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%"
+                    detail = f"Ingressi BLOCCATI dal drawdown cap: {drawdown:.1f}% >= {cap:.0f}%"
                 # ``value`` feeds the notifier throttle: reminder once per
                 # interval, immediate re-send only if it worsens by >= step.
+                await notifier.notify_risk_alert(user_id, "drawdown", detail, value=drawdown)
+            elif self.settings.risk_drawdown_alert_enabled and drawdown >= self.settings.risk_notify_drawdown_pct:
+                detail = f"Drawdown {drawdown:.1f}% supera soglia {self.settings.risk_notify_drawdown_pct:.0f}%"
                 await notifier.notify_risk_alert(user_id, "drawdown", detail, value=drawdown)
 
             # Daily loss limit: twin of the drawdown alert. Same source and
