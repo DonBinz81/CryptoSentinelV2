@@ -3939,6 +3939,31 @@ class AgentService:
                 # interval, immediate re-send only if it worsens by >= step.
                 await notifier.notify_risk_alert(user_id, "drawdown", detail, value=drawdown)
 
+            # Daily loss limit: twin of the drawdown alert. Same source and
+            # semantics as daily_loss_limit_guard (risk/manager.py): BOTH values
+            # are negative when losing (used e.g. -9.1, cap e.g. -8.0) and the
+            # guard fires on used <= cap. Unlike the drawdown cap this unblocks
+            # by itself at midnight UTC, so the message says so. No dedicated
+            # toggle on purpose: a hard block must always notify (like the kill
+            # switch above); ``value`` = abs(used) so the hourly throttle and
+            # the worsening-escalation are inherited.
+            daily_used = float(getattr(portfolio, "daily_loss_limit_used_pct", 0) or 0)
+            ms_daily = self._ms
+            daily_cap = float(
+                ms_daily.daily_loss_limit_pct if ms_daily else self.settings.risk_daily_loss_limit_pct
+            )
+            if daily_cap < 0 and daily_used <= daily_cap:
+                await notifier.notify_risk_alert(
+                    user_id,
+                    "daily_loss_limit",
+                    (
+                        f"Ingressi BLOCCATI dal limite di perdita giornaliero: "
+                        f"{daily_used:.1f}% <= {daily_cap:.1f}%. Si sblocca da solo a "
+                        f"mezzanotte UTC, oppure azzera il conteggio dall'app"
+                    ),
+                    value=abs(daily_used),
+                )
+
             # Portfolio floor
             equity = float(getattr(portfolio, "total_equity_usd", 1) or 1)
             if equity < 1.0:

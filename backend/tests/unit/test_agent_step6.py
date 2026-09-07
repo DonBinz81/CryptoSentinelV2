@@ -3049,3 +3049,63 @@ async def test_drawdown_alert_below_cap_keeps_generic_message(db, monkeypatch) -
     assert len(calls) == 1
     _, detail = calls[0]
     assert "supera soglia" in detail and "cap" not in detail
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_limit_alert_fires_when_guard_engaged(db, monkeypatch) -> None:
+    """Guard engaged (used <= cap, both negative): a push must go out, even
+    with the drawdown toggle OFF -- the daily alert has no toggle by design."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=False, risk_notify_drawdown_pct=10.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str, float | None]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id
+            calls.append((alert_type, detail, value))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        # default mobile cap is -8.0: -9.1 engages the guard
+        session.add(_portfolio(daily_loss_limit_used_pct=Decimal("-9.1")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [])
+
+    daily = [c for c in calls if c[0] == "daily_loss_limit"]
+    assert len(daily) == 1
+    _, detail, value = daily[0]
+    assert "BLOCCATI dal limite di perdita giornaliero" in detail
+    assert "-9.1%" in detail and "-8.0%" in detail
+    assert "mezzanotte UTC" in detail
+    assert value == pytest.approx(9.1)
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_limit_alert_silent_below_cap(db, monkeypatch) -> None:
+    """Losing but within the daily cap: no daily_loss_limit push."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=False),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[str] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, detail, value
+            calls.append(alert_type)
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        session.add(_portfolio(daily_loss_limit_used_pct=Decimal("-4.5")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [])
+
+    assert "daily_loss_limit" not in calls
