@@ -384,6 +384,78 @@ const RiskGuardrailBanner: FC<{ guardrail: GlobalView['risk_guardrail']; onOpenS
   );
 };
 
+/**
+ * Blocco del rischio: cartello + pulsante di sblocco + conferma, in un pezzo solo.
+ *
+ * ⚠️ Sta SOPRA le schede, non dentro una di esse. Prima viveva dentro `GlobalPane`:
+ * il bot fermo per `drawdown_cap_guard` era invisibile da Perp e da Spot, cioe'
+ * proprio dove si va a guardare quando "non apre niente". Il 05/09 il perp e'
+ * rimasto fermo dal venerdi' alle 16:09 e David se n'e' accorto la domenica
+ * confrontando con la V1, non dall'app (NOTE/117).
+ *
+ * Un bot fermo per una protezione e un bot che non trova occasioni si somigliano
+ * troppo per lasciarli indistinguibili: il primo non ripartira' MAI da solo se
+ * l'equity e' congelata a posizioni zero, il secondo riparte appena il mercato
+ * cambia.
+ *
+ * Montato una volta sola: lo stesso pulsante duplicato in tre schede sarebbe tre
+ * copie della stessa logica di sblocco da tenere allineate (NOTE/113 §7-bis).
+ */
+export const RiskGuardrailSection: FC<{
+  guardrail: GlobalView['risk_guardrail'];
+  adminToken?: string;
+  onOpenSetup?: () => void;
+  onReset?: () => void;
+}> = ({ guardrail, adminToken, onOpenSetup, onReset }) => {
+  const [resetKind, setResetKind] = useState<ResetKind | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState('');
+
+  if (!guardrail?.blocked) return null;
+
+  const confirmReset = async () => {
+    if (!resetKind) return;
+    if (!adminToken) { setResetError("Serve l'admin token: salvalo nel setup."); return; }
+    setResetBusy(true);
+    setResetError('');
+    try {
+      const esito = resetKind === 'daily_loss'
+        ? await resetDailyCounter(adminToken, 'da app')
+        : await resetDrawdownPeak(adminToken, 'da app');
+      if (esito.status !== 'ok' && esito.status !== 'success') {
+        setResetError(esito.reason ?? 'Il backend ha rifiutato la richiesta.');
+        return;
+      }
+      setResetKind(null);
+      onReset?.();
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : 'Errore di rete.');
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <RiskGuardrailBanner
+        guardrail={guardrail}
+        onOpenSetup={onOpenSetup}
+        onResetCounter={(kind) => { setResetError(''); setResetKind(kind); }}
+      />
+      {resetKind && (
+        <ResetCounterDialog
+          kind={resetKind}
+          guardrail={guardrail}
+          busy={resetBusy}
+          error={resetError}
+          onConfirm={() => void confirmReset()}
+          onCancel={() => setResetKind(null)}
+        />
+      )}
+    </>
+  );
+};
+
 const Stat: FC<{ label: string; value: string; tone?: 'good' | 'bad' | 'neutral' }> = ({ label, value, tone = 'neutral' }) => (
   <div className="rounded-lg bg-dark-800 px-3 py-2 min-w-0">
     <p className="text-[11px] uppercase text-gray-500 truncate">{label}</p>
@@ -1472,36 +1544,11 @@ export const GlobalPane: FC<{
   decisions: AgentDecisionResponse | null;
   assetBreakdown: AssetBreakdownResponse | null;
   claudeUsage: ClaudeUsageView | null;
-  onOpenSetup?: () => void;
-  adminToken?: string;
-  onCounterReset?: () => void;
   operationalStats?: OperationalStats | null;
-}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, onOpenSetup, adminToken, onCounterReset, operationalStats = null }) => {
-  const [resetKind, setResetKind] = useState<ResetKind | null>(null);
-  const [resetBusy, setResetBusy] = useState(false);
-  const [resetError, setResetError] = useState('');
-
-  const confirmReset = async () => {
-    if (!resetKind) return;
-    if (!adminToken) { setResetError("Serve l'admin token: salvalo nel setup."); return; }
-    setResetBusy(true);
-    setResetError('');
-    try {
-      const esito = resetKind === 'daily_loss'
-        ? await resetDailyCounter(adminToken, 'da app')
-        : await resetDrawdownPeak(adminToken, 'da app');
-      if (esito.status !== 'ok' && esito.status !== 'success') {
-        setResetError(esito.reason ?? 'Il backend ha rifiutato la richiesta.');
-        return;
-      }
-      setResetKind(null);
-      onCounterReset?.();
-    } catch (e) {
-      setResetError(e instanceof Error ? e.message : 'Errore di rete.');
-    } finally {
-      setResetBusy(false);
-    }
-  };
+}> = ({ data, status, equity, equityRange, onEquityRange, decisions, assetBreakdown, claudeUsage, operationalStats = null }) => {
+  // Il cartello del blocco e il suo pulsante NON stanno piu' qui: sono saliti
+  // sopra le schede (`RiskGuardrailSection`), perche' da qui non si vedevano da
+  // Perp — cioe' dalla schermata da cui ci si accorge che il bot e' fermo.
   const hasHistory = (data?.pnl_history.length ?? 0) > 0;
   const hasPortfolio = Number(data?.total_equity_usd ?? 0) > 0 || Number(data?.initial_equity_usd ?? 0) > 0;
   const hasTradesToday = Number(data?.trades_today ?? 0) > 0;
@@ -1511,21 +1558,6 @@ export const GlobalPane: FC<{
 
   return (
     <div className="space-y-3">
-      <RiskGuardrailBanner
-        guardrail={data?.risk_guardrail}
-        onOpenSetup={onOpenSetup}
-        onResetCounter={(kind) => { setResetError(''); setResetKind(kind); }}
-      />
-      {resetKind && data?.risk_guardrail && (
-        <ResetCounterDialog
-          kind={resetKind}
-          guardrail={data.risk_guardrail}
-          busy={resetBusy}
-          error={resetError}
-          onConfirm={() => void confirmReset()}
-          onCancel={() => setResetKind(null)}
-        />
-      )}
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Equity" value={fmtUsd(data?.total_equity_usd)} />
         <Stat label="PnL tot." value={fmtUsd(data?.pnl_total_usd)} tone={Number(data?.pnl_total_usd ?? 0) >= 0 ? 'good' : 'bad'} />
@@ -3571,9 +3603,17 @@ const AgentTab: FC<AgentTabProps> = ({
       {watchlistError && pane !== 'coins' && (
         <p className="rounded-lg bg-accent-red/10 px-3 py-2 text-xs text-accent-red">{watchlistError}</p>
       )}
+      {/* Sopra la scheda attiva, non dentro una sola: un blocco del rischio si deve
+          vedere da dove si guarda quando il bot sembra fermo (NOTE/117). */}
+      <RiskGuardrailSection
+        guardrail={global?.risk_guardrail}
+        adminToken={adminToken}
+        onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }}
+        onReset={() => void refresh()}
+      />
       {pane === 'spot' && <SpotPane data={spot} onTrade={(tradeId) => void handleTradeDetail(tradeId)} />}
       {pane === 'perp' && <PerpPane data={perp} onTrade={(tradeId) => void handleTradeDetail(tradeId)} adminToken={adminToken} onClosed={() => void refresh()} />}
-      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} adminToken={adminToken} onCounterReset={() => void refresh()} operationalStats={operationalStats} onOpenSetup={() => { setPane('setup'); agentCache.setupTab = 'generale'; }} />}
+      {pane === 'global' && <GlobalPane data={global} status={status} equity={equity} equityRange={equityRange} onEquityRange={setEquityRange} decisions={decisions} assetBreakdown={assetBreakdown} claudeUsage={claudeUsage} operationalStats={operationalStats} />}
       {pane === 'wallet' && <WalletPane execWallets={execWallets} spot={spot} perp={perp} />}
       {pane === 'coins' && (
         <CoinsPane
