@@ -3109,3 +3109,62 @@ async def test_daily_loss_limit_alert_silent_below_cap(db, monkeypatch) -> None:
         await service._check_risk_notifications(session, [], [])
 
     assert "daily_loss_limit" not in calls
+
+
+@pytest.mark.asyncio
+async def test_drawdown_blocked_alert_ignores_toggle(db, monkeypatch) -> None:
+    """Cap engaged: the alert must fire even with the app toggle OFF.
+    The toggle only governs the informational tier (refined design, NOTE/117):
+    a hard block must never be silenceable."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=False, risk_notify_drawdown_pct=10.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, value
+            calls.append((alert_type, detail))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        # default test cap is 15: drawdown 16 engages the guard
+        session.add(_portfolio(drawdown_pct=Decimal("16")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [])
+
+    drawdown_calls = [c for c in calls if c[0] == "drawdown"]
+    assert len(drawdown_calls) == 1
+    assert "FERMO" in drawdown_calls[0][1] and "reset del picco" in drawdown_calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_drawdown_blocked_with_positions_ignores_toggle(db, monkeypatch) -> None:
+    """Cap engaged with open positions and toggle OFF: BLOCCATI still fires."""
+    service = AgentService(
+        settings(risk_drawdown_alert_enabled=False, risk_notify_drawdown_pct=10.0),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    calls: list[tuple[str, str]] = []
+
+    class FakeNotifier:
+        async def notify_risk_alert(self, user_id, alert_type, detail, *, value=None):
+            del user_id, value
+            calls.append((alert_type, detail))
+            return True
+
+    monkeypatch.setattr("backend.app.agent.service.get_agent_notifier", lambda: FakeNotifier())
+
+    async with get_session_factory()() as session:
+        session.add(_portfolio(drawdown_pct=Decimal("16")))
+        await session.commit()
+        await service._check_risk_notifications(session, [], [SimpleNamespace()])
+
+    drawdown_calls = [c for c in calls if c[0] == "drawdown"]
+    assert len(drawdown_calls) == 1
+    assert "BLOCCATI" in drawdown_calls[0][1] and "FERMO" not in drawdown_calls[0][1]
