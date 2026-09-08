@@ -4395,6 +4395,15 @@ def _build_skip_reasoning(signal: dict, settings) -> str:
         req = components.get("required_candles", "?")
         return f"skip: {count}/{req} candele disponibili"
 
+    if reason == "vwap_extension_rejected":
+        # The measured extension makes the skip judgeable, not just countable
+        # (a 3.6 near-miss and a 7.0 runaway ask for different thresholds).
+        ext = components.get("vwap_ext")
+        lim = components.get("vwap_ext_limit")
+        ext_s = f"{ext:.2f}" if isinstance(ext, (int, float)) else "?"
+        lim_s = f"{lim:g}" if isinstance(lim, (int, float)) else "?"
+        return f"skip: vwap_extension_rejected (ext={ext_s} >= {lim_s} ATR)"
+
     return f"skip: {reason}"
 
 

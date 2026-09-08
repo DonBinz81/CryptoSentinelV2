@@ -113,3 +113,22 @@ async def test_gate_vwap_is_causal_ignores_forming_candle() -> None:
         {"asset": "ETH", "symbol": "ETHUSDT", "candles": inflated}
     )
     assert r_base["components"]["vwap_ext"] == r_inflated["components"]["vwap_ext"]
+
+
+def test_skip_reasoning_carries_measured_extension() -> None:
+    """The persisted reasoning must carry the measured extension, so the
+    skips can be judged (near-miss vs runaway) straight from agent_decisions."""
+    from types import SimpleNamespace
+
+    from backend.app.agent.service import _build_skip_reasoning
+
+    text = _build_skip_reasoning(
+        {
+            "reason": "vwap_extension_rejected",
+            "side": None,
+            "components": {"vwap_ext": 5.234, "vwap_ext_limit": 3.5},
+        },
+        SimpleNamespace(),
+    )
+    assert "vwap_extension_rejected" in text
+    assert "ext=5.23" in text and "3.5" in text
