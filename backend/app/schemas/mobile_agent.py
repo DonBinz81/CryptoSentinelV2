@@ -41,6 +41,7 @@ class AgentMobileSettings(BaseModel):
     perp_structural_stop_buffer_pct: float = Field(default=1.10, ge=0.0, le=20.0)
     # FIX-2: rapporto minimo TP1/SL per accettare un segnale (0 = filtro disattivo).
     perp_min_rr: float = Field(default=1.2, ge=0.0, le=5.0)
+    perp_vwap_atr_extension_limit: float = Field(default=3.5, ge=0.0, le=20.0)
     # Distanza dei take profit in multipli di ATR: TP1 chiude la quota parziale,
     # TP2 e' l'uscita finale. Devono restare TP1 < TP2.
     perp_tp1_atr_multiplier: float = Field(default=2.5, ge=0.3, le=10.0)
