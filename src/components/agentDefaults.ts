@@ -54,6 +54,10 @@ export const defaultSettings: AgentMobileSettings = {
   perp_structural_stop_lookback_candles: 20,
   perp_structural_stop_buffer_pct: 1.10,
   perp_min_rr: 1.2,
+  // Stesso default del backend (schemas/mobile_agent.py:44) e del YAML
+  // (configs/strategy_perp.yaml). Un default diverso qui mostrerebbe un valore
+  // che il server non ha, finche' l'utente non salva.
+  perp_vwap_atr_extension_limit: 3.5,
   perp_tp1_atr_multiplier: 2.5,
   perp_tp2_atr_multiplier: 4.0,
   spot_capital_per_trade_pct: 6,

@@ -521,6 +521,9 @@ export interface AgentMobileSettings {
   spot_sl_mode: string;
   perp_sl_mode: string;
   perp_min_rr: number;
+  /** Scarta l'ingresso se dista piu' di N ATR dal VWAP 24h nel verso del trade.
+   *  0 = filtro spento. Limiti del backend: 0-20. */
+  perp_vwap_atr_extension_limit: number;
   perp_tp1_atr_multiplier: number;
   perp_tp2_atr_multiplier: number;
   spot_structural_stop_lookback_candles: number;
