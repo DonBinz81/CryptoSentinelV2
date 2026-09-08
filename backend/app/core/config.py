@@ -242,6 +242,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "structural_stop_lookback_candles": "perp_structural_stop_lookback_candles",
         "structural_stop_buffer_pct": "perp_structural_stop_buffer_pct",
         "min_rr": "perp_min_rr",
+        "vwap_atr_extension_limit": "perp_vwap_atr_extension_limit",
         "tp1_atr_multiplier": "perp_tp1_atr_multiplier",
         "tp2_atr_multiplier": "perp_tp2_atr_multiplier",
         "use_poc_for_tp2": "perp_use_poc_for_tp2",
@@ -675,6 +676,8 @@ class Settings(BaseSettings):
     perp_structural_stop_lookback_candles: int = Field(default=20, alias="PERP_STRUCTURAL_STOP_LOOKBACK_CANDLES")
     perp_structural_stop_buffer_pct: float = Field(default=1.10, alias="PERP_STRUCTURAL_STOP_BUFFER_PCT")
     perp_min_rr: float = Field(default=1.2, alias="PERP_MIN_RR")  # FIX-2: R:R minimo TP1 vs SL (0 = disattivo)
+    # NOTE/122: gate estensione VWAP sugli ingressi perp (ATR oltre il vwap 24h nel verso del trade; 0 = off)
+    perp_vwap_atr_extension_limit: float = Field(default=3.5, alias="PERP_VWAP_ATR_EXTENSION_LIMIT")
     # ── Push aggiornamento app: il backend controlla le release GitHub e manda un
     # FCM quando ne esce una nuova (arriva anche ad app chiusa) ──────────────────
     update_push_enabled: bool = Field(default=True, alias="UPDATE_PUSH_ENABLED")

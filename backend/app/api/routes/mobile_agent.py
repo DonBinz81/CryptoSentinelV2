@@ -47,6 +47,7 @@ _MOBILE_TO_SETTINGS: dict[str, str] = {
     "perp_structural_stop_lookback_candles": "perp_structural_stop_lookback_candles",
     "perp_structural_stop_buffer_pct": "perp_structural_stop_buffer_pct",
     "perp_min_rr": "perp_min_rr",
+    "perp_vwap_atr_extension_limit": "perp_vwap_atr_extension_limit",
     "perp_tp1_atr_multiplier": "perp_tp1_atr_multiplier",
     "perp_tp2_atr_multiplier": "perp_tp2_atr_multiplier",
     "spot_time_stop_enabled": "spot_time_stop_enabled",
@@ -132,6 +133,7 @@ def _settings_from_config(settings: SettingsDep) -> AgentMobileSettings:
         perp_structural_stop_lookback_candles=getattr(settings, "perp_structural_stop_lookback_candles", 20),
         perp_structural_stop_buffer_pct=getattr(settings, "perp_structural_stop_buffer_pct", 1.10),
         perp_min_rr=getattr(settings, "perp_min_rr", 1.2),
+        perp_vwap_atr_extension_limit=getattr(settings, "perp_vwap_atr_extension_limit", 3.5),
         perp_tp1_atr_multiplier=getattr(settings, "perp_tp1_atr_multiplier", 2.5),
         perp_tp2_atr_multiplier=getattr(settings, "perp_tp2_atr_multiplier", 4.0),
         # Parametri spot (default = valore condiviso dal YAML)

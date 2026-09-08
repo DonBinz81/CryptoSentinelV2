@@ -157,6 +157,27 @@ class VolumeProfileSignal(SignalModule[SignalPayload, SignalResult]):
                 side = None
                 rr_rejected = True
 
+        # VWAP extension gate (NOTE/120-122): a mean-reversion entry taken too
+        # far from the 24h volume-weighted average is not a re-entry into value
+        # but a chase of a move still in progress — the "never in favor" family.
+        # Distance is measured in ATRs BEYOND the vwap in the trade's direction
+        # (long below vwap / short above). The vwap is CAUSAL: closed candles
+        # only, never the forming one, close-weighted (same construction the
+        # backtest validated). Fail-open: no ATR or no volume -> gate silent.
+        # 0 disables. Mirrors spot_vwap_atr_extension_limit in name and spirit.
+        ext_rejected = False
+        vwap_ext = None
+        ext_limit = float(getattr(self.settings, "perp_vwap_atr_extension_limit", 0.0) or 0.0)
+        if side and ext_limit > 0 and atr_v:
+            closed = candles[:-1] if len(candles) > 1 else candles
+            vol_sum = sum(c.volume for c in closed)
+            if vol_sum > 0:
+                gate_vwap = sum(c.close * c.volume for c in closed) / vol_sum
+                vwap_ext = (gate_vwap - current) / atr_v if side == "long" else (current - gate_vwap) / atr_v
+                if vwap_ext >= ext_limit:
+                    side = None
+                    ext_rejected = True
+
         # ATR corrente per la leva (periodo da config). atr_min/atr_max storici sono
         # calcolati nel service su un lookback più lungo; qui la leva è solo placeholder
         # (verrà sovrascritta in evaluate_perp con i mobile settings).
@@ -187,12 +208,16 @@ class VolumeProfileSignal(SignalModule[SignalPayload, SignalResult]):
             "take_profit_1": take_profit_1,
             "take_profit_2": take_profit_2,
             "trailing_stop": trailing_stop,
-            "reason": "value_reentry_confirmed" if side else ("rr_below_minimum" if rr_rejected else "perp_filters_not_satisfied"),
+            "reason": "value_reentry_confirmed" if side else (
+                "rr_below_minimum" if rr_rejected else (
+                    "vwap_extension_rejected" if ext_rejected else "perp_filters_not_satisfied")),
             "components": {
                 "poc": poc,
                 "vah": vah,
                 "val": val,
                 "vwap": current_vwap,
+                "vwap_ext": round(vwap_ext, 3) if vwap_ext is not None else None,
+                "vwap_ext_limit": ext_limit or None,
                 "atr": current_atr,
                 "atr_lev": lev_atr,
                 "atr_lev_min": lev_atr_min,

@@ -11,6 +11,7 @@ perp:
   # Con sl_mode=lowest lo stop e' piu' largo: a 1.2 respinge ~92% dei segnali,
   # a 0.6 e' il valore che massimizza i trade che arrivano a TP1 (vedi NOTE/16).
   min_rr: 1.2
+  vwap_atr_extension_limit: 3.5   # NOTE/122: scarta ingressi oltre 3.5 ATR dal vwap 24h (0 = off)
   # SL/TP ancorati all'entry via ATR(14): R:R controllato a prescindere dalla leva.
   atr_stop_multiplier: 0.8   # SL = entry ∓ 0.8×ATR
   tp1_atr_multiplier: 2.5    # TP1 = entry ± 2.5×ATR (R:R ~1.67)
