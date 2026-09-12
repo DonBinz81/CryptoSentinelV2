@@ -243,6 +243,10 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "structural_stop_buffer_pct": "perp_structural_stop_buffer_pct",
         "min_rr": "perp_min_rr",
         "vwap_atr_extension_limit": "perp_vwap_atr_extension_limit",
+        "direction_cap": "perp_direction_cap",
+        "stop_airbag_enabled": "perp_stop_airbag_enabled",
+        "stop_airbag_close_fraction": "perp_stop_airbag_close_fraction",
+        "stop_airbag_cooldown_minutes": "perp_stop_airbag_cooldown_minutes",
         "tp1_atr_multiplier": "perp_tp1_atr_multiplier",
         "tp2_atr_multiplier": "perp_tp2_atr_multiplier",
         "use_poc_for_tp2": "perp_use_poc_for_tp2",
@@ -678,6 +682,12 @@ class Settings(BaseSettings):
     perp_min_rr: float = Field(default=1.2, alias="PERP_MIN_RR")  # FIX-2: R:R minimo TP1 vs SL (0 = disattivo)
     # NOTE/122: gate estensione VWAP sugli ingressi perp (ATR oltre il vwap 24h nel verso del trade; 0 = off)
     perp_vwap_atr_extension_limit: float = Field(default=3.5, alias="PERP_VWAP_ATR_EXTENSION_LIMIT")
+    # NOTE/127: cap di concentrazione direzionale (max posizioni perp same-side; 0 = off)
+    perp_direction_cap: int = Field(default=0, alias="PERP_DIRECTION_CAP")
+    # NOTE/127: stop airbag — al primo stop pieno dimezza le altre same-side
+    perp_stop_airbag_enabled: bool = Field(default=False, alias="PERP_STOP_AIRBAG_ENABLED")
+    perp_stop_airbag_close_fraction: float = Field(default=0.5, alias="PERP_STOP_AIRBAG_CLOSE_FRACTION")
+    perp_stop_airbag_cooldown_minutes: float = Field(default=60.0, alias="PERP_STOP_AIRBAG_COOLDOWN_MINUTES")
     # ── Push aggiornamento app: il backend controlla le release GitHub e manda un
     # FCM quando ne esce una nuova (arriva anche ad app chiusa) ──────────────────
     update_push_enabled: bool = Field(default=True, alias="UPDATE_PUSH_ENABLED")
