@@ -1716,6 +1716,55 @@ class AgentService:
         except Exception:
             return None
 
+    async def _stop_airbag(self, session: AsyncSession, stopped: PerpPosition, now: datetime) -> None:
+        """Stop airbag (NOTE/127): when a position takes a FULL stop, halve the
+        OTHER open perp positions on the same side. Historical clusters were
+        3-7 same-side positions swept by one move within an hour, all already
+        open at the first stop: the first stop is the only usable warning.
+        A cooldown (runtime state) keeps one airbag per event window, so the
+        stops that follow inside the same cluster do not cascade the halving.
+        Opposite-side positions are untouched. Measured effect: ~20% of the
+        cluster cost recovered at ~zero cost outside clusters."""
+        ms = self._ms
+        if not bool(getattr(ms, "perp_stop_airbag_enabled", False)):
+            return
+        cooldown_min = float(getattr(ms, "perp_stop_airbag_cooldown_minutes", 60.0) or 60.0)
+        user_id = str(self.settings.default_user_id)
+        last_raw = get_runtime_value(user_id, "stop_airbag_last")
+        if last_raw:
+            try:
+                last = datetime.fromisoformat(json.loads(last_raw)["at"])
+                if (now - last).total_seconds() < cooldown_min * 60:
+                    return
+            except (ValueError, KeyError, TypeError):
+                pass
+        fraction = Decimal(str(getattr(ms, "perp_stop_airbag_close_fraction", 0.5) or 0.5))
+        repo = PerpPositionRepository(session)
+        open_positions = await repo.open_for_user(user_id)
+        targets = [
+            p for p in open_positions
+            if p.side == stopped.side and p.position_id != stopped.position_id
+        ]
+        if not targets:
+            return
+        set_runtime_value(user_id, "stop_airbag_last", json.dumps({
+            "at": now.isoformat(), "trigger": stopped.asset, "side": stopped.side,
+        }))
+        for p in targets:
+            try:
+                price = p.current_price or p.entry_price
+                await self._close_perp_position(
+                    session, p, Decimal(str(price)), "stop_airbag", now,
+                    partial=True, close_fraction=fraction,
+                    set_tp1_reached=False, renormalize_states=True,
+                )
+            except Exception as exc:  # one failed leg must not stop the others
+                logger.warning("stop_airbag_leg_failed", asset=p.asset, error=str(exc))
+        logger.info(
+            "stop_airbag_fired", trigger=stopped.asset, side=stopped.side,
+            targets=[p.asset for p in targets], fraction=float(fraction),
+        )
+
     async def _close_perp_position(
         self,
         session: AsyncSession,
@@ -1887,6 +1936,10 @@ class AgentService:
                     await self._notify_guardian_change(session, change, now)
             except Exception as exc:  # the guardian must never block a close
                 logger.warning("guardian_record_stop_failed", error=str(exc))
+            try:
+                await self._stop_airbag(session, pos, now)
+            except Exception as exc:  # the airbag must never block a close
+                logger.warning("stop_airbag_failed", error=str(exc))
         # Notifica chiusura trade (fire-and-forget)
         try:
             notifier = get_agent_notifier()

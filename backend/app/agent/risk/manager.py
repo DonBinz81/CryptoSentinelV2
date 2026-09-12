@@ -112,6 +112,16 @@ class RiskManager:
         if asset_upper in open_assets:
             return RiskDecision(False, "asset_already_open")
 
+        # Direction cap (NOTE/127): stop clusters are born from 3-7 same-side
+        # perp positions hit by a single market move (8/9 historical clusters
+        # were single-sided). Caps directional concentration at entry; 0 = off.
+        if intent.market == "perp" and ms is not None:
+            dir_cap = int(getattr(ms, "perp_direction_cap", 0) or 0)
+            if dir_cap > 0:
+                same_side = sum(1 for p in open_perp_positions if p.side == intent.side)
+                if same_side >= dir_cap:
+                    return RiskDecision(False, "direction_cap_guard")
+
         # Limiti posizioni e size separati per mercato
         is_perp = intent.market == "perp"
         if ms is not None:

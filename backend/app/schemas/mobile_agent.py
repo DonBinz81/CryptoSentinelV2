@@ -42,6 +42,10 @@ class AgentMobileSettings(BaseModel):
     # FIX-2: rapporto minimo TP1/SL per accettare un segnale (0 = filtro disattivo).
     perp_min_rr: float = Field(default=1.2, ge=0.0, le=5.0)
     perp_vwap_atr_extension_limit: float = Field(default=3.5, ge=0.0, le=20.0)
+    perp_direction_cap: int = Field(default=2, ge=0, le=10)
+    perp_stop_airbag_enabled: bool = True
+    perp_stop_airbag_close_fraction: float = Field(default=0.5, ge=0.1, le=0.9)
+    perp_stop_airbag_cooldown_minutes: float = Field(default=60.0, ge=5.0, le=720.0)
     # Distanza dei take profit in multipli di ATR: TP1 chiude la quota parziale,
     # TP2 e' l'uscita finale. Devono restare TP1 < TP2.
     perp_tp1_atr_multiplier: float = Field(default=2.5, ge=0.3, le=10.0)
