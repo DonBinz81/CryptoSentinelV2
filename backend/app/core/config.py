@@ -243,6 +243,7 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
         "structural_stop_buffer_pct": "perp_structural_stop_buffer_pct",
         "min_rr": "perp_min_rr",
         "vwap_atr_extension_limit": "perp_vwap_atr_extension_limit",
+        "max_stop_atr": "perp_max_stop_atr",
         "direction_cap": "perp_direction_cap",
         "stop_airbag_enabled": "perp_stop_airbag_enabled",
         "stop_airbag_close_fraction": "perp_stop_airbag_close_fraction",
@@ -682,6 +683,8 @@ class Settings(BaseSettings):
     perp_min_rr: float = Field(default=1.2, alias="PERP_MIN_RR")  # FIX-2: R:R minimo TP1 vs SL (0 = disattivo)
     # NOTE/122: gate estensione VWAP sugli ingressi perp (ATR oltre il vwap 24h nel verso del trade; 0 = off)
     perp_vwap_atr_extension_limit: float = Field(default=3.5, alias="PERP_VWAP_ATR_EXTENSION_LIMIT")
+    # NOTE/131-132: tetto distanza stop in ATR — lo stop diventa il piu' vicino tra strutturale e entry -/+ K*ATR (0 = off)
+    perp_max_stop_atr: float = Field(default=0.0, alias="PERP_MAX_STOP_ATR")
     # NOTE/127: cap di concentrazione direzionale (max posizioni perp same-side; 0 = off)
     perp_direction_cap: int = Field(default=0, alias="PERP_DIRECTION_CAP")
     # NOTE/127: stop airbag — al primo stop pieno dimezza le altre same-side

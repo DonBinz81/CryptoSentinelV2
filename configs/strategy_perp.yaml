@@ -12,6 +12,7 @@ perp:
   # a 0.6 e' il valore che massimizza i trade che arrivano a TP1 (vedi NOTE/16).
   min_rr: 1.2
   vwap_atr_extension_limit: 3.5   # NOTE/122: scarta ingressi oltre 3.5 ATR dal vwap 24h (0 = off)
+  max_stop_atr: 8.0               # NOTE/132: tetto distanza stop = entry -/+ 8*ATR se lo strutturale e' oltre (0 = off)
   direction_cap: 2                # NOTE/127: max posizioni perp stesso lato (0 = off)
   stop_airbag_enabled: true       # NOTE/127: al primo stop pieno dimezza le altre same-side
   stop_airbag_close_fraction: 0.5
