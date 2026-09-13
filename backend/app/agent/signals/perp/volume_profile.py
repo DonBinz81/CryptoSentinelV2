@@ -144,6 +144,29 @@ class VolumeProfileSignal(SignalModule[SignalPayload, SignalResult]):
                 take_profit_1 = vah
                 take_profit_2 = poc
 
+        # ATR cap on stop distance (NOTE/131-132): the structural stop uses a
+        # FIXED % buffer, which explodes when measured in ATRs on compressed
+        # assets (BTC at 23 ATR vs a 1.5 ATR TP1). The stop becomes the NEAREST
+        # of the structural level and entry -/+ K*ATR; on ~85% of entries the
+        # structural stop is already inside the cap and nothing changes.
+        # 0 disables; fail-open when no ATR is available. Applied BEFORE the
+        # min-RR filter so R:R is evaluated on the effective stop.
+        stop_capped = False
+        max_stop_atr = float(getattr(self.settings, "perp_max_stop_atr", 0.0) or 0.0)
+        if side and max_stop_atr > 0 and atr_v and stop_loss is not None:
+            cap_level = (
+                current - atr_v * max_stop_atr
+                if side == "long"
+                else current + atr_v * max_stop_atr
+            )
+            if (side == "long" and cap_level > stop_loss) or (
+                side == "short" and cap_level < stop_loss
+            ):
+                stop_loss = cap_level
+                stop_capped = True
+                if stop_reference is not None:
+                    stop_reference["capped_at_atr"] = max_stop_atr
+
         # FIX-2: filtro R:R minimo sull'uscita primaria (TP1). Lo stop strutturale
         # (20 candele + buffer) puo' risultare piu' largo di TP1, producendo R:R
         # negativo sull'uscita che chiude il 70% della posizione. Sotto la soglia
@@ -226,6 +249,12 @@ class VolumeProfileSignal(SignalModule[SignalPayload, SignalResult]):
                 "total_quote_volume": round(total_quote_volume, 2),
                 "value_area_pct": self.settings.perp_value_area_pct,
                 "stop_reference": stop_reference,
+                "stop_capped": stop_capped,
+                "stop_dist_atr": (
+                    round(abs(current - stop_loss) / atr_v, 3)
+                    if stop_loss is not None and atr_v
+                    else None
+                ),
             },
         }
 
