@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from backend.app.persistence import database
-from backend.app.persistence.backup import backup_db
+from backend.app.persistence import backup as backup_module
+from backend.app.persistence.backup import BackupVerificationError, backup_db
 from backend.app.persistence.database import check_db, close_db, get_session_factory, init_db
 from backend.app.persistence.migration import migrate_json_to_db
 from backend.app.persistence.archive import archive_dry_run_records, list_archived_runs, reset_all_data
@@ -818,9 +819,33 @@ async def test_reset_all_data_without_backup_does_not_archive(db) -> None:
     assert trades == []
 
 
+def _make_sqlite_db(path: Path, rows: int = 50) -> None:
+    """Write a real SQLite database with a schema and some rows.
+
+    The backup verifies its copy by opening it, so a byte stub is no longer a
+    valid stand-in for the source.
+    """
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    try:
+        con.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, payload TEXT)")
+        con.executemany("INSERT INTO t (payload) VALUES (?)", [("x" * 200,)] * rows)
+        con.commit()
+    finally:
+        con.close()
+
+
+def _age(path: Path, days: int) -> None:
+    import os
+
+    old_time = datetime.now(UTC).timestamp() - days * 86_400
+    os.utime(path, (old_time, old_time))
+
+
 def test_backup_creates_timestamped_copy_and_prunes(tmp_path: Path) -> None:
     src = tmp_path / "local.db"
-    src.write_bytes(b"SQLite format 3\x00stub")
+    _make_sqlite_db(src)
     url = f"sqlite+aiosqlite:///{src}"
     backup_dir = tmp_path / "backups"
 
@@ -828,16 +853,116 @@ def test_backup_creates_timestamped_copy_and_prunes(tmp_path: Path) -> None:
     assert created is not None
     assert created.exists()
     assert created.parent == backup_dir
+    assert created.stat().st_size == src.stat().st_size
+    # Nothing half-finished is left next to the published copy.
+    assert list(backup_dir.glob("*.part")) == []
 
     # An old backup gets pruned.
     old = backup_dir / "local_20000101T000000Z.db"
     old.write_bytes(b"old")
-    import os
-
-    old_time = datetime.now(UTC).timestamp() - 30 * 86_400
-    os.utime(old, (old_time, old_time))
+    _age(old, days=30)
     backup_db(url, backup_dir, retention_days=7)
     assert not old.exists()
+
+
+def test_backup_rejects_empty_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A copy that comes out empty must not be published as a backup.
+
+    This is the 2026-09-25 failure: a full disk let copy2 create the target
+    and write nothing into it. The old code returned that path as a success.
+    """
+    src = tmp_path / "local.db"
+    _make_sqlite_db(src)
+    backup_dir = tmp_path / "backups"
+
+    def copy_nothing(_src: str | Path, dst: str | Path, **_: object) -> None:
+        Path(dst).write_bytes(b"")
+
+    monkeypatch.setattr(backup_module.shutil, "copy2", copy_nothing)
+
+    with pytest.raises(BackupVerificationError):
+        backup_db(f"sqlite+aiosqlite:///{src}", backup_dir, retention_days=7)
+    assert list(backup_dir.glob("local_*.db")) == []
+    assert list(backup_dir.glob("*.part")) == []
+
+
+def test_backup_rejects_truncated_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A copy cut short of the source must not be published either."""
+    src = tmp_path / "local.db"
+    _make_sqlite_db(src, rows=500)
+    backup_dir = tmp_path / "backups"
+
+    def copy_half(s: str | Path, dst: str | Path, **_: object) -> None:
+        data = Path(s).read_bytes()
+        Path(dst).write_bytes(data[: len(data) // 2])
+
+    monkeypatch.setattr(backup_module.shutil, "copy2", copy_half)
+
+    with pytest.raises(BackupVerificationError):
+        backup_db(f"sqlite+aiosqlite:///{src}", backup_dir, retention_days=7)
+    assert list(backup_dir.glob("local_*.db")) == []
+    assert list(backup_dir.glob("*.part")) == []
+
+
+def test_backup_leaves_no_artifact_when_copy_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ENOSPC mid-copy: the exception propagates and no file remains behind."""
+    import errno
+
+    src = tmp_path / "local.db"
+    _make_sqlite_db(src)
+    backup_dir = tmp_path / "backups"
+
+    def copy_then_fail(_src: str | Path, dst: str | Path, **_: object) -> None:
+        Path(dst).write_bytes(b"SQLite format 3\x00")
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(backup_module.shutil, "copy2", copy_then_fail)
+
+    with pytest.raises(OSError):
+        backup_db(f"sqlite+aiosqlite:///{src}", backup_dir, retention_days=7)
+    assert list(backup_dir.iterdir()) == []
+
+
+def test_prune_runs_even_when_backup_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retention must keep working on the run where the copy fails.
+
+    A full disk is when retention matters most, and it is also when the copy
+    fails. The old code skipped pruning on any exception, so copies kept
+    accumulating on exactly the day they had to be trimmed.
+    """
+    import errno
+
+    src = tmp_path / "local.db"
+    _make_sqlite_db(src)
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    old = backup_dir / "local_20000101T000000Z.db"
+    old.write_bytes(b"old")
+    _age(old, days=30)
+
+    def fail(*_: object, **__: object) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(backup_module.shutil, "copy2", fail)
+
+    with pytest.raises(OSError):
+        backup_db(f"sqlite+aiosqlite:///{src}", backup_dir, retention_days=7)
+    assert not old.exists()
+
+
+def test_prune_removes_stale_staging_file(tmp_path: Path) -> None:
+    """A .part left by a run that died between copy and verify is cleared."""
+    src = tmp_path / "local.db"
+    _make_sqlite_db(src)
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    stale = backup_dir / "local_20000101T000000Z.db.part"
+    stale.write_bytes(b"half")
+
+    backup_db(f"sqlite+aiosqlite:///{src}", backup_dir, retention_days=7)
+    assert not stale.exists()
 
 
 def test_backup_returns_none_for_missing_db(tmp_path: Path) -> None:
