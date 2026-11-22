@@ -3003,8 +3003,18 @@ class AgentService:
 
         heartbeat.beat("agent_slow_tick")
         _now = now or datetime.now(UTC)
-        trade_heartbeat = await self._daily_trade_heartbeat(session, now=_now)
         markets = _active_markets(self._ms.markets_enabled)
+        # The daily trade heartbeat opens a Spot position, so it must honour the
+        # enabled markets like every other Spot path. It used to run BEFORE this
+        # line, which meant a perp-only setup still opened one forced ETH trade a
+        # day — the market switch looked off in the app while the engine kept
+        # trading. Already-open Spot positions are unaffected: fast_tick manages
+        # them to closure regardless of this setting.
+        trade_heartbeat = (
+            await self._daily_trade_heartbeat(session, now=_now)
+            if "spot" in markets
+            else {"status": "skipped", "reason": "spot_market_disabled"}
+        )
         # Aggiorna il regime mercato una volta per ciclo, così il flag (e il messaggio
         # in app) riflette sempre lo stato reale anche se nessun segnale prova a entrare.
         if "spot" in markets:

@@ -1383,6 +1383,60 @@ async def test_heartbeat_skips_when_eth_already_open(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_does_not_open_spot_when_market_disabled(db) -> None:
+    """A perp-only setup must not open the forced daily Spot trade.
+
+    The heartbeat opens a Spot position, so it has to honour markets_enabled
+    like every other Spot path. It used to run before the market check, so a
+    user who switched the app to perp still got one ETH trade a day while the
+    switch read "off".
+    """
+    service = AgentService(
+        settings(
+            markets_enabled="perp",
+            eligible_tokens=["ETH"] + [f"TOKEN_{i}" for i in range(148)],
+        ),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    now = datetime(2026, 6, 22, 20, 0, tzinfo=UTC)
+    async with get_session_factory()() as session:
+        result = await service.slow_tick(session, now=now)
+        trades = await SpotTradeRepository(session).list_for_user(str(USER_ID))
+
+    heartbeat_result = result["daily_trade_heartbeat"]
+    assert heartbeat_result["status"] == "skipped"
+    assert heartbeat_result["reason"] == "spot_market_disabled"
+    # The one that matters: no Spot trade reached the database.
+    assert trades == []
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_still_opens_spot_when_market_enabled(db) -> None:
+    """Non-regression: with Spot enabled the heartbeat keeps working.
+
+    Pairs with the test above. Without this one, deleting the heartbeat call
+    outright would also pass.
+    """
+    service = AgentService(
+        settings(
+            markets_enabled="both",
+            eligible_tokens=["ETH"] + [f"TOKEN_{i}" for i in range(148)],
+        ),
+        spot_registry=SimpleNamespace(),
+        perp_registry=SimpleNamespace(),
+    )
+    now = datetime(2026, 6, 22, 20, 0, tzinfo=UTC)
+    async with get_session_factory()() as session:
+        result = await service.slow_tick(session, now=now)
+        trades = await SpotTradeRepository(session).list_for_user(str(USER_ID))
+
+    assert result["daily_trade_heartbeat"]["status"] == "executed"
+    assert len(trades) == 1
+    assert trades[0].asset == "ETH"
+
+
+@pytest.mark.asyncio
 async def test_agent_service_does_not_run_risk_universe_on_skipped_signal(db) -> None:
     class SkippedSignal:
         async def evaluate(self, payload):
